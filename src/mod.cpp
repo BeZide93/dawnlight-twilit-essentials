@@ -485,6 +485,7 @@ static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
 static ConfigVarHandle s_varCollectionKeepOrdonShield = 0;
 static ConfigVarHandle s_varCollectionShowOrdonHero = 0;
+static ConfigVarHandle s_varCollectionOrdonHeroAlways = 0;
 static ConfigVarHandle s_varBossRushSuggestedItems = 0;
 static ConfigVarHandle s_varBossRushRefillAfterFight = 0;
 static ConfigVarHandle s_varBossRushSeparateGanon = 0;
@@ -529,6 +530,13 @@ static void on_collection_show_ordon_hero_changed(ModContext*, ConfigVarHandle, 
     if (value) {
         g_configCollectionShowOrdonHero = value->bool_value;
         sync_collection_ordon_hero_page();
+        request_collection_menu_reload();
+    }
+}
+
+static void on_collection_ordon_hero_always_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configCollectionOrdonHeroAlways = value->bool_value;
         request_collection_menu_reload();
     }
 }
@@ -953,6 +961,10 @@ static bool is_puppet_zelda_sub_disabled(ModContext*, void*) {
 
 static bool is_collection_starter_sub_disabled(ModContext*, void*) {
     return !g_configCollectionStarterEquip;
+}
+
+static bool is_collection_ordon_hero_sub_disabled(ModContext*, void*) {
+    return !g_configCollectionShowOrdonHero;
 }
 
 static bool is_stamina_sub_disabled(ModContext*, void*) {
@@ -1565,6 +1577,11 @@ static ModResult tab_menus(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>Shows the extra Ordon Hero gear (Reinforced Shield and Ordon Hero tunic) "
         "on the Collection screen and creates a second page. Cycle pages with R and L - "
         "hold them briefly.</p>");
+    ui_add_toggle(left, "Show always Ordon Hero", s_varCollectionOrdonHeroAlways,
+        "<p>When off, the gear only appears once unlocked: the Reinforced Shield once you "
+        "own the Ordon Shield, the Ordon Hero tunic once you have the Hero's Clothes. "
+        "When on, both are always shown. Requires the Show Ordon Hero option.</p>",
+        is_collection_ordon_hero_sub_disabled);
     return MOD_OK;
 }
 
@@ -2222,6 +2239,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descShowOrdonHero, &s_varCollectionShowOrdonHero) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varCollectionShowOrdonHero, &g_configCollectionShowOrdonHero);
             svc_config->subscribe(mod_ctx, s_varCollectionShowOrdonHero, on_collection_show_ordon_hero_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descOrdonHeroAlways = CONFIG_VAR_DESC_INIT;
+        descOrdonHeroAlways.name = "collectionOrdonHeroAlways";
+        descOrdonHeroAlways.type = CONFIG_VAR_BOOL;
+        descOrdonHeroAlways.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descOrdonHeroAlways, &s_varCollectionOrdonHeroAlways) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varCollectionOrdonHeroAlways, &g_configCollectionOrdonHeroAlways);
+            svc_config->subscribe(mod_ctx, s_varCollectionOrdonHeroAlways, on_collection_ordon_hero_always_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descBossRushSuggested = CONFIG_VAR_DESC_INIT;

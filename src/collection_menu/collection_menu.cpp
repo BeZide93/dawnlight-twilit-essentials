@@ -5,8 +5,19 @@
 bool g_configCollectionStarterEquip = false;
 bool g_configCollectionKeepOrdonShield = false;
 bool g_configCollectionShowOrdonHero = false;
+bool g_configCollectionOrdonHeroAlways = false;
 
 static cl::Page* s_ordonHeroPage = nullptr;
+
+static bool player_has_hero_clothes() {
+    return dComIfGs_isCollectClothes(KOKIRI_CLOTHES_FLAG) ||
+           dComIfGs_isItemFirstBit(dItemNo_WEAR_KOKIRI_e);
+}
+
+static bool player_has_ordon_shield() {
+    return dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) ||
+           dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e);
+}
 
 void sync_collection_ordon_hero_page() {
     if (g_configCollectionShowOrdonHero && s_ordonHeroPage == nullptr) {
@@ -39,6 +50,9 @@ void register_custom_shields() {
     if (!g_configCollectionShowOrdonHero) {
         return;
     }
+    if (!g_configCollectionOrdonHeroAlways && !player_has_ordon_shield()) {
+        return;
+    }
     collectionlib_add_next_shield_slot({
         CE_SHIELD, 0,
         "Reinforced Shield",
@@ -52,6 +66,9 @@ void register_custom_shields() {
 
 void register_custom_tunics() {
     if (!g_configCollectionShowOrdonHero) {
+        return;
+    }
+    if (!g_configCollectionOrdonHeroAlways && !player_has_hero_clothes()) {
         return;
     }
     collectionlib_add_next_tunic_slot({

@@ -8,6 +8,7 @@
 extern bool g_configCollectionStarterEquip;
 extern bool g_configCollectionKeepOrdonShield;
 extern bool g_configCollectionShowOrdonHero;
+extern bool g_configCollectionOrdonHeroAlways;
 
 void request_collection_menu_reload();
 void sync_collection_ordon_hero_page();
