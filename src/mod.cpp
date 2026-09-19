@@ -34,6 +34,7 @@
 #include "stamina/sprint_swim.hpp"
 #include "collection_menu/collection_menu.hpp"
 #include "collection_menu/collection_menu_shield.hpp"
+#include "controls/controls.hpp"
 #include "util.hpp"
 
 #include "mods/svc/hook.hpp"
@@ -987,6 +988,14 @@ static bool is_quick_access_sub_disabled(ModContext*, void*) {
     return !g_configQuickAccessEnabled;
 }
 
+static bool is_bottles_sub_disabled(ModContext*, void*) {
+    return !g_configBottlesQuickAccessEnabled;
+}
+
+static bool is_z_slot_sub_disabled(ModContext*, void*) {
+    return !g_configCustomZButtonEnabled;
+}
+
 static ModResult build_visible_equip_dialog(ModContext* ctx, UiElementHandle pane, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
 
@@ -1238,7 +1247,8 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
             "provides 3-slot Z-button support natively.</span>", nullptr);
     } else {
         ui_add_toggle(left, "Enabled", s_varCustomZButton,
-            "<p>Enables a 3rd item slot on the Z button. Midna is remapped to D-Pad Left.</p>");
+            "<p>Enables a 3rd item slot on the Z button. Midna moves to a separate button - "
+            "both can be changed in the Controls tab.</p>");
     }
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
@@ -1416,7 +1426,8 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
     static const char* const kQuickAccessAppearances[] = { "Radial", "Item Bar (BotW-style)" };
     ui_add_toggle(left, "Enabled", s_varQuickAccess,
-        "<p>Tap D-Pad Down to use the item on Down. Hold D-Pad Down to open the item menu.</p>");
+        "<p>Tap the Quick Access button to use the item assigned to it. Hold it to open the "
+        "item menu. The button can be changed in the Controls tab.</p>");
     ui_add_select(left, "Appearance", s_varQuickAccessAppearance,
         "<p><b>Radial</b>: vanilla item wheel look. <b>Item Bar</b>: horizontal bar at the top "
         "of the screen, like in Breath of the Wild. Press X while the menu is open to "
@@ -1428,9 +1439,10 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         is_quick_access_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
-    ui_add_toggle(left, "Bottle quick access (L)", s_varBottlesQuickAccess,
-        "<p>Your four bottles in their own menu on L. Tap L to use the bottle on L, hold L to "
-        "open the menu. Note: while enabled, L no longer triggers targeting/shield.</p>");
+    ui_add_toggle(left, "Bottle quick access", s_varBottlesQuickAccess,
+        "<p>Your four bottles in their own menu. Tap the bottle button to use the selected "
+        "bottle, hold it to open the menu. Note: while bound to L, L no longer triggers "
+        "targeting/shield. The button can be changed in the Controls tab.</p>");
 
     return MOD_OK;
 }
@@ -1630,7 +1642,8 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p>Fights all 4 Ganon phases in sequence as a single gauntlet instead of separate statues.</p>");
 
     ui_add_toggle(left, "Map portal", s_varBossRushPortal,
-        "<p>Press Z on the map screen to warp directly into the Boss Rush chamber.</p>");
+        "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
+        "into the Boss Rush chamber.</p>");
 
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");
@@ -1650,6 +1663,37 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     return MOD_OK;
 }
 
+static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
+                              UiElementHandle right, void*, ModError*) {
+    svc_ui->pane_add_rml(mod_ctx, right,
+        "<p>Remap the controller buttons of the mod's features. A binding is grayed out "
+        "while its feature is disabled.</p>", nullptr);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Z Button Slot");
+    ui_add_select(left, "Midna button", g_controlsVars[CTRL_BIND_MIDNA],
+        "<p>While the Z Button Slot feature is enabled, Midna is called with this button "
+        "instead of Z. The item slot itself always stays on Z.</p>",
+        kControlsButtonLabels, CTRL_BTN_COUNT, is_z_slot_sub_disabled);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
+    ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],
+        "<p>Tap to use your quick item, hold to open the Quick Access menu.</p>",
+        kControlsButtonLabels, CTRL_BTN_COUNT, is_quick_access_sub_disabled);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
+    ui_add_select(left, "Bottles button", g_controlsVars[CTRL_BIND_BOTTLES],
+        "<p>Tap to use the selected bottle, hold to open the bottle menu. Note: while bound "
+        "to L, L no longer triggers targeting/shield.</p>",
+        kControlsButtonLabels, CTRL_BTN_COUNT, is_bottles_sub_disabled);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Boss Rush");
+    ui_add_select(left, "Retry button", g_controlsVars[CTRL_BIND_BOSSRUSH_RETRY],
+        "<p>During a Boss Rush fight, press to restart the fight.</p>",
+        kControlsButtonLabels, CTRL_BTN_COUNT, nullptr);
+
+    return MOD_OK;
+}
+
 static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "General",   tab_general,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, nullptr, nullptr },
@@ -1658,6 +1702,7 @@ static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "Quick Access", tab_quick_access, nullptr, nullptr },
     { sizeof(UiTabDesc), "Menus",     tab_menus,     nullptr, nullptr },
     { sizeof(UiTabDesc), "BossRush",  tab_boss_rush, nullptr, nullptr },
+    { sizeof(UiTabDesc), "Controls",  tab_controls,  nullptr, nullptr },
 };
 
 static void on_open_mod_settings(ModContext*, void*) {
@@ -1671,6 +1716,17 @@ static void on_open_mod_settings(ModContext*, void*) {
 
 static UiMenuTabHandle s_menuTabTwilitEssentials = 0;
 
+static const char* const kDiscordChannelUrl =
+    "https://discord.com/channels/1491394561266679922/1534172217846403243";
+
+extern "C" __declspec(dllimport) void* __stdcall ShellExecuteA(void* hwnd, const char* op,
+    const char* file, const char* params, const char* dir, int show);
+#pragma comment(lib, "shell32.lib")
+
+static void on_open_discord_channel(ModContext*, void*) {
+    ShellExecuteA(nullptr, "open", kDiscordChannelUrl, nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+}
+
 static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
 
@@ -1680,6 +1736,20 @@ static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, M
         ctrlSettings.label = "Mod Settings...";
         ctrlSettings.on_pressed = on_open_mod_settings;
         svc_ui->pane_add_control(mod_ctx, panel, &ctrlSettings, nullptr);
+    }
+
+    {
+        svc_ui->pane_add_text(mod_ctx, panel,
+            "If you need help, found a bug, or would like to give feedback, please report it "
+            "in the Twilit Essentials Discord channel:",
+            nullptr);
+    }
+    {
+        UiControlDesc ctrlDiscord = UI_CONTROL_DESC_INIT;
+        ctrlDiscord.kind = UI_CONTROL_BUTTON;
+        ctrlDiscord.label = "View channel in Discord";
+        ctrlDiscord.on_pressed = on_open_discord_channel;
+        svc_ui->pane_add_control(mod_ctx, panel, &ctrlDiscord, nullptr);
     }
 
     return MOD_OK;
@@ -2319,6 +2389,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_bool(mod_ctx, s_varBossRushPortal, &g_configBossRushPortal);
             svc_config->subscribe(mod_ctx, s_varBossRushPortal, on_boss_rush_portal_changed, nullptr, nullptr);
         }
+
+        init_controls_config(svc_config, mod_ctx);
     }
 
 

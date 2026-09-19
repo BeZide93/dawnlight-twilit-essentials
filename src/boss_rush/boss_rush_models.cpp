@@ -1,15 +1,14 @@
 #include "boss_rush_models.hpp"
+#include "boss_rush_masterswd.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush.hpp"
 #include "../util.hpp"
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
-#include "d/d_particle_name.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
-#include "JSystem/JParticle/JPAEmitter.h"
 #include "m_Do/m_Do_mtx.h"
 
 #include <cstdio>
@@ -156,25 +155,6 @@ struct MgnBloodDrop {
     f32  base  = 0.0f;
     f32  alpha = 0.0f;
 };
-
-static constexpr const char* kMasterSwordArc = "MstrSword";
-static constexpr int kMasterSwordModelRes = 5;
-static constexpr int kMasterSwordBtkRes = 11;
-static constexpr int kMasterSwordBrkRes = 8;
-static constexpr f32 kMasterSwordForwardDist = 80.0f;
-static constexpr f32 kMasterSwordScale = 0.8f;
-static constexpr f32 kMasterSwordSparkleHeight = 130.0f;
-
-static J3DModel* s_masterSwordModel = nullptr;
-static mDoExt_btkAnm* s_masterSwordBtk = nullptr;
-static mDoExt_brkAnm* s_masterSwordBrk = nullptr;
-static bool s_masterSwordResolved = false;
-
-// Sword-charge sparkles (same set daAlink_c::setSwordChargeEffect uses), kept
-// running on the stuck sword as if it were fully charged.
-static u32 s_masterSwordEfGleam = 0;
-static u32 s_masterSwordEfSpark = 0;
-static u32 s_masterSwordEfFlash = 0;
 
 struct RuntimeSlot {
     J3DModel* model = nullptr;
@@ -528,34 +508,6 @@ bool boss_rush_get_ganondorf_cape_anchors(cXyz& outA, cXyz& outB) {
     return false;
 }
 
-static void stop_master_sword_emitter(u32& handle) {
-    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(handle);
-    if (emitter != nullptr) {
-        emitter->stopDrawParticle();
-    }
-    handle = 0;
-}
-
-static void free_boss_rush_master_sword() {
-    stop_master_sword_emitter(s_masterSwordEfGleam);
-    stop_master_sword_emitter(s_masterSwordEfSpark);
-    stop_master_sword_emitter(s_masterSwordEfFlash);
-    if (s_masterSwordBtk != nullptr) {
-        JKR_DELETE(s_masterSwordBtk);
-        s_masterSwordBtk = nullptr;
-    }
-    if (s_masterSwordBrk != nullptr) {
-        JKR_DELETE(s_masterSwordBrk);
-        s_masterSwordBrk = nullptr;
-    }
-    if (s_masterSwordModel != nullptr) {
-        JKR_DELETE(s_masterSwordModel);
-        s_masterSwordModel = nullptr;
-    }
-    unloadObjectArchive(kMasterSwordArc);
-    s_masterSwordResolved = false;
-}
-
 void reset_boss_rush_models() {
     for (auto& slot : s_slots) {        slot.model = nullptr;
         slot.bck = nullptr;
@@ -600,7 +552,7 @@ void reset_boss_rush_models() {
         init_morph_tentacle(s_morphTent[ti], s_morphSink[ti]);
     }
     s_loadOrderBuilt = false;
-    free_boss_rush_master_sword();
+    unload_boss_rush_master_sword();
 }
 
 void unload_boss_rush_models() {
@@ -728,7 +680,7 @@ void unload_boss_rush_models() {
         slot.resolved = false;
     }
 
-    free_boss_rush_master_sword();
+    unload_boss_rush_master_sword();
 }
 
 void draw_boss_rush_models(float floorY) {
@@ -739,22 +691,6 @@ void draw_boss_rush_models(float floorY) {
     }
 
     if (boss_rush_scene_load_stable()) {
-        if (!s_masterSwordResolved) {
-            const int swordArcStatus = loadObjectArchive(kMasterSwordArc);
-            if (swordArcStatus != 1) {
-                s_masterSwordResolved = true;
-                if (swordArcStatus == 0) {
-                    s_masterSwordModel = loadBmdFromArcIdx(kMasterSwordArc, kMasterSwordModelRes);
-                    if (s_masterSwordModel != nullptr && s_masterSwordModel->getModelData() != nullptr) {
-                        s_masterSwordBtk = loadBtkFromArcIdx(kMasterSwordArc, kMasterSwordBtkRes,
-                                                             s_masterSwordModel->getModelData());
-                        s_masterSwordBrk = loadBrkFromArcIdx(kMasterSwordArc, kMasterSwordBrkRes,
-                                                             s_masterSwordModel->getModelData());
-                    }
-                }
-            }
-        }
-
         for (size_t orderIdx = 0; orderIdx < count; ++orderIdx) {
             const size_t circleSlot = s_loadOrder[orderIdx];
             const size_t tableIdx = boss_rush_get_active_gallery_table_index(circleSlot);
@@ -1115,36 +1051,5 @@ void draw_boss_rush_models(float floorY) {
         }
     }
 
-    if (s_masterSwordModel != nullptr) {
-        if (s_masterSwordBrk != nullptr) {
-            s_masterSwordBrk->play();
-            s_masterSwordBrk->entry(s_masterSwordModel->getModelData());
-        }
-        if (s_masterSwordBtk != nullptr) {
-            s_masterSwordBtk->play();
-            s_masterSwordBtk->entry(s_masterSwordModel->getModelData());
-        }
-        cXyz swordPos(0.0f, floorY, -kMasterSwordForwardDist);
-        csXyz swordAngle(0, cM_deg2s(180.0f), 0);
-        renderModelAt(s_masterSwordModel, swordPos, swordAngle,
-                      cXyz(kMasterSwordScale, kMasterSwordScale, kMasterSwordScale));
-
-        daAlink_c* alink = daAlink_getAlinkActorClass();
-        const dKy_tevstr_c* tev = (alink != nullptr) ? &alink->tevStr : nullptr;
-
-        cXyz bladePos(swordPos.x, swordPos.y + kMasterSwordSparkleHeight, swordPos.z);
-        s_masterSwordEfGleam = dComIfGp_particle_set(s_masterSwordEfGleam, ID_ZI_J_SWA_KIRARI_A, &swordPos, tev);
-        s_masterSwordEfSpark = dComIfGp_particle_set(s_masterSwordEfSpark, ID_ZI_J_SWA_KIRARI_B, &bladePos, tev);
-        s_masterSwordEfFlash = dComIfGp_particle_set(s_masterSwordEfFlash, ID_ZI_J_SWA_KIRARI_C, &bladePos, tev);
-
-        JPABaseEmitter* gleam = dComIfGp_particle_getEmitter(s_masterSwordEfGleam);
-        if (gleam != nullptr) {
-            Mtx gleamMtx;
-            mDoMtx_stack_c::transS(swordPos.x, swordPos.y, swordPos.z);
-            mDoMtx_stack_c::YrotM(swordAngle.y);
-            mDoMtx_stack_c::scaleM(kMasterSwordScale, kMasterSwordScale, kMasterSwordScale);
-            MTXCopy(mDoMtx_stack_c::get(), gleamMtx);
-            gleam->setGlobalRTMatrix(gleamMtx);
-        }
-    }
+    draw_boss_rush_master_sword(floorY);
 }

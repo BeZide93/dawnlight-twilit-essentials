@@ -1,6 +1,7 @@
 #include "boss_rush_texts.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush.hpp"
+#include "boss_rush_masterswd.hpp"
 #include "boss_rush_timer.hpp"
 #include "boss_rush_timer_v2.hpp"
 #include "../boss_bar/boss_bar.hpp"
@@ -65,6 +66,15 @@ f32 measure_text_width(const char* text, f32 charW) {
     return total;
 }
 
+}
+
+f32 boss_rush_texts_measure_width(const char* text, f32 charW) {
+    return measure_text_width(text, charW);
+}
+
+void boss_rush_texts_draw_label(const char* text, f32 x, f32 y, f32 charW, f32 charH,
+                                JUtility::TColor top, JUtility::TColor bottom, u8 alpha) {
+    draw_world_label(text, x, y, charW, charH, top, bottom, alpha);
 }
 
 void boss_rush_texts_reset_fade() {
@@ -145,6 +155,8 @@ void draw_boss_rush_texts(float floorY) {
                              JUtility::TColor(255, 226, 140, 255), JUtility::TColor(230, 170, 70, 255), tA);
         }
     }
+
+    draw_boss_rush_master_sword_label(link, floorY);
 
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port) port->setup2D();

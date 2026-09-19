@@ -3,6 +3,7 @@
 #include "boss_rush_collection.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush_models.hpp"
+#include "boss_rush_masterswd.hpp"
 #include "boss_rush_texts.hpp"
 #include "boss_rush_equipment.hpp"
 #include "boss_rush_timer.hpp"
@@ -1021,6 +1022,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     s_chamberSpawnFrames = 0;
     s_chamberCamArmFrames = 30;
     boss_rush_texts_reset_fade();
+    boss_rush_master_sword_reset_fade();
 
     if (g_configBossRushRefillAfterFight) {
         s_pendingInitialInventory = true;
@@ -3065,6 +3067,8 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
 static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     daAlink_c* link = daAlink_getAlinkActorClass();
 
+    update_boss_rush_master_sword_effects();
+
     show_statue_fight_a_status();
 
     update_morpheel_pos_pin();
@@ -3174,7 +3178,7 @@ static bool link_near_gallery_statue() {
 }
 
 static void show_statue_fight_a_status() {
-    if (link_near_gallery_statue()) {
+    if (link_near_gallery_statue() || boss_rush_master_sword_near()) {
         g_dComIfG_gameInfo.play.setDoStatus(BUTTON_STATUS_OPEN, BUTTON_STATUS_FLAG_NONE);
     }
 }
@@ -3193,9 +3197,12 @@ static void on_action_string_post(ModContext*, void* args, void* retval, void*) 
     }
 
     static char fight[] = "Fight";
+    static char startBossRush[] = "Start boss rush";
     static char leave[] = "Leave Boss Rush";
     if (link_near_gallery_statue()) {
         *static_cast<char**>(retval) = fight;
+    } else if (boss_rush_master_sword_near()) {
+        *static_cast<char**>(retval) = startBossRush;
     } else {
         *static_cast<char**>(retval) = leave;
     }
@@ -4215,6 +4222,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         s_chamberCleanupFrames = kChamberCleanupWindow;
         s_ignitedStatue = -1;
         boss_rush_texts_reset_fade();
+        boss_rush_master_sword_reset_fade();
     }
     if (s_wasInChamber && !nowInChamber) {
         s_chamberCamArmFrames = 0;

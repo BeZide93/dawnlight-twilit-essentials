@@ -6,6 +6,8 @@
 #include "SSystem/SComponent/c_xyz.h"
 #include "SSystem/SComponent/c_sxyz.h"
 
+#include <string_view>
+
 int loadObjectArchive(const char* arcName);
 
 void unloadObjectArchive(const char* arcName);
@@ -23,3 +25,5 @@ void renderModelAt(J3DModel* model, const cXyz& pos, const csXyz& angle = csXyz(
 void renderModelAtMtx(J3DModel* model, MtxP mtx, mDoExt_bckAnm* bck = nullptr);
 
 void ensure_system_heap_capacity();
+
+bool is_mod_installed(std::string_view id);

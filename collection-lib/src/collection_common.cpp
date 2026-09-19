@@ -1,5 +1,7 @@
 #include "collection_lib/collection_common.hpp"
 
+#include "../../src/util.hpp"
+
 ModContext* g_modCtx = nullptr;
 const SaveService* g_saveSvc = nullptr;
 const LogService* g_logSvc = nullptr;
@@ -254,7 +256,10 @@ static ResTIMG* load_collection_bti(const char* resPath, ResourceBuffer* buf, Re
 
 ResTIMG* get_ordon_clothes_texture() {
     static ResTIMG* s_cache = nullptr;
-    return load_collection_bti("textures/ordon_clothes.bti", &s_ordonClothesBtiBuf, &s_cache);
+    const char* path = is_mod_installed("com.ditrey.linkle")
+        ? "textures/ordon_clothes_linkle.bti"
+        : "textures/ordon_clothes.bti";
+    return load_collection_bti(path, &s_ordonClothesBtiBuf, &s_cache);
 }
 
 ResTIMG* get_ordon_hero_texture() {

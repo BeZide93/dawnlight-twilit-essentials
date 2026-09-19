@@ -2,6 +2,7 @@
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
 #include "../z_button/z_button.hpp"
+#include "../controls/controls.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_ext.h"
@@ -923,6 +924,21 @@ static void play_cursor_se() {
 
 static u8 s_deferredUseItem = QA_ITEM_NONE;
 
+// Using a quick access item other than the lantern snuffs a burning lantern for
+// real (clear FLG2_UNK_1), so it does not come back lit when switching back to it.
+static void qa_extinguish_lantern_for_item() {
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (link == nullptr || link->checkWolf()) {
+        return;
+    }
+    if (link->mEquipItem == dItemNo_KANTERA_e ||
+        !link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1)) {
+        return;
+    }
+    link->offNoResetFlg2(daPy_py_c::FLG2_UNK_1);
+    link->mZ2Link.setKanteraState(0);
+}
+
 static void execute_iron_boots() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
@@ -982,6 +998,12 @@ static void execute_horse_call() {
     g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
 }
 
+// Mirror of FLG2_UNK_1 while the quick access lantern is the tracked flame. The
+// engine's daAlink_c::execute() snuffs a burning lantern that no face button
+// holds (that check inlines checkItemSetButton, so hooking the latter is not
+// reliable) - we relight it here to match native face-button behaviour.
+static bool s_qaLanternLit = false;
+
 static void execute_lantern() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
@@ -999,6 +1021,12 @@ static void execute_lantern() {
     if (link->mEquipItem == dItemNo_KANTERA_e) {
         s_deferredUseItem = dItemNo_KANTERA_e;
         return;
+    }
+
+    if (qa_is_lantern_active()) {
+        // Lit but holstered (sword/other item drawn): this press puts the flame out
+        // on purpose - drop the keep-alive so it stays out.
+        s_qaLanternLit = false;
     }
 
     u8 oldGpItem = dComIfGp_getSelectItem(2);
@@ -1161,6 +1189,90 @@ bool quick_access_keep_bomb_equipped(daAlink_c* link) {
            (link->mGrabItemAcKeep.getActor() != nullptr);
 }
 
+bool quick_access_keep_lantern_equipped(daAlink_c* link) {
+    if (!g_configQuickAccessEnabled || link == nullptr) {
+        return false;
+    }
+    if (s_assignedItem != dItemNo_KANTERA_e && s_assignedItem != dItemNo_KANTERA2_e) {
+        return false;
+    }
+    return link->mEquipItem == dItemNo_KANTERA_e ||
+           link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1);
+}
+
+DEFINE_HOOK(&daAlink_c::execute, QaAlinkExecuteHook);
+
+static u8 s_qaPreEquipItem = 0xFF;
+
+HookAction on_qa_alink_execute_pre(ModContext*, void*, void*, void*) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (link != nullptr) {
+        s_qaPreEquipItem = link->mEquipItem;
+    }
+    return HOOK_CONTINUE;
+}
+
+static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+        s_qaLanternLit = false;
+        return;
+    }
+
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (link == nullptr || link->checkWolf()) {
+        s_qaLanternLit = false;
+        return;
+    }
+
+    const bool lanternAssigned =
+        (s_assignedItem == dItemNo_KANTERA_e || s_assignedItem == dItemNo_KANTERA2_e);
+    const bool litNow = link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1);
+
+    if (litNow) {
+        s_qaLanternLit = lanternAssigned;
+        return;
+    }
+
+    if (!s_qaLanternLit || !lanternAssigned) {
+        return;
+    }
+
+    // The flame went out this frame while we tracked it as burning. Only keep it
+    // alive when a real item (sword, bow, ...) is out and the engine snuffed it
+    // merely because no face button holds the lantern. Anything else is an
+    // intentional end: put-away (extinguished while still equipped), sheathing
+    // (nothing equipped and nothing pending), empty oil, water or an A press.
+    if (s_qaPreEquipItem == dItemNo_KANTERA_e) {
+        s_qaLanternLit = false;
+        return;
+    }
+    if (link->mEquipItem == dItemNo_NONE_e && link->field_0x2fde == dItemNo_NONE_e) {
+        s_qaLanternLit = false;
+        return;
+    }
+    if (dComIfGs_getOil() == 0) {
+        s_qaLanternLit = false;
+        return;
+    }
+    if (link->checkNoResetFlg0(daPy_py_c::FLG0_WATER_IN_MOVE)) {
+        s_qaLanternLit = false;
+        return;
+    }
+
+    if (link->doTrigger()) {
+        // A was pressed (put-away context): the engine snuffed the flame on
+        // purpose so the sheath can proceed - let it stay out.
+        s_qaLanternLit = false;
+        return;
+    }
+
+    link->onNoResetFlg2(daPy_py_c::FLG2_UNK_1);
+    link->mZ2Link.setKanteraState(2);
+}
+
 static void execute_generic_item(u8 itemNo) {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
@@ -1200,14 +1312,18 @@ void qa_execute_item(u8 itemNo) {
         return;
     }
     if (itemNo == dItemNo_HVY_BOOTS_e) {
+        qa_extinguish_lantern_for_item();
         execute_iron_boots();
     } else if (itemNo == dItemNo_HORSE_FLUTE_e) {
+        qa_extinguish_lantern_for_item();
         execute_horse_call();
     } else if (itemNo == dItemNo_KANTERA_e || itemNo == dItemNo_KANTERA2_e) {
         execute_lantern();
     } else if (qa_is_rod_item(itemNo)) {
+        qa_extinguish_lantern_for_item();
         execute_fishing_rod();
     } else {
+        qa_extinguish_lantern_for_item();
         execute_generic_item(itemNo);
     }
 }
@@ -1293,8 +1409,9 @@ static dMeter2Draw_c* s_lastDraw = nullptr;
 static J2DScreen* s_lastScreen = nullptr;
 
 static void suppress_menu_buttons(interface_of_controller_pad& pad) {
-    pad.mButtonFlags &= ~PAD_BUTTON_DOWN;
-    pad.mPressedButtonFlags &= ~PAD_BUTTON_DOWN;
+    const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    pad.mButtonFlags &= ~qaBit;
+    pad.mPressedButtonFlags &= ~qaBit;
 
     pad.mCStickPosX = 0.0f;
     pad.mCStickPosY = 0.0f;
@@ -1537,7 +1654,7 @@ static void qa_wolf_sun_song() {
 }
 
 static void wolf_quick_access_input(interface_of_controller_pad& pad) {
-    bool held = (pad.mButtonFlags & PAD_BUTTON_DOWN) != 0;
+    bool held = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
     if (s_dpadCancelLatch) {
         if (!held) {
             s_dpadCancelLatch = false;
@@ -1663,7 +1780,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    bool dpadDownHeld = (pad.mButtonFlags & PAD_BUTTON_DOWN) != 0;
+    bool dpadDownHeld = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
     if (s_dpadCancelLatch) {
         if (!dpadDownHeld) {
             s_dpadCancelLatch = false;
@@ -1673,7 +1790,8 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     if (quick_access_bottles_hotkey_active()) {
         dpadDownHeld = false;
     }
-    if (s_editMode && s_editDpadDownLatch && (pad.mButtonFlags & PAD_BUTTON_DOWN) == 0) {
+    if (s_editMode && s_editDpadDownLatch &&
+        (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) == 0) {
         s_editDpadDownLatch = false;
     }
 
@@ -1694,7 +1812,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
             pad.mButtonFlags &= ~PAD_BUTTON_X;
             s_editDpadDownLatch = false;
-            dpadDownHeld = (pad.mButtonFlags & PAD_BUTTON_DOWN) != 0;
+            dpadDownHeld = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
             leave_edit_mode(dpadDownHeld);
             play_ok_se();
             suppress_menu_buttons(pad);
@@ -2070,6 +2188,8 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<Meter2DrawRadialMenuHook>(hook_svc, on_meter2_draw_quick_access_post);
         mods::hook::add_post<QaSetStickDataHook>(hook_svc, on_set_stick_data_qa_post);
         mods::hook::add_post<QaCheckReadyItemHook>(hook_svc, on_check_ready_item_qa_post);
+        mods::hook::add_pre<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_pre);
+        mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
     }
 
     s_saveSvc = save_svc;

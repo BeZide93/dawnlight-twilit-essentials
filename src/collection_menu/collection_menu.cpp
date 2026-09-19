@@ -1,4 +1,5 @@
 #include "collection_menu.hpp"
+#include "../util.hpp"
 
 #include <collection_lib/collection_lib.hpp>
 
@@ -120,11 +121,14 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
         }
 
         if (g_configCollectionStarterEquip) {
+            const bool linkle = is_mod_installed("com.ditrey.linkle");
             add_vanilla_tunic_slot({
                 .unlocked = []() { return g_configCollectionStarterEquip; },
                 .equipped = []() { return dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e; },
-                .name = "Ordon Clothes",
-                .description = "The clothes Link wore at the beginning of his journey in Ordon Village.",
+                .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
+                .description = linkle
+                    ? "The clothes Linkle wore at the beginning of her journey in Ordon Village."
+                    : "The clothes Link wore at the beginning of his journey in Ordon Village.",
                 .icon = get_ordon_clothes_texture(),
             });
         }

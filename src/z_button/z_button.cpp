@@ -61,6 +61,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<CheckItemButtonChangeHook>(hook_svc, on_check_item_button_change_pre);
     mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre);
     mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre);
+    mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
     mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_post);
     mods::hook::add_pre<SetSelectItemIndexHook>(hook_svc, on_set_select_item_index_pre);
     mods::hook::add_post<DrawButtonZHook>(hook_svc, on_draw_button_z_post);

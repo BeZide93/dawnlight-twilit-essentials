@@ -51,7 +51,16 @@ bool apply_shield_item() {
     if (dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {
         return false;
     }
+    if (!dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD)) {
+        return false;
+    }
     if (s_shieldApplied) return true;
+
+    const char* stage = dComIfGp_getStartStageName();
+    if (stage == nullptr || std::strcmp(stage, kChestStage) != 0 ||
+        dComIfGp_roomControl_getStayNo() != kChestRoom) {
+        return false;
+    }
     if (svc_stage == nullptr) {
         return false;
     }
@@ -160,8 +169,12 @@ void shield_prompt_and_pickup_update() {
     if (dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {
         struct shield_hider {
             static void* collect(void* i_proc, void*) {
-                if (((base_process_class*)i_proc)->name == fpcNm_Obj_Shield_e) {
-                    fopAcM_delete(static_cast<fopAc_ac_c*>(i_proc));
+                fopAc_ac_c* ac = static_cast<fopAc_ac_c*>(i_proc);
+                if (ac->name == fpcNm_Obj_Shield_e) {
+                    daItemShield_c* shield = static_cast<daItemShield_c*>(ac);
+                    if (shield->getSwBit() == kShieldSwBit) {
+                        fopAcM_delete(ac);
+                    }
                 }
                 return nullptr;
             }

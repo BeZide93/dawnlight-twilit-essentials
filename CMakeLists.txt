@@ -53,6 +53,7 @@ add_mod(twilit_essentials
             src/boss_bar/boss_bar.cpp
             src/boss_rush/boss_rush.cpp
             src/boss_rush/boss_rush_models.cpp
+            src/boss_rush/boss_rush_masterswd.cpp
             src/boss_rush/boss_rush_texts.cpp
             src/boss_rush/boss_rush_midna.cpp
             src/boss_rush/boss_rush_collection.cpp
@@ -65,6 +66,7 @@ add_mod(twilit_essentials
             src/boss_rush/ganondorf_cape.cpp
             src/visible_equipment/visible_equipment.cpp
             src/z_button/z_button.cpp
+            src/controls/controls.cpp
             src/quick_access/quick_access.cpp
             src/quick_access/quick_access_radial.cpp
             src/quick_access/quick_access_strip.cpp

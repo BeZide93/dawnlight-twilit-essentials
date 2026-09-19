@@ -23,6 +23,7 @@
 #include "d/d_select_cursor.h"
 #include "Z2AudioLib/Z2SeMgr.h"
 #include "../z_button/z_common.hpp"
+#include "../controls/controls.hpp"
 #include "mods/svc/save.h"
 
 #include <dolphin/gx.h>
@@ -53,7 +54,7 @@ struct BottleBlob {
 static_assert(sizeof(BottleBlob) == 8, "blob size");
 
 static bool s_bottleMenuOpen = false;
-static int s_bottleSelectedSlot = 0;
+static int s_bottleSelectedSlot = SLOT_NONE;
 static int s_holdFramesL = 0;
 static bool s_cancelLatchL = false;
 static u8 s_assignedSlot = 0xFF;
@@ -179,21 +180,22 @@ static void open_bottle_menu() {
     s_bottleMenuOpen = true;
     bottles_reset_repeat();
 
-    s_bottleSelectedSlot = 0;
-    if (s_assignedSlot < 4 && bottle_owned(s_assignedSlot)) {
-        s_bottleSelectedSlot = s_assignedSlot;
-    }
+    /* Start with nothing selected; the player picks a slot with the stick. */
+    s_bottleSelectedSlot = SLOT_NONE;
 
     qa_invalidate_msg_window();
     Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
 }
 
-static void eat_left_trigger(interface_of_controller_pad& pad) {
-    pad.mTriggerLeft = 0.0f;
-    pad.mTrigLockL = false;
-    pad.mHoldLockL = false;
-    pad.mPressedButtonFlags &= ~PAD_TRIGGER_L;
-    pad.mButtonFlags &= ~PAD_TRIGGER_L;
+static void eat_bottle_trigger(interface_of_controller_pad& pad) {
+    const u16 bottleBit = controls_binding_bit(CTRL_BIND_BOTTLES);
+    if (bottleBit == PAD_TRIGGER_L) {
+        pad.mTriggerLeft = 0.0f;
+        pad.mTrigLockL = false;
+        pad.mHoldLockL = false;
+    }
+    pad.mPressedButtonFlags &= ~bottleBit;
+    pad.mButtonFlags &= ~bottleBit;
 }
 
 static void eat_all_triggers(interface_of_controller_pad& pad) {
@@ -237,8 +239,9 @@ static void bottles_cycle_step(int dir) {
 }
 
 static void bottles_suppress_pad(interface_of_controller_pad& pad) {
-    pad.mPressedButtonFlags &= ~PAD_BUTTON_DOWN;
-    pad.mButtonFlags &= ~PAD_BUTTON_DOWN;
+    const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    pad.mPressedButtonFlags &= ~qaBit;
+    pad.mButtonFlags &= ~qaBit;
 
     pad.mCStickPosX = 0.0f;
     pad.mCStickPosY = 0.0f;
@@ -394,7 +397,8 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const bool lPhys = (pad.mButtonFlags & PAD_TRIGGER_L) != 0;
+    const u16 bottleBit = controls_binding_bit(CTRL_BIND_BOTTLES);
+    const bool lPhys = (pad.mButtonFlags & bottleBit) != 0;
 
     bool lHeld = lPhys;
     if (s_cancelLatchL) {
@@ -406,7 +410,7 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
 
     if (s_bottleMenuOpen) {
         s_hotkeyActive = true;
-        eat_left_trigger(pad);
+        eat_bottle_trigger(pad);
 
         if (g_configQuickAccessAppearance == QA_APPEARANCE_RADIAL) {
             bottles_radial_select(pad.mCStickPosX, pad.mCStickPosY,
@@ -469,15 +473,16 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
 
         if (!lHeld) {
             close_bottle_menu();
-            if (s_bottleSelectedSlot >= 0 && s_bottleSelectedSlot < QA_QUICK_SLOTS &&
-                bottle_owned(s_bottleSelectedSlot)) {
-                if (s_assignedSlot != static_cast<u8>(s_bottleSelectedSlot)) {
-                    s_assignedSlot = static_cast<u8>(s_bottleSelectedSlot);
-                    bottles_store();
+            if (s_bottleSelectedSlot >= 0 && s_bottleSelectedSlot < QA_QUICK_SLOTS) {
+                if (bottle_owned(s_bottleSelectedSlot)) {
+                    if (s_assignedSlot != static_cast<u8>(s_bottleSelectedSlot)) {
+                        s_assignedSlot = static_cast<u8>(s_bottleSelectedSlot);
+                        bottles_store();
+                    }
+                    bottles_use_bottle(s_bottleSelectedSlot);
+                } else {
+                    bottles_play_error_se();
                 }
-                bottles_use_bottle(s_bottleSelectedSlot);
-            } else {
-                bottles_play_error_se();
             }
         }
 
@@ -488,10 +493,11 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
 
     if (lHeld) {
         s_hotkeyActive = true;
-        eat_left_trigger(pad);
+        eat_bottle_trigger(pad);
 
-        pad.mPressedButtonFlags &= ~PAD_BUTTON_DOWN;
-        pad.mButtonFlags &= ~PAD_BUTTON_DOWN;
+        const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+        pad.mPressedButtonFlags &= ~qaBit;
+        pad.mButtonFlags &= ~qaBit;
 
         s_holdFramesL++;
         if (s_holdFramesL >= QA_TAP_FRAMES && bottle_count() > 0) {
@@ -592,24 +598,23 @@ static void draw_bottle_bar(f32 screenW, f32 screenH, u8 alpha) {
         }
     }
 
-    if (s_bottleSelectedSlot < 0 || s_bottleSelectedSlot >= QA_QUICK_SLOTS) {
-        s_bottleSelectedSlot = 0;
-    }
-    dSelect_cursor_c* cursor = qa_sel_cursor(0);
-    if (cursor != nullptr) {
-        const f32 cx = centerX - totalSpan * 0.5f + static_cast<f32>(s_bottleSelectedSlot) * QB_BOX_SPACING;
-        const f32 cy = centerY + slide;
-        cursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
-        cursor->setPos(cx, cy);
-        cursor->setAlphaRate(s_bottleMenuAlpha);
-        cursor->draw();
-        J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
-        if (port != nullptr) {
-            port->setup2D();
+    if (s_bottleSelectedSlot >= 0 && s_bottleSelectedSlot < QA_QUICK_SLOTS) {
+        dSelect_cursor_c* cursor = qa_sel_cursor(0);
+        if (cursor != nullptr) {
+            const f32 cx = centerX - totalSpan * 0.5f + static_cast<f32>(s_bottleSelectedSlot) * QB_BOX_SPACING;
+            const f32 cy = centerY + slide;
+            cursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
+            cursor->setPos(cx, cy);
+            cursor->setAlphaRate(s_bottleMenuAlpha);
+            cursor->draw();
+            J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+            if (port != nullptr) {
+                port->setup2D();
+            }
         }
     }
 
-    {
+    if (s_bottleSelectedSlot >= 0 && s_bottleSelectedSlot < QA_QUICK_SLOTS) {
         const u8 sel = bottle_item(s_bottleSelectedSlot);
         if (sel != dItemNo_NONE_e) {
             char labelBuf[64] = "";

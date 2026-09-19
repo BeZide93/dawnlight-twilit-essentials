@@ -5,8 +5,57 @@
 #include "m_Do/m_Do_mtx.h"
 #include "d/d_kankyo.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
+#include "mods/svc/hook.h"
+#include "dusk/config_var.hpp"
 
 #include <cstring>
+#include <string>
+
+// Service globals defined in mod.cpp.
+extern const HookService* svc_hook;
+extern "C" ModContext* mod_ctx;
+
+namespace {
+
+using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
+
+std::string mod_enabled_cvar_name(std::string_view id) {
+    std::string name = "mod.";
+    for (const char c : id) {
+        if (c == '.') {
+            name.push_back('_');
+        } else if (c == '_') {
+            name.append("__");
+        } else {
+            name.push_back(c);
+        }
+    }
+    name.append(".enabled");
+    return name;
+}
+
+GetConfigVarFn host_get_config_var() {
+    static GetConfigVarFn fn = nullptr;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        void* addr = nullptr;
+        if (svc_hook != nullptr && mod_ctx != nullptr &&
+            svc_hook->resolve(mod_ctx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK) {
+            fn = reinterpret_cast<GetConfigVarFn>(addr);
+        }
+    }
+    return fn;
+}
+
+}  // namespace
+
+bool is_mod_installed(std::string_view id) {
+    const auto getVar = host_get_config_var();
+    if (getVar == nullptr) return false;
+    const auto* var = getVar(mod_enabled_cvar_name(id));
+    return var != nullptr && static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue();
+}
 
 static void normalizeArcName(const char* src, char* dst, size_t dstSize) {
     if (src == nullptr || dst == nullptr || dstSize == 0) return;

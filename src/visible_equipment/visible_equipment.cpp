@@ -1107,11 +1107,11 @@ static void renderBow(daAlink_c *alink, bool shouldShowEquipment,
   if (bowMtx != nullptr) {
     mDoMtx_stack_c::copy(bowMtx);
     if (g_configVisibleEquipMirrorBow) {
-      mDoMtx_stack_c::transM(22.0f, 5.0f, -4.0f);
+      mDoMtx_stack_c::transM(22.0f, 2.0f, -4.0f);
       mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(-56.0f),
                               degToS16(0.0f));
     } else {
-      mDoMtx_stack_c::transM(25.0f, 5.0f, -14.0f);
+      mDoMtx_stack_c::transM(25.0f, 2.0f, -14.0f);
       mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(56.0f),
                               degToS16(0.0f));
     }
