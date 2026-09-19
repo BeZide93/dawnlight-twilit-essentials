@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <string_view>
 
-bool g_configFlurryRushEnabled = true;
+bool g_configFlurryRushEnabled = false;
 int g_configFlurryRushPerfectFrames = 30;
 int g_configFlurryRushSlowFactor = 30;
 int g_configFlurryRushWindowTicks = 150;

@@ -18,7 +18,7 @@ void dSelect_cursor_c::setPos(f32 x, f32 y, const cXyz* world) {
     mInterpolatePosition = false;
 }
 
-void J3DTexture::initGXTexObj(u16 idx) {
+void J3DTexture::loadGXTexObj(u16 idx) {
     if (idx >= mNum) return;
 
     ResTIMG* timg = getResTIMG(idx);
