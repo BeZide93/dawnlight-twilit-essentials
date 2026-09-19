@@ -41,9 +41,6 @@ void trigger_ring_item_slide_z(dMenu_Ring_c* ring, u8 itemNo) {
 
     ring->setSelectItem(2, itemNo);
     ring->field_0x674[2] = 1;
-#if TARGET_PC
-    ring->mSelectItemSlideElapsed[2] = 0.0f;
-#endif
     ring->field_0x538[0] = g_ringHIO.mUnselectItemScale;
     ring->field_0x538[1] = g_ringHIO.mUnselectItemScale;
     ring->field_0x538[2] = g_ringHIO.mSelectItemScale;
@@ -393,9 +390,6 @@ HookAction on_set_jump_item_pre(ModContext*, void* args, void*, void*) {
             ring->field_0x6b8[0] != dComIfGs_getMixItemIndex(0))
         {
             ring->field_0x674[0] = 1;
-#if TARGET_PC
-            ring->mSelectItemSlideElapsed[0] = 0.0f;
-#endif
         }
     } else if (ring->field_0x6b3 == 1) {
         ring->field_0x538[0] = g_ringHIO.mUnselectItemScale;
@@ -405,9 +399,6 @@ HookAction on_set_jump_item_pre(ModContext*, void* args, void*, void*) {
             ring->field_0x6b8[1] != dComIfGs_getMixItemIndex(1))
         {
             ring->field_0x674[1] = 1;
-#if TARGET_PC
-            ring->mSelectItemSlideElapsed[1] = 0.0f;
-#endif
         }
     } else if (ring->field_0x6b3 == 2) {
         ring->field_0x538[0] = g_ringHIO.mUnselectItemScale;
@@ -417,9 +408,6 @@ HookAction on_set_jump_item_pre(ModContext*, void* args, void*, void*) {
             ring->field_0x6b8[2] != dComIfGs_getMixItemIndex(2))
         {
             ring->field_0x674[2] = 1;
-#if TARGET_PC
-            ring->mSelectItemSlideElapsed[2] = 0.0f;
-#endif
         }
     }
 
@@ -459,9 +447,6 @@ HookAction on_set_select_item_force_pre(ModContext*, void* args, void*, void*) {
             }
         }
         ring->field_0x674[i_idx] = 0;
-#if TARGET_PC
-        ring->mSelectItemSlideElapsed[i_idx] = 0.0f;
-#endif
         g_zInventorySlot = ring->field_0x6b4[2];
         g_zMixSlot = ring->field_0x6b8[2];
         sync_z_item_state();
@@ -885,9 +870,6 @@ static constexpr f32 kItemWheelPromptXOffset = -15.0f;
 
 void reset_ring_z_prompt() {
     clear_ring_z_prompt_refs();
-    // Put the shared HIO guide X back to its pristine value. apply_item_wheel_
-    // centering() re-derives base + offset on the next menu open, so it never
-    // accumulates across fades / warps / stage loads.
     if (s_guideBaseXValid) {
         g_ringHIO.mGuidePosX[0] = s_guideBaseX;
     }
@@ -897,11 +879,9 @@ static void apply_item_wheel_centering(dMenu_Ring_c* ring) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine()) return;
 
     if (!s_guideBaseXValid) {
-        s_guideBaseX = g_ringHIO.mGuidePosX[0];   // capture the pristine value once
+        s_guideBaseX = g_ringHIO.mGuidePosX[0];
         s_guideBaseXValid = true;
     }
-    // Absolute write - idempotent, so repeated calls (each item-wheel open) can't
-    // drift the guide text further left every time.
     g_ringHIO.mGuidePosX[0] = s_guideBaseX + kItemWheelPromptXOffset;
 
     if (ring != nullptr) {
@@ -914,7 +894,6 @@ static void apply_item_wheel_centering(dMenu_Ring_c* ring) {
 
 static void destroy_ring_z_prompt(dMenu_Ring_c* ring) {
     if (s_ringZPrompt.ring != ring) return;
-    // The ring menu owns this heap lifetime; keep only per-menu references here.
     clear_ring_z_prompt_refs();
 }
 
@@ -936,7 +915,9 @@ static void create_ring_z_prompt(dMenu_Ring_c* ring) {
     }
 
     J2DScreen* screen = JKR_NEW J2DScreen();
-    if (screen == nullptr) return;
+    if (screen == nullptr) {
+        return;
+    }
     if (!screen->setPriority("zelda_game_image.blo", 0x20000, archive)) {
         JKR_DELETE(screen);
         return;
@@ -955,7 +936,10 @@ static void create_ring_z_prompt(dMenu_Ring_c* ring) {
     show_pane_tree(zButtonPane);
 
     CPaneMgr* button = JKR_NEW CPaneMgr(screen, MULTI_CHAR('zbtn_n'), 2, nullptr);
-    if (button == nullptr) {
+    if (button == nullptr || !pane_is_ready(button)) {
+        if (button != nullptr) {
+            JKR_DELETE(button);
+        }
         JKR_DELETE(screen);
         return;
     }
@@ -968,7 +952,7 @@ static void create_ring_z_prompt(dMenu_Ring_c* ring) {
 static void draw_ring_z_prompt(dMenu_Ring_c* ring) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() ||
         s_ringZPrompt.ring != ring ||
-        s_ringZPrompt.screen == nullptr || s_ringZPrompt.button == nullptr ||
+        s_ringZPrompt.screen == nullptr || !pane_is_ready(s_ringZPrompt.button) ||
         ring == nullptr || ring->mpScreen == nullptr || ring->mPlayerIsWolf)
     {
         return;
@@ -1018,7 +1002,3 @@ void after_ring_draw(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !args) return;
     draw_ring_z_prompt(mods::arg<dMenu_Ring_c*>(args, 0));
 }
-
-
-
-

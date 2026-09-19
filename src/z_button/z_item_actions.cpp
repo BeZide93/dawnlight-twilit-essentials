@@ -4,6 +4,7 @@
 #include "z_mobile.hpp"
 #include "../sheathed_spin/sheathed_spin.hpp"
 #include "m_Do/m_Do_audio.h"
+#include "../quick_access/quick_access.hpp"
 
 DEFINE_HOOK(&daAlink_c::checkItemChangeFromButton, CheckItemChangeFromButtonHook);
 DEFINE_HOOK(&daAlink_c::checkItemButtonChange, CheckItemButtonChangeHook);
@@ -17,7 +18,6 @@ bool item_needs_z_valid_button(int itemNo) {
 }
 
 HookAction on_set_heavy_boots_pre(ModContext*, void* args, void* ret, void*) {
-    // Real logic is mobile-only (no-op / HOOK_CONTINUE on desktop).
     return z_mobile_guard_heavy_boots(args, ret);
 }
 
@@ -48,6 +48,9 @@ HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* r
         {
             if (!link->checkEndResetFlg1(daPy_py_c::ERFLG1_SWORD_TRIGGER_NON)) {
                 if (g_configSheathedSpinEnabled && link->checkCutTurnInput()) {
+                    if (link->mEquipItem != 0x103) {
+                        link->deleteEquipItem(FALSE, TRUE);
+                    }
                     link->swordEquip(TRUE);
                     link->setSwordModel();
                     mDoAud_seStart(Z2SE_AL_SWORD_PULLOUT, NULL, 0, 0);
@@ -83,7 +86,7 @@ HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* r
                         if (z_mobile_hb_locked(link)) {
                             continue;
                         }
-                        z_mobile_hb_lock(link, link->checkEquipHeavyBoots());  // no-op on desktop
+                        z_mobile_hb_lock(link, link->checkEquipHeavyBoots());
                     }
                     result = link->changeItemTriggerKeepProc(i, procType);
                     *static_cast<BOOL*>(retval) = result;
@@ -151,6 +154,18 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
     auto* link = mods::arg<daAlink_c*>(args, 0);
     const int itemNo = mods::arg<int>(args, 1);
     if (!g_configCustomZButtonEnabled || link == nullptr) {
+        if (link != nullptr && quick_access_keep_boots_equipped(link) &&
+            link->checkGroupItem(itemNo, dItemNo_HVY_BOOTS_e))
+        {
+            *static_cast<int*>(retval) = 3;
+            return HOOK_SKIP_ORIGINAL;
+        }
+        if (link != nullptr && quick_access_keep_bomb_equipped(link) &&
+            link->checkGroupItem(itemNo, link->mEquipItem))
+        {
+            *static_cast<int*>(retval) = 3;
+            return HOOK_SKIP_ORIGINAL;
+        }
         return HOOK_CONTINUE;
     }
 
@@ -163,6 +178,20 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
         return HOOK_SKIP_ORIGINAL;
     }
     if (link->checkGroupItem(itemNo, resolved_select_item(2))) {
+        *static_cast<int*>(retval) = 3;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (quick_access_keep_boots_equipped(link) &&
+        link->checkGroupItem(itemNo, dItemNo_HVY_BOOTS_e))
+    {
+        *static_cast<int*>(retval) = 3;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (quick_access_keep_bomb_equipped(link) &&
+        link->checkGroupItem(itemNo, link->mEquipItem))
+    {
         *static_cast<int*>(retval) = 3;
         return HOOK_SKIP_ORIGINAL;
     }
@@ -187,19 +216,18 @@ HookAction on_check_set_item_trigger_pre(ModContext*, void* args, void* retval, 
 
         if (itemNo == dItemNo_HVY_BOOTS_e && i == 2) {
             if (link->checkEquipHeavyBoots()) {
-                // mobile: same press still being handled -> ignore
                 if (z_mobile_hb_locked(link)) {
                     *static_cast<int*>(retval) = 0;
                     return HOOK_SKIP_ORIGINAL;
                 }
                 if (link->checkNewItemChange(2) == 1) {
-                    z_mobile_hb_lock(link, true);  // no-op on desktop
+                    z_mobile_hb_lock(link, true);
                     link->changeItemTriggerKeepProc(2, 1);
                 }
                 *static_cast<int*>(retval) = 0;
                 return HOOK_SKIP_ORIGINAL;
             }
-            z_mobile_hb_lock(link, false);  // no-op on desktop
+            z_mobile_hb_lock(link, false);
         } else {
             link->mSelectItemId = i;
         }
@@ -249,6 +277,10 @@ void check_iron_boots_unequip_on_overwrite() {
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
+
+    if (quick_access_keep_boots_equipped(link)) {
+        return;
+    }
 
     if (link->checkEquipHeavyBoots()) {
         bool assigned = false;

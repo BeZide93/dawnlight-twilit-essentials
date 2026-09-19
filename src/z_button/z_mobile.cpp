@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <string>
 
-// Itanium-mangled names, valid for the Android/iOS (libc++) builds only. hopefully not needed in the future anymore
 #define Z_SYM_MIDNA_SOURCE "_ZN4dusk2ui17midna_icon_sourceEv"
 #define Z_SYM_MIDNA_REVISION "_ZN4dusk2ui19midna_icon_revisionEv"
 #define Z_SYM_SYNC_DISPLAYS "_ZN4dusk2ui13TouchControls21sync_control_displaysEv"
@@ -32,7 +31,6 @@ using RmlGetChildFn = void* (*)(const void*, int);
 using RmlSetPropertyFn = bool (*)(void*, const std::string*, const std::string*);
 using RmlSetInnerRMLFn = void (*)(void*, const std::string*);
 
-// dusklight's `dusk::ui::EquipTarget` (src/dusk/ui/controls.hpp). Layout must match.
 struct EquipTargetABI {
     float left = 0.0f;
     float top = 0.0f;
@@ -66,7 +64,6 @@ bool resolve_symbol(const char* name, Fn& out) {
     }
     void* addr = nullptr;
     if (s_hookSvc->resolve(mod_ctx, name, &addr, nullptr) != MOD_OK || addr == nullptr) {
-        log_z_info("[ZButton/mobile] symbol NOT resolved: %s", name);
         return false;
     }
     out = reinterpret_cast<Fn>(addr);
@@ -89,7 +86,6 @@ u8 current_z_item() {
     return zItem;
 }
 
-// dusklight's icon_provider serves "item://item/<hex>"
 std::string z_item_icon_source() {
     const u8 itemNo = current_z_item();
     if (itemNo == dItemNo_NONE_e) {
@@ -135,8 +131,6 @@ void set_property(void* element, const char* name, const char* value) {
     s_rmlSetProperty(element, &propertyName, &propertyValue);
 }
 
-// Turn the Z button's label span into a full-size overlay so the count / oil
-// meter can be positioned against the button exactly like they are on X/Y.
 void configure_meter_container(void* container) {
     set_property(container, "position", "absolute");
     set_property(container, "left", "0dp");
@@ -314,7 +308,6 @@ void z_mobile_init(const HookService* hook_svc) {
 
     s_useCaptureFallback = !iconOk;
 
-    // Ammo count / lantern oil bar on the touch button.
     const bool meterOk =
         resolve_symbol(Z_SYM_RML_GET_CHILD, s_rmlGetChild) &&
         resolve_symbol(Z_SYM_RML_SET_PROPERTY, s_rmlSetProperty) &&
@@ -379,7 +372,7 @@ bool s_hbManualToggleOff = false;
 bool s_hbWaitRelease = false;
 u8 s_hbGuardFrames = 0;
 
-constexpr u8 kBtnZ = 0x04;  // daAlink_c::BTN_Z
+constexpr u8 kBtnZ = 0x04;
 
 bool hb_z_selected(daAlink_c* link) {
     return link != nullptr &&

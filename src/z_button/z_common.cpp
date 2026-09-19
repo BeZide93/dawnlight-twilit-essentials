@@ -1,11 +1,12 @@
 #pragma once
 
 #include "z_common.hpp"
+#include "../boss_rush/boss_rush.hpp"
+#include "../boss_rush/boss_rush_midna.hpp"
 
 bool g_configCustomZButtonEnabled = false;
 bool g_configZButtonEnabled = false;
 
-const LogService* g_zLogSvc = nullptr;
 ModContext* g_zModCtx = nullptr;
 
 u8 g_zInventorySlot = 0xFF;
@@ -36,19 +37,6 @@ bool g_zHasSecondLayer = false;
 J2DPicture* g_drawDigitPic[3] = { nullptr, nullptr, nullptr };
 dKantera_icon_c* g_zKanteraIcon = nullptr;
 
-void log_z_info(const char* fmt, ...) {
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-
-    if (g_zLogSvc && g_zModCtx) {
-        g_zLogSvc->info(g_zModCtx, buf);
-    }
-    std::printf("%s\n", buf);
-    std::fflush(stdout);
-}
 
 void ensure_z_buffers() {
     g_zTexBufMain[0] = s_staticTexBufMain[0];
@@ -63,10 +51,8 @@ void sync_z_item_state() {
 
     u8 zSlot = dComIfGs_getSelectItemIndex(2);
     if (zSlot == 0xFF || zSlot >= 24) {
-        zSlot = g_zInventorySlot;
-    }
-    if (zSlot == 0xFF || zSlot >= 24) {
         g_zInventorySlot = 0xFF;
+        g_zMixSlot = 0xFF;
         dComIfGs_setSelectItemIndex(2, 0xFF);
         dComIfGs_setMixItemIndex(2, 0xFF);
         g_dComIfG_gameInfo.play.setSelectItem(2, dItemNo_NONE_e);
@@ -124,7 +110,6 @@ void ensure_z_slot_initialized() {
         if (itm != 0xFF && itm != 0x00 && itm != dItemNo_NONE_e) {
             g_zInventorySlot = savedItemIdx;
             sync_z_item_state();
-            log_z_info("[ZButton] INITIAL LOAD: slot=%d item=0x%02X", g_zInventorySlot, itm);
             return;
         } else {
             g_zInventorySlot = 0xFF;
@@ -165,22 +150,23 @@ bool z_items_dimmed() {
     if (dMeter2Info_getWindowStatus() == 2) {
         return false;
     }
-    // Items are only dimmed when Link cannot use ANY items (dialog, swimming, carrying, etc.)
-    // If either X or Y is usable (e.g. aiming bow on one button while the other remains usable),
-    // then items are active and the Z item must NOT be dimmed!
     return !dMeter2Info_isUseButton(METER2_USEBUTTON_X) && !dMeter2Info_isUseButton(METER2_USEBUTTON_Y);
 }
 
 u8 z_item_icon_alpha() {
-    // On the mobile capture path this alpha is baked into the touch button's icon
-    // texture. Dusklight's own X/Y touch icons never grey out, so keep it opaque.
     if (z_mobile_wants_midona_host()) {
         return 255;
+    }
+    if (daAlink_c::checkRoom()) {
+        return g_drawHIO.mButtonXYItemDimAlpha;
     }
     return z_items_dimmed() ? g_drawHIO.mButtonXYItemDimAlpha : 255;
 }
 
 u8 z_button_base_alpha() {
+    if (daAlink_c::checkRoom()) {
+        return g_drawHIO.mButtonXYBaseDimAlpha;
+    }
     return z_items_dimmed() ? g_drawHIO.mButtonXYBaseDimAlpha : 255;
 }
 
@@ -192,7 +178,6 @@ bool z_item_ammo(u8 itemNo, int& count, int& maxCount) {
     count = -1;
     maxCount = -1;
 
-    // Bomb arrow / bombs: the count comes from the equipped bomb bag
     if (itemNo == dItemNo_BOMB_ARROW_e || itemNo == 0x59 || is_bomb_item(itemNo)) {
         u8 bombSlot = dComIfGs_getSelectMixItemNoArrowIndex(2);
         u8 bagIdx = (bombSlot >= 15 && bombSlot < 18) ? (bombSlot - 15) : 0;
@@ -200,18 +185,15 @@ bool z_item_ammo(u8 itemNo, int& count, int& maxCount) {
         count = dComIfGs_getBombNum(bagIdx);
         maxCount = dComIfGs_getBombMax(bombType);
     }
-    // Bow / arrows
     else if (itemNo == dItemNo_BOW_e || itemNo == dItemNo_HAWK_ARROW_e || itemNo == 0x43 ||
              itemNo == 0x53 || itemNo == 0x54 || itemNo == 0x55 || itemNo == 0x56 || itemNo == 0x5A) {
         count = dComIfGs_getArrowNum();
         maxCount = dComIfGs_getArrowMax();
     }
-    // Slingshot
     else if (itemNo == 0x4B || itemNo == 0x76) {
         count = dComIfGs_getPachinkoNum();
         maxCount = dComIfGs_getPachinkoMax();
     }
-    // Bee larva bottle
     else if (itemNo == dItemNo_BEE_CHILD_e || itemNo == dItemNo_BEE_ROD_e) {
         u8 bottleSlot = dComIfGs_getSelectItemIndex(2);
         u8 bottleIdx = (bottleSlot >= 11 && bottleSlot < 15) ? (bottleSlot - 11) : 0;
@@ -245,6 +227,9 @@ bool isTitleOrMainMenu() {
 }
 
 bool isMidnaUnlocked() {
+    if (is_boss_rush_active()) {
+        return true;
+    }
     if (isWolfPlayer()) {
         return true;
     }
@@ -260,7 +245,7 @@ bool isMidnaUnlocked() {
 }
 
 bool is_pause_menu_open(dMeter2Draw_c* draw) {
-    u8 winStatus = g_meter2_info.getWindowStatus();
+    const u8 winStatus = g_meter2_info.getWindowStatus();
     if (winStatus == 2) {
         return false;
     }
@@ -269,6 +254,8 @@ bool is_pause_menu_open(dMeter2Draw_c* draw) {
     if (dComIfGp_isPauseFlag()) return true;
     if (g_meter2_info.getPauseStatus() != 0) return true;
     if (winStatus != 0) return true;
+    if (dMeter2Info_isShopTalkFlag()) return true;
+    if (dMsgObject_isTalkNowCheck()) return true;
 
 #if !Z_MOBILE_BUILD
     if (draw == nullptr && g_meter2_info.getMeterClass() != nullptr) {
@@ -376,4 +363,3 @@ void sync_play_select_item(int index) {
     if (index != 2) return;
     g_dComIfG_gameInfo.play.setSelectItem(2, resolved_select_item(2));
 }
-

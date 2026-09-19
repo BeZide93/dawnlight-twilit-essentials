@@ -1,6 +1,5 @@
 #include "z_button.hpp"
 
-// Sub-module implementation includes
 #include "z_common.cpp"
 #include "z_mobile.cpp"
 #include "midna_location.cpp"
@@ -12,17 +11,11 @@
 #include "f_pc/f_pc_profile_lst.h"
 
 bool isNativeZButtonEngine() {
-    /** this should now more definitively check if mItemHeap is [2] or [3] by checking if the size of daAlink_c on
-    runtime is correct vs what the SDK assumes it is **/
-    const u32 actualSize = g_profile_ALINK.base.base.process_size; // size of daAlink_c on runtime
-    const size_t linkSize = sizeof(daAlink_c); // expected size based on dusklight's SDK
-    const size_t animHeapSize = sizeof(daPy_anmHeap_c); // expected size of mItemHeap/mAnmHeap based on dusklight's SDK
 
-    /** lazy tweaks or a z-items fork that increased mItemHeap to [3] will shift the size of daAlink_c by more than
-    what is calculated here, but this will know it's specifically a z-items fork if daAlink_c is increased by
-    specifically 32 (another mItemHeap) (assuming no other heaps are increased or any other size is added);
-    if a fork happens to do other weird stuff (which I'm going to avoid doing with lazy tweaks),
-    this won't catch it, but this works for now unless a universal implementation is wanted **/
+    const u32 actualSize = g_profile_ALINK.base.base.process_size;
+    const size_t linkSize = sizeof(daAlink_c);
+    const size_t animHeapSize = sizeof(daPy_anmHeap_c);
+
     if (static_cast<const int>(actualSize) == static_cast<const int>(linkSize) + static_cast<const int>(animHeapSize)) {
         return true;
     }
@@ -30,7 +23,6 @@ bool isNativeZButtonEngine() {
 }
 
 ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, ModContext* mod_ctx, ModError*) {
-    g_zLogSvc = log_svc;
     g_zModCtx = mod_ctx;
 
     if (!hook_svc)
@@ -40,26 +32,16 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
         return MOD_OK;
     }
 
-    // issue #7: when the custom Z-button feature is off, install no hooks at all.
     if (!g_configCustomZButtonEnabled) {
         if (log_svc) {
-            log_svc->info(mod_ctx, "[ZButton] feature disabled - no Z-button hooks");
         }
         return MOD_OK;
     }
 
-    // HUD and Item Wheel UI hooks
-    mods::hook::add_pre<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_pre);
-    mods::hook::add_post<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_post);
-    mods::hook::add_pre<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_pre);
-    mods::hook::add_post<RingCreateHook>(hook_svc, after_ring_create);
-    mods::hook::add_pre<RingDeleteHook>(hook_svc, before_ring_delete);
-    mods::hook::add_post<RingDrawHook>(hook_svc, after_ring_draw);
     mods::hook::add_pre<SetActiveCursorHook>(hook_svc, on_set_active_cursor_pre);
     mods::hook::add_post<SetActiveCursorHook>(hook_svc, on_set_active_cursor_post);
     mods::hook::add_pre<SetSelectItemHook>(hook_svc, on_set_select_item_pre);
 
-    // Android / iOS touch Z-button icon
     z_mobile_init(hook_svc);
 
     mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_post);
@@ -69,6 +51,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<MidonaAlphaHook>(hook_svc, on_set_button_icon_midona_alpha_pre);
     mods::hook::add_post<MidonaAlphaHook>(hook_svc, on_set_button_icon_midona_alpha_post);
     mods::hook::add_pre<ButtonIconAlphaHook>(hook_svc, on_set_button_icon_alpha_pre);
+    mods::hook::add_post<ButtonIconAlphaHook>(hook_svc, on_set_button_icon_alpha_post);
     mods::hook::add_pre<ChangeTextureItemXYHook>(hook_svc, on_change_texture_item_xy_pre);
     mods::hook::add_post<MoveButtonXYHook>(hook_svc, on_move_button_xy_post);
     mods::hook::add_post<OrderTalkHook>(hook_svc, on_order_talk_post);
@@ -88,6 +71,12 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<IsMixItemOnHook>(hook_svc, on_is_mix_item_on_pre);
     mods::hook::add_pre<IsMixItemOffHook>(hook_svc, on_is_mix_item_off_pre);
     mods::hook::add_pre<CheckExplainForceHook>(hook_svc, on_check_explain_force_pre);
+    mods::hook::add_post<RingCreateHook>(hook_svc, after_ring_create);
+    mods::hook::add_pre<RingDeleteHook>(hook_svc, before_ring_delete);
+    mods::hook::add_post<RingDrawHook>(hook_svc, after_ring_draw);
+    mods::hook::add_pre<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_pre);
+    mods::hook::add_post<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_post);
+    mods::hook::add_pre<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_pre);
 
     return MOD_OK;
 }
@@ -97,7 +86,6 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
         return;
     }
 
-    g_zLogSvc = log_svc;
     g_zModCtx = mod_ctx;
 
     static bool s_wasActive = false;
@@ -125,14 +113,21 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
 }
 
 void shutdown_z_button() {
-    g_zKanteraIcon = nullptr;
-
-    for (int i = 0; i < 3; i++) {
-        g_drawDigitPic[i] = nullptr;
+    if (g_zKanteraIcon != nullptr) {
+        JKR_DELETE(g_zKanteraIcon);
+        g_zKanteraIcon = nullptr;
     }
 
-    z_mobile_shutdown();
+    for (int i = 0; i < 3; i++) {
+        if (g_drawDigitPic[i] != nullptr) {
+            JKR_DELETE(g_drawDigitPic[i]);
+            g_drawDigitPic[i] = nullptr;
+        }
+    }
+
     reset_ring_z_prompt();
+
+    z_mobile_shutdown();
 
     g_cachedZMainPic = nullptr;
     g_lastLoadedZItem = 0xFF;

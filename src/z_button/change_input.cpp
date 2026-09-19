@@ -2,6 +2,7 @@
 
 #include "change_input.hpp"
 #include "z_mobile.hpp"
+#include "../quick_access/quick_access.hpp"
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadHook);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
@@ -24,12 +25,14 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    g_dpadLeftHeld = (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
-    g_dpadLeftTrig = (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
+    const bool quickAccessOpen = quick_access_is_active();
+    g_dpadLeftHeld = !quickAccessOpen && (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
+    g_dpadLeftTrig = !quickAccessOpen && (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
 
-    // Block D-Pad Left
-    if (g_dpadLeftHeld) pad.mButtonFlags &= ~PAD_BUTTON_LEFT;
-    if (g_dpadLeftTrig) pad.mPressedButtonFlags &= ~PAD_BUTTON_LEFT;
+    if (!quickAccessOpen) {
+        if (g_dpadLeftHeld) pad.mButtonFlags &= ~PAD_BUTTON_LEFT;
+        if (g_dpadLeftTrig) pad.mPressedButtonFlags &= ~PAD_BUTTON_LEFT;
+    }
 
     JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
     u32 rawTrig = rawGamePad ? rawGamePad->getTrigger() : 0;
@@ -37,6 +40,11 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
 
     bool physZHeld = (rawHold & PAD_TRIGGER_Z) != 0;
     bool physZTrig = (rawTrig & PAD_TRIGGER_Z) != 0;
+
+    if (quickAccessOpen) {
+        physZHeld = false;
+        physZTrig = false;
+    }
 
     g_physZHeld = physZHeld;
     g_physZTrig = physZTrig;
@@ -46,7 +54,7 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
 
     ensure_z_slot_initialized();
 
-    if (!isWolfPlayer() && g_zInventorySlot != 0xFF) {
+    if (!quickAccessOpen && !isWolfPlayer() && g_zInventorySlot != 0xFF) {
         u8 zItem = dComIfGs_getItem(g_zInventorySlot, false);
         if (zItem != 0xFF && zItem != 0x00 && zItem != dItemNo_NONE_e && zItem != 0x72) {
             daAlink_c* alink = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
@@ -66,12 +74,11 @@ void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
 
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
 
-    // mobile: release the iron-boots-on-Z debounce lock once Z is let go
     z_mobile_hb_tick(alink);
 
     if (alink != nullptr && !alink->checkWolf()) {
         u8 windowStatus = dMeter2Info_getWindowStatus();
-        if (windowStatus == 0) {
+        if (windowStatus == 0 && !quick_access_is_active()) {
             JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
             if (rawGamePad != nullptr) {
                 bool physZHeld = (rawGamePad->getButton() & PAD_TRIGGER_Z) != 0;

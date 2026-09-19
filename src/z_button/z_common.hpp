@@ -41,46 +41,36 @@
 #define Z_MOBILE_BUILD 0
 #endif
 
-// Configuration flags
 extern bool g_configCustomZButtonEnabled;
 extern bool g_configZButtonEnabled;
 
-extern const LogService* g_zLogSvc;
 extern ModContext* g_zModCtx;
 
-// D-Pad state tracking
 extern bool g_dpadLeftHeld;
 extern bool g_dpadLeftTrig;
 
-// Physical Z button status
 extern bool g_physZHeld;
 extern bool g_physZTrig;
 
-// Texture buffers for Z item rendering
 extern u8* g_zTexBufMain[2];
 extern u8* g_zTexBufShine[2];
 extern u8 g_zTexBufIdx;
 
-// Z button inventory tracking
 extern u8 g_zInventorySlot;
 extern u8 g_zMixSlot;
 extern u8 g_zPendingZSlot;
 extern void* g_ringArgs;
 extern bool g_inSetSelectItemIndex;
 
-// Z item visual cache
 extern J2DPicture* g_cachedZMainPic;
 extern f32 g_cachedZW;
 extern f32 g_cachedZH;
 extern u8 g_lastLoadedZItem;
 extern bool g_zHasSecondLayer;
 
-// UI elements
 extern dKantera_icon_c* g_zKanteraIcon;
 extern J2DPicture* g_drawDigitPic[3];
 
-// Utilities
-void log_z_info(const char* fmt, ...);
 void ensure_z_buffers();
 void ensure_z_slot_initialized();
 void sync_z_item_state();
@@ -104,7 +94,6 @@ u8 combine_select_item(u8 playItem, u8 mixSlot);
 u8 resolved_select_item(int index);
 void sync_play_select_item(int index);
 
-// Safe CPaneMgr wrappers
 inline bool pane_is_ready(CPaneMgr* p) { return p != nullptr && p->getPanePtr() != nullptr; }
 inline void safe_pane_hide(CPaneMgr* p) { if (pane_is_ready(p)) p->getPanePtr()->hide(); }
 inline void safe_pane_show(CPaneMgr* p) { if (pane_is_ready(p)) p->getPanePtr()->show(); }

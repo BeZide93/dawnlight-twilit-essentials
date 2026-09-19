@@ -13,11 +13,14 @@
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
 
+#include "../boss_bar/boss_bar.hpp"
+
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
 #include "d/d_bg_s_lin_chk.h"
+#include "d/d_camera.h"
 #include "d/actor/d_a_player.h"
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_actor_iter.h"
@@ -40,6 +43,7 @@ DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawHook);
 
 static std::unordered_map<fpc_ProcID, s16> g_maxHealthMap;
 static std::unordered_map<fpc_ProcID, f32> g_enemyAlphaMap;
+static std::unordered_map<fpc_ProcID, f32> g_enemyAnchorH;
 
 struct DamagePopup {
     fpc_ProcID enemyId;
@@ -56,27 +60,33 @@ struct DamagePopup {
 static std::unordered_map<fpc_ProcID, s16> s_lastHealthMap;
 static std::vector<DamagePopup> s_damagePopups;
 
-// Text drawing helper (restores GX 2D state)
-static void draw_text_ingame(const char* text, f32 x, f32 y, f32 charW, f32 charH, JUtility::TColor color, bool hasShadow = true) {
+static void draw_damage_number(const char* text, f32 x, f32 y, f32 charW, f32 charH,
+                               JUtility::TColor top, JUtility::TColor bottom, u8 alpha,
+                               f32 outlineScale = 1.0f) {
     JUTFont* font = mDoExt_getSubFont();
-    if (!font) {
-        font = mDoExt_getMesgFont();
-    }
-    if (font) {
-        font->setGX();
-        if (hasShadow) {
-            u8 shadowAlpha = static_cast<u8>(static_cast<f32>(color.a) * 0.5f);
-            font->setCharColor(JUtility::TColor(0, 0, 0, shadowAlpha));
-            font->drawString_scale(x + 1.0f, y + 1.0f, charW, charH, text, true);
-        }
-        font->setCharColor(color);
-        font->drawString_scale(x, y, charW, charH, text, true);
+    if (!font) font = mDoExt_getMesgFont();
+    if (!font) return;
 
-        J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
-        if (port) {
-            port->setup2D();
-        }
+    font->setGX();
+
+    const f32 c = 1.7f * outlineScale;
+    const f32 d = 1.2f * outlineScale;
+    const f32 kOff[8][2] = {
+        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
+        { d, d}, {d, -d}, {-d, d}, {-d, -d},
+    };
+    font->setCharColor(JUtility::TColor(0, 0, 0, alpha));
+    for (const auto& o : kOff) {
+        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
     }
+
+    top.a = alpha;
+    bottom.a = alpha;
+    font->setGradColor(top, bottom);
+    font->drawString_scale(x, y, charW, charH, text, true);
+
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port) port->setup2D();
 }
 
 static f32 get_text_width_ingame(const char* text, f32 charW) {
@@ -97,16 +107,23 @@ static f32 get_text_width_ingame(const char* text, f32 charW) {
 }
 
 static bool isSenseOnlyEnemy(s16 name) {
-    return (name == fpcNm_E_PO_e  || // Imp Poe / Ghost Poe
-            name == fpcNm_E_NZ_e  || // Ghoul Rat
-            name == fpcNm_E_HP_e  || // Shadow Beast
-            name == fpcNm_E_MS_e  || // Shadow Insect (Tears of Light)
-            name == fpcNm_E_GS_e  || // Shadow entity
-            name == fpcNm_E_YM_e  || // Twilit insect
-            name == fpcNm_E_YMB_e || // Twilit insect
-            name == fpcNm_E_YK_e  || // Shadow insect
-            name == fpcNm_E_YR_e  || // Shadow insect
-            name == fpcNm_E_YG_e);   // Shadow insect
+    return (name == fpcNm_E_PO_e  ||
+            name == fpcNm_E_NZ_e  ||
+            name == fpcNm_E_HP_e  ||
+            name == fpcNm_E_MS_e  ||
+            name == fpcNm_E_GS_e  ||
+            name == fpcNm_E_YM_e  ||
+            name == fpcNm_E_YMB_e ||
+            name == fpcNm_E_YK_e  ||
+            name == fpcNm_E_YR_e  ||
+            name == fpcNm_E_YG_e);
+}
+
+static bool isEnemyActive(fopAc_ac_c* actor) {
+    if (fopAcM_GetName(actor) == fpcNm_E_ZS_e) {
+        return !static_cast<fopEn_enemy_c*>(actor)->checkWolfNoLock();
+    }
+    return (actor->attention_info.flags & fopAc_AttnFlags_LOCK) != 0;
 }
 
 static bool isEnemyActor(fopAc_ac_c* actor, fopAc_ac_c* player) {
@@ -127,7 +144,6 @@ static bool isEnemyActor(fopAc_ac_c* actor, fopAc_ac_c* player) {
         return true;
     }
 
-    // Comprehensive enemy & boss ranges from fpc_name.h
     if ((name >= 0x0D2 && name <= 0x0D2) ||
         (name >= 0x0E4 && name <= 0x0F5) ||
         (name >= 0x1AF && name <= 0x220) ||
@@ -138,32 +154,48 @@ static bool isEnemyActor(fopAc_ac_c* actor, fopAc_ac_c* player) {
     return false;
 }
 
-static bool checkLineOfSight(fopAc_ac_c* player, fopAc_ac_c* enemy, const cXyz& targetPos) {
-    if (!player || !enemy) return false;
+static cXyz enemy_hp_anchor(fopAc_ac_c* a, fpc_ProcID id) {
+    cXyz anchor = a->current.pos;
 
-    cXyz playerEye = player->eyePos;
-    if (playerEye.abs2() < 0.001f) {
-        playerEye = player->current.pos;
-        playerEye.y += 120.0f;
+    f32 h = 0.0f;
+    if (a->attention_info.position.abs2() > 0.001f) {
+        h = a->attention_info.position.y - a->current.pos.y;
+    }
+    if (h < 20.0f || h > 150.0f) {
+        if (a->eyePos.abs2() > 0.001f) h = a->eyePos.y - a->current.pos.y;
+    }
+    if (h < 20.0f || h > 150.0f) h = 55.0f;
+
+    auto it = g_enemyAnchorH.find(id);
+    if (it != g_enemyAnchorH.end()) {
+        if (h > it->second) it->second = h;
+        h = it->second;
+    } else {
+        g_enemyAnchorH[id] = h;
     }
 
-    cXyz diff = targetPos - playerEye;
+    anchor.y = a->current.pos.y + h + 8.0f;
+    return anchor;
+}
+
+static bool checkLineOfSight(fopAc_ac_c* enemy, const cXyz& targetPos) {
+    if (!enemy) return false;
+
+    dCamera_c* cam = dCam_getBody();
+    if (!cam) return true;
+
+    cXyz start = cam->iEye();
+    cXyz end = targetPos;
+
+    cXyz diff = end - start;
     f32 dist = diff.abs();
+    if (dist < 1.0f) return true;
 
-    if (dist < 350.0f) {
-        return true;
-    }
+    end = start + diff * ((dist - 45.0f) / dist);
 
-    cXyz start = playerEye + diff * (60.0f / dist);
-    cXyz end = targetPos - diff * (60.0f / dist);
-
-    dBgS_LinChk linChk;
-    linChk.Set(&start, &end, player);
-
-    if (dComIfG_Bgsp().LineCross(&linChk)) {
+    if (cam->lineBGCheck(&start, &end, static_cast<u32>(0x40b7))) {
         return false;
     }
-
     return true;
 }
 
@@ -192,6 +224,11 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     }
 
     s16 name = fopAcM_GetName(actor);
+
+    if (g_configBossBarEnabled && boss_bar_is_boss_name(name)) {
+        return 0;
+    }
+
     bool isSenseActive = daPy_py_c::checkNowWolfPowerUp() || dComIfGs_wolfeye_effect_check();
     if (isSenseOnlyEnemy(name) && !isSenseActive) {
         return 0;
@@ -199,7 +236,6 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
 
     fpc_ProcID id = fopAcM_GetID(actor);
 
-    // Max HP tracking
     auto itMaxHp = g_maxHealthMap.find(id);
     if (itMaxHp == g_maxHealthMap.end() || actor->health > itMaxHp->second) {
         g_maxHealthMap[id] = actor->health;
@@ -211,22 +247,10 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
         return 0;
     }
 
-    // Anchor position
-    cXyz pos;
-    if (actor->eyePos.abs2() > 0.001f) {
-        pos = actor->eyePos;
-    } else if (actor->attention_info.position.abs2() > 0.001f) {
-        pos = actor->attention_info.position;
-    } else {
-        pos = actor->current.pos;
-        pos.y += 50.0f;
-    }
-
-    cXyz drawPos = pos;
-    drawPos.y += ctx->cursorOffsetY;
+    cXyz pos = enemy_hp_anchor(actor, id);
 
     Vec screenPos;
-    mDoLib_project(&drawPos, &screenPos);
+    mDoLib_project(&pos, &screenPos);
 
     f32 screenW = mDoGph_gInf_c::getWidthF();
     f32 screenH = mDoGph_gInf_c::getHeightF();
@@ -239,11 +263,13 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
 
     bool hasLos = false;
     if (onScreen) {
-        hasLos = checkLineOfSight(ctx->player, actor, pos);
+        hasLos = checkLineOfSight(actor, pos);
     }
 
+    bool enemyActive = isEnemyActive(actor);
+
     f32 targetAlpha = 0.0f;
-    if (onScreen && hasLos) {
+    if (enemyActive && onScreen && hasLos) {
         f32 dist = fopAcM_searchActorDistance(ctx->player, actor);
         const f32 maxDist = 4500.0f;
         const f32 fadeDist = 800.0f;
@@ -266,6 +292,7 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     currentAlpha += (targetAlpha - currentAlpha) * 0.2f;
     if (currentAlpha < 0.005f) {
         g_enemyAlphaMap.erase(id);
+        g_enemyAnchorH.erase(id);
         return 0;
     }
     g_enemyAlphaMap[id] = currentAlpha;
@@ -313,13 +340,15 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     if (g_configHpBarsShowNumbers) {
         char hpText[32];
         std::snprintf(hpText, sizeof(hpText), "%d/%d", actor->health, maxHp);
-        const f32 fontW = 5.2f;
-        const f32 fontH = 6.2f;
+        const f32 fontW = 7.0f;
+        const f32 fontH = 8.5f;
         f32 textWidth = get_text_width_ingame(hpText, fontW);
         f32 textX = drawX + (barWidth - textWidth) * 0.5f;
-        f32 textY = drawY - 4.5f;
+        f32 textY = drawY - 3.5f;
 
-        draw_text_ingame(hpText, textX, textY, fontW, fontH, JUtility::TColor(255, 245, 210, getAlpha(255)), true);
+        JUtility::TColor creamTop(255, 252, 240, 255);
+        JUtility::TColor creamBot(226, 208, 168, 255);
+        draw_damage_number(hpText, textX, textY, fontW, fontH, creamTop, creamBot, getAlpha(255), 0.6f);
     }
 
     return 0;
@@ -334,6 +363,10 @@ static void* trackEnemyDamageCallback(void* pActor, void*) {
         return nullptr;
     }
 
+    const bool suppressPopup =
+        (g_configBossBarEnabled && boss_bar_is_boss_name(fopAcM_GetName(actor))) ||
+        !isEnemyActive(actor);
+
     fpc_ProcID id = fopAcM_GetID(actor);
     s16 curHp = actor->health;
 
@@ -342,27 +375,23 @@ static void* trackEnemyDamageCallback(void* pActor, void*) {
         s16 prevHp = it->second;
         if (curHp < prevHp) {
             s16 damage = prevHp - curHp;
-            if (damage > 0) {
+            if (damage > 0 && !suppressPopup) {
                 DamagePopup popup;
                 popup.enemyId = id;
                 popup.damageAmount = damage;
 
-                popup.worldPos = actor->attention_info.position;
-                if (popup.worldPos.y == 0.0f) {
-                    popup.worldPos = actor->current.pos;
-                    popup.worldPos.y += 100.0f;
-                }
+                popup.worldPos = enemy_hp_anchor(actor, id);
 
-                f32 randX = (static_cast<f32>(std::rand() % 30) - 15.0f);
-                f32 randZ = (static_cast<f32>(std::rand() % 30) - 15.0f);
+                f32 randX = (static_cast<f32>(std::rand() % 20) - 10.0f);
+                f32 randZ = (static_cast<f32>(std::rand() % 20) - 10.0f);
                 popup.worldPos.x += randX;
                 popup.worldPos.z += randZ;
 
-                popup.velY = 3.5f;
+                popup.velY = 4.0f;
                 popup.velX = randX * 0.05f;
                 popup.velZ = randZ * 0.05f;
                 popup.currentFrame = 0;
-                popup.maxFrames = 45;
+                popup.maxFrames = 62;
                 popup.isCritical = (damage >= 60);
 
                 s_damagePopups.push_back(popup);
@@ -407,6 +436,8 @@ static void draw_damage_popups() {
         return;
     }
 
+    J2DFillBox(0.0f, 0.0f, 0.0f, 0.0f, JUtility::TColor(0, 0, 0, 0));
+
     for (const auto& popup : s_damagePopups) {
         cXyz pos = popup.worldPos;
         Vec screenPos;
@@ -414,16 +445,18 @@ static void draw_damage_popups() {
 
         if (screenPos.z < 400000.0f && screenPos.x > -50.0f && screenPos.x < 700.0f && screenPos.y > -50.0f && screenPos.y < 500.0f) {
             f32 alphaF = 1.0f;
-            if (popup.currentFrame > (popup.maxFrames - 15)) {
-                alphaF = static_cast<f32>(popup.maxFrames - popup.currentFrame) / 15.0f;
+            const int kFade = 18;
+            if (popup.currentFrame > (popup.maxFrames - kFade)) {
+                alphaF = static_cast<f32>(popup.maxFrames - popup.currentFrame) / static_cast<f32>(kFade);
             }
+            if (alphaF < 0.0f) alphaF = 0.0f;
 
             u8 alpha = static_cast<u8>(alphaF * 255.0f);
             if (alpha == 0) continue;
 
             f32 popScale = 1.0f;
-            if (popup.currentFrame < 5) {
-                popScale = 1.3f - (static_cast<f32>(popup.currentFrame) * 0.06f);
+            if (popup.currentFrame < 7) {
+                popScale = 1.55f - (static_cast<f32>(popup.currentFrame) * 0.08f);
             }
 
             char numText[32];
@@ -433,16 +466,19 @@ static void draw_damage_popups() {
                 std::snprintf(numText, sizeof(numText), "-%d", popup.damageAmount);
             }
 
-            f32 charW = (popup.isCritical ? 14.0f : 11.0f) * popScale;
-            f32 charH = (popup.isCritical ? 17.0f : 14.0f) * popScale;
+            f32 charW = (popup.isCritical ? 24.0f : 17.0f) * popScale;
+            f32 charH = (popup.isCritical ? 30.0f : 21.0f) * popScale;
 
             f32 textW = get_text_width_ingame(numText, charW);
             f32 drawX = screenPos.x - (textW * 0.5f);
-            f32 drawY = screenPos.y - (charH * 0.5f);
+            f32 drawY = screenPos.y - charH - 8.0f;
 
-            JUtility::TColor numColor(235, 45, 45, alpha);
+            JUtility::TColor top    = popup.isCritical ? JUtility::TColor(255, 236, 150, 255)
+                                                       : JUtility::TColor(255, 150, 120, 255);
+            JUtility::TColor bottom = popup.isCritical ? JUtility::TColor(255, 176,  40, 255)
+                                                       : JUtility::TColor(224,  32,  28, 255);
 
-            draw_text_ingame(numText, drawX, drawY, charW, charH, numColor);
+            draw_damage_number(numText, drawX, drawY, charW, charH, top, bottom, alpha);
         }
     }
 }
@@ -489,7 +525,7 @@ ModResult init_hp_bars(const HookService* hook_svc, ModError*) {
 void shutdown_hp_bars() {
     g_maxHealthMap.clear();
     g_enemyAlphaMap.clear();
+    g_enemyAnchorH.clear();
     s_lastHealthMap.clear();
     s_damagePopups.clear();
 }
-

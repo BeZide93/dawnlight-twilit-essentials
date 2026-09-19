@@ -1,0 +1,14 @@
+# Build directories
+build/
+build-*/
+out/
+
+# Managed Dusklight checkout (created by cmake/FetchDusklight.cmake)
+dusklight/
+collection-lib/
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store

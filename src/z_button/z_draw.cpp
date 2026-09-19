@@ -3,6 +3,7 @@
 #include "z_draw.hpp"
 #include "midna_location.hpp"
 #include "z_mobile.hpp"
+#include "../boss_rush/boss_rush_midna.hpp"
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawDrawHook);
 DEFINE_HOOK(&dMeter2Draw_c::drawButtonZ, DrawButtonZHook);
@@ -35,10 +36,6 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
         s_lastZbtn = zbtn;
         g_cachedZMainPic = nullptr;
         g_lastLoadedZItem = 0xFF;
-        g_drawDigitPic[0] = nullptr;
-        g_drawDigitPic[1] = nullptr;
-        g_drawDigitPic[2] = nullptr;
-        g_zKanteraIcon = nullptr;
     }
 
     update_midna_pane(draw);
@@ -50,9 +47,6 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
         return;
     }
 
-    // On builds without a symbol manifest the Z item pane lives inside `midona_n`
-    // instead, so dusklight's render-to-texture of that pane puts the item on the
-    // touch Z button; everywhere else it stays a child of `zbtn_n`.
     J2DPane* zItemHost = zbtn;
     if (J2DPane* mobileHost = z_mobile_sync_touch_z(draw)) {
         zItemHost = mobileHost;
@@ -192,8 +186,6 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
 
     safe_pane_trans(itemR, offsetX, offsetY);
 
-    // Grey out with X/Y while items are unusable (the engine has no dim branch
-    // for the Z slot, so the mod applies the same rule itself).
     const u8 zIconAlpha = z_item_icon_alpha();
     pane->show();
     pane->setAlpha(zIconAlpha);
@@ -242,8 +234,8 @@ void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW
     if (!defaultDigitTex) return;
 
     if (g_drawDigitPic[0] == nullptr) {
-        JKRExpHeap* heap2D = dComIfGp_getExpHeap2D();
-        JKRHeap* oldHeap = (heap2D != nullptr) ? mDoExt_setCurrentHeap(heap2D) : nullptr;
+        JKRHeap* rootHeap = JKRHeap::getRootHeap();
+        JKRHeap* oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
         for (int i = 0; i < 3; i++) {
             g_drawDigitPic[i] = JKR_NEW J2DPicture(defaultDigitTex);
         }
@@ -355,7 +347,6 @@ void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
         iconH = bounds.getHeight();
     }
 
-    // On mobile the digits must follow the real touch Z button, not the HUD pane.
     f32 touchX, touchY, touchW, touchH;
     if (z_mobile_touch_z_rect(touchX, touchY, touchW, touchH)) {
         baseX = touchX;
@@ -407,14 +398,21 @@ void draw_z_ammo_digits(dMeter2Draw_c* draw, f32 baseX, f32 baseY, f32 iconW, f3
 
     if (z_item_is_lantern(zItem)) {
         if (g_zKanteraIcon == nullptr) {
-            JKRExpHeap* heap2D = dComIfGp_getExpHeap2D();
-            JKRHeap* oldHeap = (heap2D != nullptr) ? mDoExt_setCurrentHeap(heap2D) : nullptr;
-            g_zKanteraIcon = JKR_NEW dKantera_icon_c();
-            if (oldHeap != nullptr) {
+            JKRArchive* arc2D = dComIfGp_getMain2DArchive();
+            JKRHeap* rootHeap = JKRHeap::getRootHeap();
+            if (arc2D != nullptr && rootHeap != nullptr) {
+                JKRHeap* oldHeap = mDoExt_setCurrentHeap(rootHeap);
+                g_zKanteraIcon = JKR_NEW dKantera_icon_c();
                 mDoExt_setCurrentHeap(oldHeap);
+
+                if (g_zKanteraIcon != nullptr && !pane_is_ready(g_zKanteraIcon->mpParent)) {
+                    JKR_DELETE(g_zKanteraIcon);
+                    g_zKanteraIcon = nullptr;
+                }
             }
         }
-        if (g_zKanteraIcon != nullptr) {
+        if (g_zKanteraIcon != nullptr && pane_is_ready(g_zKanteraIcon->mpParent) &&
+            pane_is_ready(g_zKanteraIcon->mpGauge)) {
             f32 kanteraX = baseX + iconW * 0.5f - 8.0f;
             f32 kanteraY = baseY + iconH - 4.0f;
             g_zKanteraIcon->setPos(kanteraX, kanteraY);
@@ -495,10 +493,19 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
         return HOOK_CONTINUE;
     }
 
+    if (is_boss_rush_ganon_fight()) {
+        dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
+        dComIfGs_onEventBit(dSv_event_flag_c::M_067);
+        dComIfGs_onEventBit(0x0540);
+        dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
+        dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
+        if (draw != nullptr) {
+            draw->field_0x724 = 1.0f;
+            draw->mButtonZAlpha = 1.0f;
+        }
+    }
+
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine()) {
-        // Feature off (or a native 3-slot engine owns the Z slot): stay fully
-        // passive. Previously this hid r_itm_p / r_itm_pp every frame, which
-        // blanked another Z-item mod's HUD panes (issue #7).
         return HOOK_CONTINUE;
     }
 
@@ -530,8 +537,6 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
                 return HOOK_CONTINUE;
             }
 
-            // Grey out with X/Y while items are unusable; the engine only dims
-            // i_no 0/1 in setButtonIconAlpha, never the Z slot.
             const u8 zBaseAlpha = z_button_base_alpha();
             const u8 zIconAlpha = z_item_icon_alpha();
 
@@ -578,8 +583,6 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
         }
     }
 
-    // Last thing before the original renders `midona_n` into the touch Z button's
-    // texture, so the item pane it captures is in place and fully opaque.
     if (z_mobile_sync_touch_z(draw) != nullptr) {
         update_z_item_texture(draw);
     }
@@ -636,9 +639,6 @@ HookAction on_set_button_icon_alpha_pre(ModContext*, void* args, void*, void*) {
 
     int i_no = mods::arg<int>(args, 1);
 
-    // Latch the X/Y "items usable" state while the engine is evaluating it; this
-    // is the only point in the frame where these flags are meaningful. The Z item
-    // greys out with them (see z_items_dimmed).
     if (i_no == 0) {
         g_zDimX = !dMeter2Info_isUseButton(METER2_USEBUTTON_X);
     } else if (i_no == 1) {
@@ -652,6 +652,31 @@ HookAction on_set_button_icon_alpha_pre(ModContext*, void* args, void*, void*) {
     g_meter2_info.onUseButton(0x800);
 
     return HOOK_CONTINUE;
+}
+
+static void on_set_button_icon_alpha_post(ModContext*, void* args, void*, void*) {
+    if (!args) return;
+    dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
+    const int i_no = mods::arg<int>(args, 1);
+    if (draw == nullptr || i_no < 0 || i_no > 1) return;
+    if (!daAlink_c::checkRoom()) return;
+
+    const f32 itemDim = g_drawHIO.mButtonXYItemDimAlpha / 255.0f;
+    const f32 baseDim = g_drawHIO.mButtonXYBaseDimAlpha / 255.0f;
+    const f32 textDim = g_drawHIO.field_0x42c / 255.0f;
+
+    const auto dimPane = [itemDim, baseDim](CPaneMgr* pane, bool isBase) {
+        if (pane == nullptr || pane->getPanePtr() == nullptr) return;
+        J2DPane* p = pane->getPanePtr();
+        p->setAlpha(static_cast<u8>(p->getAlpha() * (isBase ? baseDim : itemDim)));
+    };
+
+    dimPane(draw->mpItemXY[i_no], false);
+    dimPane(draw->mpLightXY[i_no], false);
+    dimPane(draw->mpButtonXY[i_no], true);
+    for (int t = 0; t < 5; t++) {
+        dimPane(draw->mpXYText[t][i_no], false);
+    }
 }
 
 HookAction on_change_texture_item_xy_pre(ModContext*, void* args, void*, void*) {

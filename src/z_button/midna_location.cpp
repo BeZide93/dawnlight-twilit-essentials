@@ -35,8 +35,6 @@ void update_midna_pane(dMeter2Draw_c* draw) {
     J2DPane* midnaPane = screen->search(MULTI_CHAR('midona_n'));
     if (midnaPane == nullptr) return;
 
-    // While the mobile fallback borrows `midona_n` to mirror the Z item onto the
-    // touch button, leave that pane alone
     if (z_mobile_wants_midona_host()) {
         if (g_configCustomZButtonEnabled) {
             J2DPane* z_btnl_hosted = screen->search(MULTI_CHAR('z_btnl'));
@@ -204,18 +202,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
     J2DPane* midonaPane = buttonScreen->search(MULTI_CHAR('midona'));
     J2DPicture* z_btnl = static_cast<J2DPicture*>(buttonScreen->search(MULTI_CHAR('z_btnl')));
 
-    if (z_btnl && !s_origZbtnlTex && z_btnl->getTexture(0)) {
-        s_origZbtnlTex = z_btnl->getTexture(0)->getTexInfo();
-    }
-
     if (zbtnPic) {
-        if (!s_hasOrigProps && zbtnPic->getTexture(0)) {
-            s_origZbtnTex = zbtnPic->getTexture(0)->getTexInfo();
-            s_origBlack = zbtnPic->getBlack();
-            s_origWhite = zbtnPic->getWhite();
-            s_hasOrigProps = true;
-        }
-
         if (g_configCustomZButtonEnabled && !isNativeZButtonEngine()) {
             ResTIMG* dpadTex = get_dpad_left_texture();
             if (dpadTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != dpadTex) {
@@ -223,7 +210,6 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
             }
             zbtnPic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 255, 255, 255));
 
-            // Hide only the letter "Z" components inside zbtn_n
             if (z_btnl) {
                 z_btnl->hide();
                 z_btnl->setAlpha(0);
@@ -238,11 +224,12 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
                 }
             }
         } else {
-            if (s_origZbtnTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != s_origZbtnTex) {
-                zbtnPic->changeTexture(s_origZbtnTex, 0);
+            const ResTIMG* origTex = get_orig_z_button_texture();
+            if (origTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != origTex) {
+                zbtnPic->changeTexture(origTex, 0);
             }
             if (s_hasOrigProps) {
-                zbtnPic->setBlackWhite(s_origBlack, s_origWhite);
+                zbtnPic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
             }
             if (z_btnl) {
                 z_btnl->show();

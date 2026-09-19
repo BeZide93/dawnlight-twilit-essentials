@@ -8,12 +8,10 @@ DEFINE_HOOK(&daAlink_c::checkItemAction, SheathedSpinItemActionHook);
 static bool is_spin_triggered(daAlink_c* link) {
     if (!link) return false;
 
-    // 1. Gamepad / Analog stick 360-degree rotation + sword button
     if (link->checkCutTurnInputTrigger()) {
         return true;
     }
 
-    // 2. Dusklight Spin-Flag (Touch Gesture / Motion / Shake)
     if (link->checkResetFlg0(daAlink_c::RFLG0_UNK_40)) {
         return true;
     }
@@ -34,7 +32,6 @@ static HookAction on_check_item_action_pre(ModContext*, void* args, void* retval
         return HOOK_CONTINUE;
     }
 
-    // Wolf Link
     if (link->checkWolf()) {
         if (is_spin_triggered(link)) {
             BOOL result = link->procWolfRollAttackInit(2, 0);
@@ -44,13 +41,15 @@ static HookAction on_check_item_action_pre(ModContext*, void* args, void* retval
         return HOOK_CONTINUE;
     }
 
-    // Human Link (Sheathed sword state)
     if (link->mEquipItem != 0x103 || link->checkEquipAnime()) {
         if (dComIfGs_getSelectEquipSword() != dItemNo_NONE_e &&
             !link->checkNotBattleStage() &&
             !link->checkCanoeRide())
         {
             if (is_spin_triggered(link)) {
+                if (link->mEquipItem != 0x103) {
+                    link->deleteEquipItem(FALSE, TRUE);
+                }
                 link->swordEquip(TRUE);
                 link->setSwordModel();
 
@@ -79,5 +78,3 @@ ModResult init_sheathed_spin(const HookService* hook_svc) {
 
 void update_sheathed_spin(const LogService*, ModContext*) {
 }
-
-
