@@ -96,6 +96,12 @@ A collection of quality-of-life improvements, combat tweaks, and visual enhancem
   <img src="images/boss_rush.png" alt="Boss Rush" width="60%" />
 </p>
 
+When used alongside Dawnlight, Essentials only shows its Boss Rush gallery after
+entering its own Boss Rush from the menu or portal. Loading Dawnlight's hub or a
+normal boss room does not activate Essentials' Boss Rush. Enabling or reloading
+Essentials inside a boss room also requires an explicit entry through its menu
+or portal.
+
 ### Quality of Life
 * **Skip Cutscenes** — skips all skippable cutscenes automatically.
 * **Fast-Forward Cutscenes** — plays cutscenes and boss intros that cannot be skipped at 4x speed.
