@@ -1639,12 +1639,18 @@ static UiMenuTabHandle s_menuTabTwilitEssentials = 0;
 static const char* const kDiscordChannelUrl =
     "https://discord.com/channels/1491394561266679922/1534172217846403243";
 
+#ifdef _WIN32
 extern "C" __declspec(dllimport) void* __stdcall ShellExecuteA(void* hwnd, const char* op,
     const char* file, const char* params, const char* dir, int show);
 #pragma comment(lib, "shell32.lib")
+#endif
 
 static void on_open_discord_channel(ModContext*, void*) {
+#ifdef _WIN32
     ShellExecuteA(nullptr, "open", kDiscordChannelUrl, nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+#else
+    // Opening external URLs is only wired up for Windows builds.
+#endif
 }
 
 static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, ModError*) {

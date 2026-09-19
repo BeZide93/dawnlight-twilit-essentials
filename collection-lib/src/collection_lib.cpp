@@ -326,7 +326,7 @@ void collectionlib_request_reload() {
 // with a generous 32 MB heap carved from rootHeap (~230 MB free).
 // ---------------------------------------------------------------------------
 
-static void ensure_system_heap_capacity() {
+static void ensure_collection_heap_capacity() {
     static bool s_done = false;
     if (s_done) return;
 
@@ -383,7 +383,7 @@ static void cl_item_b_texture_post(ModContext*, void* args, void*, void*) {
 
 ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_svc,
                              const SaveService* save_svc, ModContext* mod_ctx, ModError*) {
-    ensure_system_heap_capacity();
+    ensure_collection_heap_capacity();
     g_modCtx = mod_ctx;
     g_saveSvc = save_svc;
     g_logSvc = log_svc;
