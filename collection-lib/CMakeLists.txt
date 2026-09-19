@@ -21,6 +21,8 @@ endif ()
 add_library(collection_lib STATIC
         src/collection_lib.cpp
 )
+# This static library is linked into the mod's shared module on Linux/Android.
+set_target_properties(collection_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(collection_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # dusklight_mod_api: SDK service headers. dusklight_game_abi_headers: the game's

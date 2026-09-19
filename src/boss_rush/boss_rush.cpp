@@ -1156,7 +1156,7 @@ static void on_boss_rush_draw_post(ModContext* ctx, void* args, void* retval, vo
 }
 
 static void on_boss_rush_draw_post_impl(ModContext*, void*, void*, void*) {
-    if (!kBossGalleryModelsEnabled) {
+    if (!kBossGalleryModelsEnabled || !is_boss_rush_active()) {
         return;
     }
 
@@ -3066,7 +3066,7 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     boss_rush_timer_update();
 
 
-    if (link == nullptr || !is_in_chamber_room()) {
+    if (link == nullptr || !is_in_boss_rush_chamber()) {
         if (any_ring_flames_lit()) clear_ring_flames();
         s_healTimer = 0;
         return;
@@ -3110,8 +3110,8 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
         return;
     }
 
-    const bool inChamberForText = is_in_boss_rush_chamber() ||
-        (s_pendingFightIndex != -1 && is_in_chamber_room());
+    const bool inChamberForText = is_boss_rush_active() &&
+        (is_in_boss_rush_chamber() || (s_pendingFightIndex != -1 && is_in_chamber_room()));
     if (!kBossGalleryTextsEnabled || !inChamberForText || s_returningToChamber) {
         return;
     }
@@ -3313,7 +3313,8 @@ bool boss_rush_is_fight_engaged() {
 }
 
 bool is_in_boss_rush_chamber() {
-    if (s_activeFightIndex != -1 || s_returningToChamber) {
+    // The vanilla Darknut fight and other mods also use this room.
+    if (!is_boss_rush_active() || s_activeFightIndex != -1 || s_returningToChamber) {
         return false;
     }
     return is_in_chamber_room();
@@ -4491,72 +4492,9 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
     init_boss_rush_collection(hook_svc, log_svc, mod_ctx);
     init_ganondorf_cape(hook_svc, log_svc, mod_ctx);
 
-    if (is_in_chamber_room()) {
-        s_bossRushModeActive = true;
-        s_needsChamberSpawn = true;
-        s_chamberSpawnFrames = 0;
-        s_chamberCamArmFrames = 30;
-        cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
-        dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
-        dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
-        daAlink_c* link = daAlink_getAlinkActorClass();
-        if (link != nullptr) {
-            link->current.pos = spawnPos;
-            link->old.pos = spawnPos;
-            link->shape_angle.set(0, cM_deg2s(180.0f), 0);
-            link->current.angle.set(0, cM_deg2s(180.0f), 0);
-            link->speedF = 0.0f;
-            link->speed.set(0.0f, 0.0f, 0.0f);
-
-            camera_process_class* cam = boss_rush_get_active_player_camera();
-            if (cam != nullptr) {
-                static const s16 kChamberAngle = cM_deg2s(180.0f);
-                const f32 fx = cM_ssin(kChamberAngle), fz = cM_scos(kChamberAngle);
-                cXyz center(spawnPos.x + fx * 200.0f, spawnPos.y + 100.0f, spawnPos.z + fz * 200.0f);
-                cXyz eye(spawnPos.x - fx * 420.0f, spawnPos.y + 140.0f, spawnPos.z - fz * 420.0f);
-                cam->mCamera.Reset(center, eye);
-                cam->mCamera.Start();
-                cam->mCamera.SetTrimSize(0);
-                fopCamM_SetAngleY(cam, kChamberAngle);
-            }
-        }
-        if (dComIfGs_getLife() == 0) {
-            dComIfGs_setLife(dComIfGs_getMaxLife());
-        }
-    } else if (const char* curStage = dComIfGp_getStartStageName()) {
-        const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
-        for (size_t i = 0; i < g_bossGalleryCount; ++i) {
-            const BossGalleryEntry& boss = g_bossGalleryTable[i];
-            if (std::strcmp(curStage, boss.stage) != 0) {
-                continue;
-            }
-            if (!boss_rush_room_matches_target(boss, curRoom)) {
-                continue;
-            }
-            if (std::strcmp(curStage, "D_MN09B") == 0) {
-                const bool isGround = g_dComIfG_gameInfo.info.getDan().isSwitch(1);
-                if (isGround && std::strcmp(boss.displayName, "Horseback Ganon") == 0) {
-                    continue;
-                }
-                if (!isGround && std::strcmp(boss.displayName, "Ganondorf") == 0) {
-                    continue;
-                }
-            }
-            if (std::strcmp(curStage, "D_MN09A") == 0) {
-                const s32 curLayer = dComIfG_play_c::getLayerNo(0);
-                if (curLayer == 1 && std::strcmp(boss.displayName, "Puppet Zelda") == 0) {
-                    continue;
-                }
-                if (curLayer == 0 && std::strcmp(boss.displayName, "Beast Ganon") == 0) {
-                    continue;
-                }
-            }
-            s_bossRushModeActive = true;
-            s_activeFightIndex = static_cast<int>(i);
-            break;
-        }
-    }
-
+    // Only an explicit Essentials menu/portal entry owns a Boss Rush session.
+    // A stage/room match is not evidence of ownership, including on mod reload:
+    // adopting it here also takes over vanilla fights and Dawnlight's hub.
 
     return MOD_OK;
 }
