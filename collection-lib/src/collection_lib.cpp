@@ -19,22 +19,18 @@
 #include "collection_equip.cpp"
 
 // ---------------------------------------------------------------------------
-// Services (the globals themselves live in collection_common.cpp)
+// Services
 // ---------------------------------------------------------------------------
 
 // The library loads icons (.bti) and models (.arc) from the OWNING MOD's
-// res/ directory, so it imports its own ResourceService instance.
-IMPORT_OPTIONAL_SERVICE(ResourceService, cl_resource_svc);
+// res/ directory. The owning mod already imports the ResourceService for
+// itself - reuse that import instead of declaring a second one with the
+// same service_id (the package validator rejects duplicate imports).
+extern const ResourceService* svc_resource;
 
 const ResourceService* cl_get_resource_service() {
-    return cl_resource_svc;
+    return svc_resource;
 }
-
-// Keep the import record alive against linker dead-stripping (consumers that
-// do not set /OPT:NOREF would otherwise lose the service import).
-extern "C" MOD_EXPORT const void* const g_keep_collection_lib_records[] = {
-    &mod_meta_import_cl_resource_svc,
-};
 
 // ---------------------------------------------------------------------------
 // Consumer slot registration
