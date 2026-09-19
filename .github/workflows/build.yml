@@ -56,11 +56,14 @@ jobs:
         shell: bash
         run: echo "version=$(sed -n 's/.*set(DUSKLIGHT_VERSION "\([^"]*\)").*/\1/p' CMakeLists.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Dusklight sources
-        uses: actions/cache@v6
+      - name: Checkout Dusklight sources
+        uses: actions/checkout@v7
         with:
+          repository: TwilitRealm/dusklight
+          ref: ${{steps.dusklight.outputs.version}}
           path: dusklight
-          key: dusklight-${{runner.os}}-${{steps.dusklight.outputs.version}}
+          # extern/aurora carries the WebGPU headers the SDK needs for FEATURES webgpu
+          submodules: recursive
 
       - name: Enable Visual Studio environment
         if: matrix.msvc_arch
