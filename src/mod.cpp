@@ -557,9 +557,12 @@ static bool is_boss_rush_start_disabled(ModContext*, void*) {
     return is_boss_rush_active();
 }
 
+static bool is_boss_rush_timer_toggle_disabled(ModContext*, void*) {
+    return is_boss_rush_active() && boss_rush_current_target_index() >= 0;
+}
+
 static bool is_boss_rush_fight_toggle_disabled(ModContext*, void*) {
-    return !g_configBossRushTimer ||
-           (is_boss_rush_active() && boss_rush_current_target_index() >= 0);
+    return !g_configBossRushTimer || is_boss_rush_timer_toggle_disabled(nullptr, nullptr);
 }
 
 static void on_horse_cam_no_recenter_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1581,7 +1584,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
 
     ui_add_toggle(left, "Boss Rush timer", s_varBossRushTimer,
         "<p>Displays a fight timer on screen and tracks personal best times for each boss.</p>",
-        is_boss_rush_fight_toggle_disabled);
+        is_boss_rush_timer_toggle_disabled);
     ui_add_toggle(left, "Show best timer below timer", s_varBossRushShowBestTimer,
         "<p>Shows your personal best below the timer.</p>",
         is_boss_rush_fight_toggle_disabled);
