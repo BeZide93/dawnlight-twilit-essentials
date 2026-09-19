@@ -6,7 +6,7 @@ project(twilit_essentials CXX)
 # struct layouts (CPaneMgr, dSelect_cursor_c, ...), and a mod built against a
 # newer header set corrupts memory on older game builds.
 if (NOT DUSKLIGHT_VERSION)
-    set(DUSKLIGHT_VERSION "d281c34a65568ee7be2319985f3a290c0ef65abc")
+    set(DUSKLIGHT_VERSION "8b70a4477b8a5331d8bda1bfd6b095c65880c856")
 endif ()
 
 # Fetches the Dusklight sources into ./dusklight and provides DUSKLIGHT_DIR.
