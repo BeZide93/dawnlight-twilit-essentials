@@ -6,7 +6,6 @@
 #include "general/sprint_fov_kick.hpp"
 #include "general/horse_cam.hpp"
 
-#include "general/sound_test.hpp"
 #include "general/human_warp.hpp"
 #include "general/faster_midna_cancel.hpp"
 #include "general/faster_transitions.hpp"
@@ -2361,7 +2360,6 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     if (s_collectionMenuInitialized) update_collection_menu(svc_log, mod_ctx);
     if (s_collectionMenuShopInitialized) update_collection_menu_shop(svc_log, mod_ctx);
     if (s_collectionMenuChestInitialized) update_collection_menu_chest(svc_log, mod_ctx);
-    sound_test_update();
     return MOD_OK;
 }
 

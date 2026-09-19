@@ -39,7 +39,6 @@ add_mod(twilit_essentials
             src/general/fast_forward_cutscenes.cpp
             src/general/dominion_sword.cpp
             src/general/horse_cam.cpp
-            src/general/sound_test.cpp
             src/general/always.cpp
             src/general/human_warp.cpp
             src/general/faster_midna_cancel.cpp
