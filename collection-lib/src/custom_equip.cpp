@@ -36,6 +36,8 @@ DEFINE_HOOK(&daAlink_c::basicModelDraw, CeBasicModelDrawHook); // doll shield/sw
 DEFINE_HOOK(&daAlink_c::setWaterDropColor, CeSetWaterDropColorHook); // bounds-checked water drop color
 DEFINE_HOOK(&dDlst_shadowControl_c::addReal, CeShadowAddRealHook); // redirect real-time shadow to custom models
 DEFINE_HOOK(&daAlink_c::shadowDraw, CeAlinkShadowDrawHook);       // swap vanilla equip out of Link's real shadow
+DEFINE_HOOK(&dMenu_Collect3D_c::_create, CeCollect3DCreateHook);  // collection doll session start
+DEFINE_HOOK(&dMenu_Collect3D_c::_delete, CeCollect3DDeleteHook);  // collection doll session end
 
 namespace {
 
@@ -968,6 +970,12 @@ static void save_custom_equip_state(CustomEquipKind kind, u8 item) {
 
 static bool s_restoredFromSave = false;
 
+// Previous-frame custom_equip_active() snapshot for the state-loss self-heal in
+// custom_equip_update() (see the s_healPending block there).
+static bool s_prevEquipWasActive[3] = { false, false, false };
+static bool s_healPending = false;
+static int s_healAttemptsLeft = 0;
+
 // Frames since this mod generation's custom_equip_update() first ran (i.e.
 // since a fresh init/reload) - NOT reset by anything else, so it only ever
 // matters in the brief window right after a reload. natives.cpp's own
@@ -1457,6 +1465,11 @@ static void on_custom_equip_new_save(ModContext*, uint32_t, void*) {
     save_custom_equip_state(CE_TUNIC, 0);
 }
 
+// Defined further down, next to the doll-swap implementation (they need
+// retarget_face_material_anims, which itself sits below this point).
+HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*);
+HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*);
+
 void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* save_svc) {
     if (save_svc != nullptr && g_modCtx != nullptr) {
         save_svc->observe_saves(g_modCtx, on_custom_equip_new_save, on_custom_equip_save_loaded, nullptr, nullptr, nullptr);
@@ -1471,6 +1484,8 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     mods::hook::add_pre<CeAlinkShadowDrawHook>(hook_svc, on_alink_shadow_draw_pre);
     mods::hook::add_pre<CePadSetColorHook>(hook_svc, on_pad_set_color_pre);
     mods::hook::add_post<CeAlinkShadowDrawHook>(hook_svc, on_alink_shadow_draw_post);
+    mods::hook::add_pre<CeCollect3DCreateHook>(hook_svc, on_collect_3d_create_pre);
+    mods::hook::add_pre<CeCollect3DDeleteHook>(hook_svc, on_collect_3d_delete_pre);
 }
 
 // Runs once per stage change.
@@ -1545,15 +1560,14 @@ static void safe_search_update_material_id(AnmT* anm, J3DModelData* faceData) {
 // whichever face model is CURRENTLY assigned (a->mpLinkFaceModel) - vanilla or
 // custom - by material name, so entryTexMtxAnimator()/getMaterialAnm() index
 // this model's own material table instead of the one they were originally
-// built against. Called exactly once per swap, AFTER changeModelDataDirect(1)
-// has (re)built mpFaceBtp/mpFaceBtk for the newly-assigned model - matching the
-// single-call-site shape this had before an extra pre-changeModelDataDirect call
-// was added for the Wolf->Human transform crash; that second call site turned
-// out to be what "Ordon Hero" (a tunic with no dedicated al_face.btp/btk of its
-// own) was crashing in, so it's gone again - safe_search_update_material_id's
-// own guards are what should carry both cases now. Factored out of what used to
-// be 4 near-identical copies so the guards below only need maintaining in one
-// place.
+// built against. Called in EVERY swap path (custom swap, unequip restore,
+// shutdown, menu-doll swap-out) IMMEDIATELY BEFORE changeModelDataDirect(1),
+// because that is the call which enters the animators - entering with stale
+// IDs was the 2026-09-19 Wolf->Human transform crash. safe_search_update_
+// material_id's whole-object validation is what makes the pre-entry call safe
+// for tunics without dedicated face anims ("Ordon Hero"). Factored out of what
+// used to be near-identical copies so the guards below only need maintaining
+// in one place.
 static void retarget_face_material_anims(daAlink_c* a) {
     if (a == nullptr || a->mpLinkFaceModel == nullptr) {
         return;
@@ -1562,7 +1576,7 @@ static void retarget_face_material_anims(daAlink_c* a) {
     if (faceData == nullptr || faceData->getMaterialNum() <= 0) {
         return;
     }
-    if (faceData->getMaterialNum() > 3) {
+    if (a->field_0x2180[0] != nullptr && a->field_0x2180[1] != nullptr && faceData->getMaterialNum() > 3) {
         faceData->getMaterialNodePointer(2)->setMaterialAnm(a->field_0x2180[0]);
         faceData->getMaterialNodePointer(3)->setMaterialAnm(a->field_0x2180[1]);
     }
@@ -1572,6 +1586,96 @@ static void retarget_face_material_anims(daAlink_c* a) {
     if (a->mpFaceBtk != nullptr) {
         safe_search_update_material_id(a->mpFaceBtk, faceData);
     }
+}
+
+// ---- Collection-screen doll safety -----------------------------------------
+// The game's status-window code (dMenu_Collect3D_c) drives whatever models are
+// currently on the actor with vanilla-only assumptions: initStatusWindow()
+// enters the menu-heap wait-BCK and the menu's own FA btp/btk onto the body and
+// face model data, walks hardcoded vanilla joint loops, and lets
+// statusWindowExecute() calc the body model from scratch - all written for the
+// resource-owned vanilla Link skeleton. With a custom tunic those are
+// independently loaded BMDs, and a menu session can leave menu-heap references
+// inside their model data (2026-09-19: OSPanic in J3DSys::setModelDrawMtx on
+// the next world draw, and a garbage read in J3DMtxBuffer::calcWeightEnvelopeMtx
+// the moment dMenu_Collect3D_c::_create -> statusWindowExecute calcs the custom
+// body). So: when the doll session starts, put the vanilla models back on the
+// actor; while it lasts, custom_equip_apply() is gated off (s_dollSwapActive);
+// when it ends, the flag clears and the regular per-frame poll re-applies the
+// custom tunic through the normal, fully tested swap path. Outside the menu
+// nothing changes - the world always shows the custom gear; only the menu's
+// Link doll shows vanilla equipment.
+static bool s_dollSwapActive = false;
+
+// Watchdog: if the doll session ended without its _delete hook firing (menu
+// torn down by some other path), drop the gate as soon as the collection
+// screen is gone so the poll can re-apply the custom tunic.
+static void doll_session_watchdog() {
+    if (s_dollSwapActive && s_currentCollect2D == nullptr) {
+        s_dollSwapActive = false;
+    }
+}
+
+static void custom_equip_menu_doll_begin() {
+    s_dollSwapActive = false;
+    daAlink_c* a = player();
+    if (a == nullptr || is_wolf(a)) return;
+    Entry* tunicEntry = active_entry(CE_TUNIC);
+    if (tunicEntry == nullptr || tunicEntry->model == nullptr) return;
+    // Only meaningful when the custom tunic is actually on the actor and the
+    // vanilla set it replaced is still captured.
+    if (a->mpLinkModel != tunicEntry->model) return;
+    if (s_originalLinkModel == nullptr || s_originalLinkModel == tunicEntry->model) return;
+    if (a->mpLinkModel == nullptr || a->mpLinkHatModel == nullptr ||
+        a->mpLinkFaceModel == nullptr || a->mpLinkHandModel == nullptr) {
+        return;
+    }
+    if (s_originalLinkModel == nullptr || s_originalHatModel == nullptr ||
+        s_originalFaceModel == nullptr || s_originalHandModel == nullptr) {
+        return;
+    }
+
+    a->mpLinkModel     = s_originalLinkModel;
+    a->mpLinkHatModel  = s_originalHatModel;
+    a->mpLinkFaceModel = s_originalFaceModel;
+    a->mpLinkHandModel = s_originalHandModel;
+    a->field_0x06d0    = s_origShape_06d0;
+    a->field_0x06d4    = s_origShape_06d4;
+    a->field_0x06d8    = s_origShape_06d8;
+    a->field_0x06dc    = s_origShape_06dc;
+    a->field_0x06e0    = s_origShape_06e0;
+    a->field_0x06e8    = s_origShape_06e8;
+    a->field_0x06ec    = s_origShape_06ec;
+    a->field_0x06f0    = s_origShape_06f0;
+    a->mpLinkModel->setUserArea((uintptr_t)a);
+    if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
+
+    retarget_face_material_anims(a);
+    a->changeModelDataDirect(1);
+
+    a->mEyeHL1.remove();
+    if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
+        a->mEyeHL1.entry(a->mpLinkFaceModel->getModelData(), "highlight02");
+    }
+
+    s_dollSwapActive = true;
+}
+
+static void custom_equip_menu_doll_end() {
+    // Re-applying the custom tunic is left to the regular per-frame poll
+    // (custom_equip_apply's swap branch), which owns the position watchdog and
+    // all the edge cases - this only re-opens the gate.
+    s_dollSwapActive = false;
+}
+
+HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*) {
+    if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
+    return HOOK_CONTINUE;
+}
+
+HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*) {
+    custom_equip_menu_doll_end();
+    return HOOK_CONTINUE;
 }
 
 static void custom_equip_apply(daAlink_c* a, bool duringRebuild = false);
@@ -1586,7 +1690,45 @@ void custom_equip_update() {
     if (is_title_or_menu()) {
         s_activeId[0] = s_activeId[1] = s_activeId[2] = -1;
         s_restoredFromSave = false;
+        s_prevEquipWasActive[0] = s_prevEquipWasActive[1] = s_prevEquipWasActive[2] = false;
+        s_dollSwapActive = false;
         return;
+    }
+
+    doll_session_watchdog();
+
+    // Self-heal dropped equip state. The save blob is the durable record of what
+    // the player wants equipped (custom_equip_activate() writes the item id,
+    // custom_equip_clear() writes 0 on every intentional unequip), so a blob
+    // entry while s_activeId says "nothing equipped" means the runtime state was
+    // lost somewhere OUTSIDE the equip flow (observed 2026-09-19: equip the
+    // Reinforced Shield -> transform Wolf -> transform back -> open the
+    // collection menu -> the Hylian ring shows as the equipped one -> closing
+    // the menu leaves no shield on the back). Whatever the clearer is, restore
+    // from the blob as soon as gameplay allows (this runs during pause menus too
+    // - mod_update doesn't stop for them). Unequips never fight this: they write
+    // 0 to the blob first, so the restore sees nothing wanted. The pending latch
+    // retries for a few frames when is_gameplay_ready() is still false on the
+    // frame the loss happened, and also caps the damage when the blob names an
+    // entry that no longer exists: one restore attempt, then give up instead of
+    // retry-spamming forever.
+    for (int k = 0; k < 3; k++) {
+        if (s_prevEquipWasActive[k] && s_activeId[k] < 0) {
+            s_healPending = true;
+            s_healAttemptsLeft = 10;
+        }
+    }
+    s_prevEquipWasActive[0] = s_activeId[0] >= 0;
+    s_prevEquipWasActive[1] = s_activeId[1] >= 0;
+    s_prevEquipWasActive[2] = s_activeId[2] >= 0;
+
+    if (s_healPending) {
+        if (is_gameplay_ready()) {
+            custom_equip_restore_from_save();
+            s_healPending = false;
+        } else if (--s_healAttemptsLeft <= 0) {
+            s_healPending = false;
+        }
     }
 
     // Models/archives live on the game heap, which is torn down on an area load -
@@ -1737,7 +1879,12 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
             dComIfGs_setSelectEquipClothes(tunicEntry->def.baseClothes);
         }
     }
-    if (a && (duringRebuild || !is_wolf(a))) {
+    // While the collection doll session is active (see s_dollSwapActive), the
+    // actor carries the vanilla models on purpose - don't swap the custom set
+    // back in, not even on duringRebuild (a mid-menu changeLink rebuilds the
+    // vanilla set and must leave it vanilla). The poll re-applies right after
+    // the menu closes.
+    if (a && !s_dollSwapActive && (duringRebuild || !is_wolf(a))) {
         if (tunicEntry && tunicEntry->model) {
             if (a->mpLinkModel != tunicEntry->model) {
                 // 2026-09-05: three straight fix attempts around face-animator
@@ -1817,6 +1964,22 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                 if (tunicEntry->handModel != nullptr) {
                     a->mpLinkHandModel = tunicEntry->handModel;
                 }
+
+                // 4b. Re-map mpFaceBtp/mpFaceBtk onto the face model we JUST
+                // assigned, BEFORE changeModelDataDirect(1) enters them. Their
+                // mUpdateMaterialID arrays still hold indices resolved against
+                // whichever face data was current when they were last entered -
+                // on the Wolf->Human transform that is the wolf model's material
+                // table (~40 materials) - and entryTexMtxAnimator() feeds those
+                // raw IDs to getMaterialNodePointer(), so any index past the
+                // custom face's material count is a wild-pointer read. That was
+                // the 2026-09-19 crash (J3DMaterial::getMaterialAnm via
+                // changeLink POST -> changeModelDataDirect) with "Ordon Hero"
+                // equipped. This used to exist as a pre-changeModelDataDirect
+                // call and was reverted when "Ordon Hero" (no al_face.btp/btk of
+                // its own) crashed inside it - safe_search_update_material_id's
+                // whole-object validation now carries that case.
+                retarget_face_material_anims(a);
 
                 // 5. Connect callbacks and animators
                 a->changeModelDataDirect(1);
@@ -1927,10 +2090,15 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
 
                 a->mpLinkModel->setUserArea((uintptr_t)a);
                 if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
+                // Re-map the face animators onto the restored vanilla face
+                // BEFORE the entry pass - same stale-ID hazard as the
+                // custom-swap path above, in reverse: they were last resolved
+                // against the custom face, and the vanilla face's material
+                // count is what entryTexMtxAnimator() must index within.
+                retarget_face_material_anims(a);
                 a->changeModelDataDirect(1);
 
                 a->mEyeHL1.remove();
-                retarget_face_material_anims(a);
                 if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
                     a->mEyeHL1.entry(a->mpLinkFaceModel->getModelData(), "highlight02");
                 }
@@ -2035,10 +2203,12 @@ void custom_equip_shutdown() {
             a->field_0x06f0    = s_origShape_06f0;
             a->mpLinkModel->setUserArea((uintptr_t)a);
             if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
+            // Same ordering as the unequip-restore path above: re-map the face
+            // animators onto the vanilla face BEFORE entering them.
+            retarget_face_material_anims(a);
             a->changeModelDataDirect(1);
 
             a->mEyeHL1.remove();
-            retarget_face_material_anims(a);
             if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
                 a->mEyeHL1.entry(a->mpLinkFaceModel->getModelData(), "highlight02");
             }

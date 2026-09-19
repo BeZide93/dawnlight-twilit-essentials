@@ -15,7 +15,9 @@ mDoExt_bckAnm* loadBckFromArcIdx(const char* arcName, int resIndex, int playMode
 J3DModel* loadBmdFromArcIdx(const char* arcName, int resIndex, cXyz scale = cXyz(1.0f, 1.0f, 1.0f));
 
 mDoExt_brkAnm* loadBrkFromArc(const char* arcName, const char* brkName, J3DModelData* modelData, int playMode = 2, f32 rate = 1.0f);
+mDoExt_brkAnm* loadBrkFromArcIdx(const char* arcName, int resIndex, J3DModelData* modelData, int playMode = 2, f32 rate = 1.0f);
 mDoExt_btkAnm* loadBtkFromArc(const char* arcName, const char* btkName, J3DModelData* modelData, int playMode = 2, f32 rate = 1.0f);
+mDoExt_btkAnm* loadBtkFromArcIdx(const char* arcName, int resIndex, J3DModelData* modelData, int playMode = 2, f32 rate = 1.0f);
 void renderModelAt(J3DModel* model, const cXyz& pos, const csXyz& angle = csXyz(0, 0, 0), const cXyz& scale = cXyz(1.0f, 1.0f, 1.0f), mDoExt_bckAnm* bck = nullptr);
 
 void renderModelAtMtx(J3DModel* model, MtxP mtx, mDoExt_bckAnm* bck = nullptr);

@@ -86,6 +86,7 @@ constexpr s16 kBossRushChamberPoint = -1;
 constexpr s8  kBossRushChamberLayer = 0;
 constexpr f32 kChamberCircleRadius = 1350.0f;
 constexpr f32 kBossChamberFloorY = -400.0f;
+constexpr f32 kBossChamberSpawnZ = 336.03f;
 
 constexpr f32 kBossInteractRadius = 250.0f;
 

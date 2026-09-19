@@ -81,7 +81,6 @@ add_mod(twilit_essentials
             src/stamina/sprint_wolf.cpp
             src/stamina/sprint_swim.cpp
             src/collection_menu/collection_menu.cpp
-            src/collection_menu/collection_menu_shop.cpp
             src/collection_menu/collection_menu_shield.cpp
             src/dusklight_compat.cpp
         MOD_JSON mod.json

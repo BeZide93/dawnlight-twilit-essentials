@@ -361,6 +361,36 @@ static void persist_saved_location_to_disk() {
                        sizeof(s_savedLocation));
 }
 
+// Marks an in-flight boss rush session so that a mod reload while standing in
+// the chamber room (which vanilla progression can also reach) does not resume
+// boss rush unless a session was actually started.
+static constexpr const char* kBossRushSessionBlobName = "boss_rush_session_active";
+
+static void persist_boss_rush_session_marker() {
+    if (svc_save == nullptr || s_modCtx == nullptr) {
+        return;
+    }
+    const u32 marker = 1;
+    svc_save->set_blob(s_modCtx, kBossRushSessionBlobName, &marker, sizeof(marker));
+}
+
+static bool boss_rush_session_marker_present() {
+    if (svc_save == nullptr || s_modCtx == nullptr) {
+        return false;
+    }
+    u32 marker = 0;
+    size_t size = sizeof(marker);
+    return svc_save->get_blob(s_modCtx, kBossRushSessionBlobName, &marker, &size) == MOD_OK &&
+           size == sizeof(marker) && marker == 1;
+}
+
+static void clear_boss_rush_session_marker() {
+    if (svc_save == nullptr || s_modCtx == nullptr) {
+        return;
+    }
+    svc_save->delete_blob(s_modCtx, kBossRushSessionBlobName);
+}
+
 static bool s_chamberEquipsPending = false;
 static int  s_chamberEquipsFrames  = 0;
 
@@ -1009,7 +1039,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     cDmr_SkipInfo = 0;
     s_chamberEquipsPending = true;
 
-    cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
     dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
@@ -1078,7 +1108,7 @@ static HookAction on_change_scene_pre(ModContext*, void* args, void* retval, voi
         s_dungeonClearWarpPending = false;
         s_dungeonClearWarpFrames  = 0;
         dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
-        cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+        cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
         dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
         dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
         dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
@@ -1177,8 +1207,8 @@ static void on_boss_rush_draw_post_impl(ModContext*, void*, void*, void*) {
     }
 
     if (s_needsChamberSpawn) {
-        link->current.pos.set(0.0f, kBossChamberFloorY, 0.0f);
-        link->old.pos.set(0.0f, kBossChamberFloorY, 0.0f);
+        link->current.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
+        link->old.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
         link->shape_angle.set(0, cM_deg2s(180.0f), 0);
         link->current.angle.set(0, cM_deg2s(180.0f), 0);
         link->speedF = 0.0f;
@@ -3066,7 +3096,7 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     boss_rush_timer_update();
 
 
-    if (link == nullptr || !is_in_chamber_room()) {
+    if (link == nullptr || (!s_bossRushModeActive && !s_exitingBossRush) || !is_in_chamber_room()) {
         if (any_ring_flames_lit()) clear_ring_flames();
         s_healTimer = 0;
         return;
@@ -3117,6 +3147,7 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
     }
 
     draw_boss_rush_texts(kBossChamberFloorY);
+    draw_boss_rush_debug_coords(link);
 }
 
 static bool link_near_gallery_statue() {
@@ -3316,6 +3347,12 @@ bool is_in_boss_rush_chamber() {
     if (s_activeFightIndex != -1 || s_returningToChamber) {
         return false;
     }
+    // The chamber room (D_MN06B room 51) is reachable in vanilla progression
+    // (Temple of Time darknut hall), so only treat it as the boss rush chamber
+    // while a boss rush session is actually running.
+    if (!s_bossRushModeActive && !s_exitingBossRush) {
+        return false;
+    }
     return is_in_chamber_room();
 }
 
@@ -3399,6 +3436,7 @@ static void prepare_boss_rush_state() {
 
     }
 
+    persist_boss_rush_session_marker();
     s_bossRushModeActive = true;
     s_activeFightIndex = -1;
     s_pendingFightIndex = -1;
@@ -3448,7 +3486,7 @@ static void start_boss_rush_entry_warp() {
 
     s_chamberEquipsPending = true;
 
-    cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
     dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
@@ -3478,7 +3516,7 @@ static HookAction on_dungeon_return_warp_pre(ModContext*, void*, void*, void*) {
 
     s_chamberEquipsPending = true;
 
-    cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
     dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
@@ -3513,7 +3551,7 @@ static HookAction on_skip_portal_obj_warp_pre(ModContext*, void*, void*, void*) 
 
     s_chamberEquipsPending = true;
 
-    cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
     dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
@@ -3540,7 +3578,7 @@ static void start_boss_rush_dungeon_warp_entry() {
 
     s_chamberEquipsPending = true;
 
-    cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
     dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
 
@@ -3993,6 +4031,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_hasSavedLocation = false;
             if (svc_save != nullptr && s_modCtx != nullptr) {
                 svc_save->delete_blob(s_modCtx, kBossRushLocationBlobName);
+                clear_boss_rush_session_marker();
             }
         }
     }
@@ -4218,8 +4257,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (s_needsChamberSpawn && is_in_chamber_room()) {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
-            link->current.pos.set(0.0f, kBossChamberFloorY, 0.0f);
-            link->old.pos.set(0.0f, kBossChamberFloorY, 0.0f);
+            link->current.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
+            link->old.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
             link->shape_angle.set(0, cM_deg2s(180.0f), 0);
             link->current.angle.set(0, cM_deg2s(180.0f), 0);
             link->speedF = 0.0f;
@@ -4491,70 +4530,82 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
     init_boss_rush_collection(hook_svc, log_svc, mod_ctx);
     init_ganondorf_cape(hook_svc, log_svc, mod_ctx);
 
-    if (is_in_chamber_room()) {
-        s_bossRushModeActive = true;
-        s_needsChamberSpawn = true;
-        s_chamberSpawnFrames = 0;
-        s_chamberCamArmFrames = 30;
-        cXyz spawnPos(0.0f, kBossChamberFloorY, 0.0f);
-        dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
-        dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
-        daAlink_c* link = daAlink_getAlinkActorClass();
-        if (link != nullptr) {
-            link->current.pos = spawnPos;
-            link->old.pos = spawnPos;
-            link->shape_angle.set(0, cM_deg2s(180.0f), 0);
-            link->current.angle.set(0, cM_deg2s(180.0f), 0);
-            link->speedF = 0.0f;
-            link->speed.set(0.0f, 0.0f, 0.0f);
-
-            camera_process_class* cam = boss_rush_get_active_player_camera();
-            if (cam != nullptr) {
-                static const s16 kChamberAngle = cM_deg2s(180.0f);
-                const f32 fx = cM_ssin(kChamberAngle), fz = cM_scos(kChamberAngle);
-                cXyz center(spawnPos.x + fx * 200.0f, spawnPos.y + 100.0f, spawnPos.z + fz * 200.0f);
-                cXyz eye(spawnPos.x - fx * 420.0f, spawnPos.y + 140.0f, spawnPos.z - fz * 420.0f);
-                cam->mCamera.Reset(center, eye);
-                cam->mCamera.Start();
-                cam->mCamera.SetTrimSize(0);
-                fopCamM_SetAngleY(cam, kChamberAngle);
-            }
-        }
-        if (dComIfGs_getLife() == 0) {
-            dComIfGs_setLife(dComIfGs_getMaxLife());
-        }
-    } else if (const char* curStage = dComIfGp_getStartStageName()) {
-        const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
-        for (size_t i = 0; i < g_bossGalleryCount; ++i) {
-            const BossGalleryEntry& boss = g_bossGalleryTable[i];
-            if (std::strcmp(curStage, boss.stage) != 0) {
-                continue;
-            }
-            if (!boss_rush_room_matches_target(boss, curRoom)) {
-                continue;
-            }
-            if (std::strcmp(curStage, "D_MN09B") == 0) {
-                const bool isGround = g_dComIfG_gameInfo.info.getDan().isSwitch(1);
-                if (isGround && std::strcmp(boss.displayName, "Horseback Ganon") == 0) {
-                    continue;
-                }
-                if (!isGround && std::strcmp(boss.displayName, "Ganondorf") == 0) {
-                    continue;
-                }
-            }
-            if (std::strcmp(curStage, "D_MN09A") == 0) {
-                const s32 curLayer = dComIfG_play_c::getLayerNo(0);
-                if (curLayer == 1 && std::strcmp(boss.displayName, "Puppet Zelda") == 0) {
-                    continue;
-                }
-                if (curLayer == 0 && std::strcmp(boss.displayName, "Beast Ganon") == 0) {
-                    continue;
-                }
-            }
+    // Only resume boss rush on init when a session was actually started
+    // (persisted marker); the chamber room and boss arenas are all reachable
+    // through vanilla progression, so the stage check alone is not enough.
+    bool resumedBossRush = false;
+    if (boss_rush_session_marker_present()) {
+        if (is_in_chamber_room()) {
+            resumedBossRush = true;
             s_bossRushModeActive = true;
-            s_activeFightIndex = static_cast<int>(i);
-            break;
+            s_needsChamberSpawn = true;
+            s_chamberSpawnFrames = 0;
+            s_chamberCamArmFrames = 30;
+            cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
+            dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
+            dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
+            daAlink_c* link = daAlink_getAlinkActorClass();
+            if (link != nullptr) {
+                link->current.pos = spawnPos;
+                link->old.pos = spawnPos;
+                link->shape_angle.set(0, cM_deg2s(180.0f), 0);
+                link->current.angle.set(0, cM_deg2s(180.0f), 0);
+                link->speedF = 0.0f;
+                link->speed.set(0.0f, 0.0f, 0.0f);
+
+                camera_process_class* cam = boss_rush_get_active_player_camera();
+                if (cam != nullptr) {
+                    static const s16 kChamberAngle = cM_deg2s(180.0f);
+                    const f32 fx = cM_ssin(kChamberAngle), fz = cM_scos(kChamberAngle);
+                    cXyz center(spawnPos.x + fx * 200.0f, spawnPos.y + 100.0f, spawnPos.z + fz * 200.0f);
+                    cXyz eye(spawnPos.x - fx * 420.0f, spawnPos.y + 140.0f, spawnPos.z - fz * 420.0f);
+                    cam->mCamera.Reset(center, eye);
+                    cam->mCamera.Start();
+                    cam->mCamera.SetTrimSize(0);
+                    fopCamM_SetAngleY(cam, kChamberAngle);
+                }
+            }
+            if (dComIfGs_getLife() == 0) {
+                dComIfGs_setLife(dComIfGs_getMaxLife());
+            }
+        } else if (const char* curStage = dComIfGp_getStartStageName()) {
+            const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
+            for (size_t i = 0; i < g_bossGalleryCount; ++i) {
+                const BossGalleryEntry& boss = g_bossGalleryTable[i];
+                if (std::strcmp(curStage, boss.stage) != 0) {
+                    continue;
+                }
+                if (!boss_rush_room_matches_target(boss, curRoom)) {
+                    continue;
+                }
+                if (std::strcmp(curStage, "D_MN09B") == 0) {
+                    const bool isGround = g_dComIfG_gameInfo.info.getDan().isSwitch(1);
+                    if (isGround && std::strcmp(boss.displayName, "Horseback Ganon") == 0) {
+                        continue;
+                    }
+                    if (!isGround && std::strcmp(boss.displayName, "Ganondorf") == 0) {
+                        continue;
+                    }
+                }
+                if (std::strcmp(curStage, "D_MN09A") == 0) {
+                    const s32 curLayer = dComIfG_play_c::getLayerNo(0);
+                    if (curLayer == 1 && std::strcmp(boss.displayName, "Puppet Zelda") == 0) {
+                        continue;
+                    }
+                    if (curLayer == 0 && std::strcmp(boss.displayName, "Beast Ganon") == 0) {
+                        continue;
+                    }
+                }
+                resumedBossRush = true;
+                s_bossRushModeActive = true;
+                s_activeFightIndex = static_cast<int>(i);
+                break;
+            }
         }
+    }
+
+    if (!resumedBossRush) {
+        clear_boss_rush_session_marker();
     }
 
 
@@ -4563,6 +4614,9 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
 
 void shutdown_boss_rush() {
     shutdown_boss_rush_save();
+    if (!s_bossRushModeActive && !s_exitingBossRush) {
+        clear_boss_rush_session_marker();
+    }
     if (s_shouldAutoSaveCaptured && s_engineShouldAutoSave != nullptr) {
         *s_engineShouldAutoSave = s_shouldAutoSaveOriginal;
     }

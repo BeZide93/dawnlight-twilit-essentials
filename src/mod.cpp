@@ -33,7 +33,6 @@
 #include "stamina/sprint_wolf.hpp"
 #include "stamina/sprint_swim.hpp"
 #include "collection_menu/collection_menu.hpp"
-#include "collection_menu/collection_menu_shop.hpp"
 #include "collection_menu/collection_menu_shield.hpp"
 #include "util.hpp"
 
@@ -485,6 +484,7 @@ static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
 static ConfigVarHandle s_varCollectionKeepOrdonShield = 0;
+static ConfigVarHandle s_varCollectionShowOrdonHero = 0;
 static ConfigVarHandle s_varBossRushSuggestedItems = 0;
 static ConfigVarHandle s_varBossRushRefillAfterFight = 0;
 static ConfigVarHandle s_varBossRushSeparateGanon = 0;
@@ -509,7 +509,6 @@ static bool s_flurryRushInitialized = false;
 static bool s_staminaInitialized = false;
 static bool s_puppetZeldaPatternInitialized = false;
 static bool s_collectionMenuInitialized = false;
-static bool s_collectionMenuShopInitialized = false;
 static bool s_collectionMenuChestInitialized = false;
 
 static void on_collection_starter_equip_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -522,6 +521,14 @@ static void on_collection_starter_equip_changed(ModContext*, ConfigVarHandle, co
 static void on_collection_keep_ordon_shield_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configCollectionKeepOrdonShield = value->bool_value;
+        request_collection_menu_reload();
+    }
+}
+
+static void on_collection_show_ordon_hero_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configCollectionShowOrdonHero = value->bool_value;
+        sync_collection_ordon_hero_page();
         request_collection_menu_reload();
     }
 }
@@ -1554,6 +1561,10 @@ static ModResult tab_menus(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_toggle(left, "Keep Ordon Shield in collection", s_varCollectionKeepOrdonShield,
         "<p>Keeps the Ordon Shield equippable in the Collection screen even if burnt. "
         "Requires the starter gear option.</p>", is_collection_starter_sub_disabled);
+    ui_add_toggle(left, "Show Ordon Hero", s_varCollectionShowOrdonHero,
+        "<p>Shows the extra Ordon Hero gear (Reinforced Shield and Ordon Hero tunic) "
+        "on the Collection screen and creates a second page. Cycle pages with R and L - "
+        "hold them briefly.</p>");
     return MOD_OK;
 }
 
@@ -2204,6 +2215,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varCollectionKeepOrdonShield, on_collection_keep_ordon_shield_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descShowOrdonHero = CONFIG_VAR_DESC_INIT;
+        descShowOrdonHero.name = "collectionShowOrdonHero";
+        descShowOrdonHero.type = CONFIG_VAR_BOOL;
+        descShowOrdonHero.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descShowOrdonHero, &s_varCollectionShowOrdonHero) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varCollectionShowOrdonHero, &g_configCollectionShowOrdonHero);
+            svc_config->subscribe(mod_ctx, s_varCollectionShowOrdonHero, on_collection_show_ordon_hero_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descBossRushSuggested = CONFIG_VAR_DESC_INIT;
         descBossRushSuggested.name = "bossRushSuggestedItems";
         descBossRushSuggested.type = CONFIG_VAR_BOOL;
@@ -2336,8 +2356,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("puppet_zelda_pattern", s_puppetZeldaPatternInitialized);
     s_collectionMenuInitialized = init_collection_menu(svc_hook, svc_log, svc_save, mod_ctx, error) == MOD_OK;
     log_init_result("collection_menu", s_collectionMenuInitialized);
-    s_collectionMenuShopInitialized = init_collection_menu_shop(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
-    log_init_result("collection_menu_shop", s_collectionMenuShopInitialized);
     s_collectionMenuChestInitialized = init_collection_menu_chest(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("collection_menu_shield", s_collectionMenuChestInitialized);
 
@@ -2361,7 +2379,6 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     if (s_staminaInitialized) update_stamina(svc_log, mod_ctx);
     if (s_puppetZeldaPatternInitialized) update_puppet_zelda_pattern(svc_log, mod_ctx);
     if (s_collectionMenuInitialized) update_collection_menu(svc_log, mod_ctx);
-    if (s_collectionMenuShopInitialized) update_collection_menu_shop(svc_log, mod_ctx);
     if (s_collectionMenuChestInitialized) update_collection_menu_chest(svc_log, mod_ctx);
     return MOD_OK;
 }
@@ -2409,7 +2426,6 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("flurry_rush", shutdown_flurry_rush);
     run_shutdown_step("stamina", shutdown_stamina);
     run_shutdown_step("collection_menu", shutdown_collection_menu);
-    run_shutdown_step("collection_menu_shop", shutdown_collection_menu_shop);
     run_shutdown_step("collection_menu_chest", shutdown_collection_menu_chest);
     return MOD_OK;
 }

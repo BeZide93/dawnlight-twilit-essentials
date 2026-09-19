@@ -606,17 +606,6 @@ HookAction on_get_string_kanji_pre(ModContext*, void* args, void*, void*) {
     u32 msgID = mods::arg<u32>(args, 1);
     if (const SlotSpec* slot = slot_by_msgid(msgID)) {
         if (msgID == slot_name_id(slot) && slot->name.str) {
-            // DIAGNOSTIC (2026-09-18): same check as on_get_string_local_pre -
-            // confirm whether the NAME hook fires at all for hidden-column
-            // (x<3) slots. Remove once the name/description investigation
-            // concludes.
-            if (slot->x < 3) {
-                static int s_nameLogs = 0;
-                if (s_nameLogs < 20) {
-                    log_collect_info("name hook fired: cell(%d,%d) '%s' msgID=0x%x", slot->x, slot->y, slot->name.str, msgID);
-                    s_nameLogs++;
-                }
-            }
             TEXT_SPAN o_str = mods::arg<TEXT_SPAN>(args, 2);
             if (o_str) {
                 SAFE_STRCPY(o_str, slot->name.str);
@@ -656,22 +645,6 @@ HookAction on_get_string_local_pre(ModContext*, void* args, void* ret, void*) {
     u32 msgID = mods::arg<u32>(args, 1);
     if (const SlotSpec* slot = slot_by_msgid(msgID)) {
         if (msgID == slot_desc_id(slot) && slot->description.str) {
-            // DIAGNOSTIC (2026-09-18): descriptions reportedly go missing for
-            // items parked on the hidden x<3 columns (item 5+ on any row) while
-            // their name text shows fine. Logs a few samples to check whether
-            // this hook even fires for those cells and, if so, whether the
-            // textboxes the caller hands write_slot_description are null -
-            // remove once the cause is confirmed.
-            if (slot->x < 3) {
-                static int s_descLogs = 0;
-                if (s_descLogs < 20) {
-                    J2DTextBox* tb0 = mods::arg<J2DTextBox*>(args, 2);
-                    J2DTextBox* tb1 = mods::arg<J2DTextBox*>(args, 3);
-                    log_collect_info("desc hook fired: cell(%d,%d) msgID=0x%x box0=%p box1=%p",
-                                     slot->x, slot->y, msgID, (void*)tb0, (void*)tb1);
-                    s_descLogs++;
-                }
-            }
             return write_slot_description(args, ret, slot->description.str);
         }
     }

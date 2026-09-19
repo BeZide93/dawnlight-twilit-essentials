@@ -4,6 +4,22 @@
 
 bool g_configCollectionStarterEquip = false;
 bool g_configCollectionKeepOrdonShield = false;
+bool g_configCollectionShowOrdonHero = false;
+
+static cl::Page* s_ordonHeroPage = nullptr;
+
+void sync_collection_ordon_hero_page() {
+    if (g_configCollectionShowOrdonHero && s_ordonHeroPage == nullptr) {
+        cl::Page* p2 = new cl::Page();
+        p2->add(cl::heart());
+        p2->add(cl::crystal());
+        p2->add(cl::fused_shadow());
+        s_ordonHeroPage = p2;
+    } else if (!g_configCollectionShowOrdonHero && s_ordonHeroPage != nullptr) {
+        delete s_ordonHeroPage;
+        s_ordonHeroPage = nullptr;
+    }
+}
 
 static inline int add_vanilla_sword_slot(const CollectionVanillaSlotDef& def) {
     return collectionlib_add_vanilla_slot(1, def);
@@ -20,6 +36,9 @@ void register_custom_swords() {
 }
 
 void register_custom_shields() {
+    if (!g_configCollectionShowOrdonHero) {
+        return;
+    }
     collectionlib_add_next_shield_slot({
         CE_SHIELD, 0,
         "Reinforced Shield",
@@ -32,6 +51,9 @@ void register_custom_shields() {
 }
 
 void register_custom_tunics() {
+    if (!g_configCollectionShowOrdonHero) {
+        return;
+    }
     collectionlib_add_next_tunic_slot({
         CE_TUNIC, 0,
         "Ordon Hero",
@@ -49,10 +71,7 @@ void register_custom_tunics() {
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc,
                                const SaveService* save_svc, ModContext* mod_ctx,
                                ModError* error) {
-    cl::Page* p2 = new cl::Page();
-    p2->add(cl::heart());
-    p2->add(cl::crystal());
-    p2->add(cl::fused_shadow());
+    sync_collection_ordon_hero_page();
 
     collectionlib_set_register_callback([]() {
         if (g_configCollectionStarterEquip) {
@@ -106,6 +125,8 @@ void update_collection_menu(const LogService*, ModContext*) {
 }
 
 void shutdown_collection_menu() {
+    delete s_ordonHeroPage;
+    s_ordonHeroPage = nullptr;
     collectionlib_shutdown();
 }
 

@@ -325,6 +325,42 @@ mDoExt_brkAnm* loadBrkFromArc(const char* arcName, const char* brkName, J3DModel
     return brkAnm;
 }
 
+mDoExt_brkAnm* loadBrkFromArcIdx(const char* arcName, int resIndex, J3DModelData* modelData, int playMode, f32 rate) {
+    if (arcName == nullptr || modelData == nullptr) return nullptr;
+
+    char cleanArc[64];
+    normalizeArcName(arcName, cleanArc, sizeof(cleanArc));
+
+    if (loadObjectArchive(cleanArc) != 0) {
+        return nullptr;
+    }
+
+    void* res = dComIfG_getObjectRes(cleanArc, resIndex);
+    if (res == nullptr) {
+        return nullptr;
+    }
+
+    if (std::memcmp(res, "J3D1", 4) == 0) {
+        res = J3DAnmLoaderDataBase::load(res);
+        if (res == nullptr) {
+            return nullptr;
+        }
+    }
+
+    J3DAnmTevRegKey* pbrk = static_cast<J3DAnmTevRegKey*>(res);
+    mDoExt_brkAnm* brkAnm = JKR_NEW mDoExt_brkAnm();
+    if (brkAnm == nullptr) {
+        return nullptr;
+    }
+
+    if (!brkAnm->init(modelData, pbrk, 1, playMode, rate, 0, -1)) {
+        JKR_DELETE(brkAnm);
+        return nullptr;
+    }
+
+    return brkAnm;
+}
+
 mDoExt_btkAnm* loadBtkFromArc(const char* arcName, const char* btkName, J3DModelData* modelData, int playMode, f32 rate) {
     if (arcName == nullptr || btkName == nullptr || modelData == nullptr) return nullptr;
 
@@ -373,6 +409,42 @@ mDoExt_btkAnm* loadBtkFromArc(const char* arcName, const char* btkName, J3DModel
         }
     }
 
+    if (res == nullptr) {
+        return nullptr;
+    }
+
+    if (std::memcmp(res, "J3D1", 4) == 0) {
+        res = J3DAnmLoaderDataBase::load(res);
+        if (res == nullptr) {
+            return nullptr;
+        }
+    }
+
+    J3DAnmTextureSRTKey* pbtk = static_cast<J3DAnmTextureSRTKey*>(res);
+    mDoExt_btkAnm* btkAnm = JKR_NEW mDoExt_btkAnm();
+    if (btkAnm == nullptr) {
+        return nullptr;
+    }
+
+    if (!btkAnm->init(modelData, pbtk, 1, playMode, rate, 0, -1)) {
+        JKR_DELETE(btkAnm);
+        return nullptr;
+    }
+
+    return btkAnm;
+}
+
+mDoExt_btkAnm* loadBtkFromArcIdx(const char* arcName, int resIndex, J3DModelData* modelData, int playMode, f32 rate) {
+    if (arcName == nullptr || modelData == nullptr) return nullptr;
+
+    char cleanArc[64];
+    normalizeArcName(arcName, cleanArc, sizeof(cleanArc));
+
+    if (loadObjectArchive(cleanArc) != 0) {
+        return nullptr;
+    }
+
+    void* res = dComIfG_getObjectRes(cleanArc, resIndex);
     if (res == nullptr) {
         return nullptr;
     }

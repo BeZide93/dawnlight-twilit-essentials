@@ -36,6 +36,13 @@ u8 get_ring_slot_for_item(dMenu_Ring_c* ring, u8 slotOrItem) {
     return 0xFF;
 }
 
+// Set by on_set_mix_item_pre when a combine/uncombine actually happened. Reset
+// every frame in on_set_active_cursor_pre. The Z-press path uses it to back off
+// when the engine's R handler already processed this frame (e.g. R1 bound to
+// both GC R and GC Z) - handling the Z press on top would instantly undo the
+// combine the R handler just performed.
+static bool s_engineMixItemActed = false;
+
 void trigger_ring_item_slide_z(dMenu_Ring_c* ring, u8 itemNo) {
     if (!ring) return;
 
@@ -54,6 +61,33 @@ void commit_pending_z_slot(dMenu_Ring_c* ring) {
             update_ring_z_slots(ring);
         }
     }
+}
+
+static bool z_press_is_arrow_mix_item(u8 itemNo) {
+    return itemNo == dItemNo_NORMAL_BOMB_e || itemNo == dItemNo_WATER_BOMB_e ||
+           itemNo == dItemNo_POKE_BOMB_e || itemNo == dItemNo_HAWK_EYE_e;
+}
+
+static bool z_press_should_combine(dMenu_Ring_c* ring, u8 hoveredItem) {
+    if (!z_press_is_arrow_mix_item(hoveredItem)) {
+        return false;
+    }
+
+    // Bow sits directly on the Z slot: combine with it instead of overwriting it.
+    if (g_zInventorySlot != 0xFF && g_zInventorySlot < 24 &&
+        dComIfGs_getItem(g_zInventorySlot, false) == dItemNo_BOW_e)
+    {
+        return true;
+    }
+
+    // Bomb/hawk arrows are already mixed on the Z slot: pressing again uncombines.
+    if (ring != nullptr && g_zMixSlot == SLOT_4 &&
+        ring->mItemSlots[ring->mCurrentSlot] == dComIfGs_getSelectItemIndex(2))
+    {
+        return true;
+    }
+
+    return false;
 }
 
 void update_ring_z_slots(dMenu_Ring_c* ring) {
@@ -78,6 +112,8 @@ HookAction on_set_active_cursor_pre(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || !args) {
         return HOOK_CONTINUE;
     }
+
+    s_engineMixItemActed = false;
 
     dMenu_Ring_c* ring = mods::arg<dMenu_Ring_c*>(args, 0);
     if (!ring) return HOOK_CONTINUE;
@@ -124,10 +160,18 @@ void on_set_active_cursor_post(ModContext*, void* args, void*, void*) {
         return;
     }
 
+    if (s_engineMixItemActed) {
+        return;
+    }
+
     for (int i = 0; i < 4; i++) {
         ring->setSelectItemForce(i);
     }
     ring->field_0x6b3 = 2;
+    if (z_press_should_combine(ring, hoveredItem)) {
+        ring->setMixItem();
+        return;
+    }
     if (!ring->checkCombineBomb(ring->field_0x6b3)) {
         ring->setItem();
         if (ring->mpItemExplain && ring->mpItemExplain->getStatus() == 0) {
@@ -603,6 +647,8 @@ HookAction on_set_mix_item_pre(ModContext*, void* args, void*, void*) {
         g_zMixSlot = ring->field_0x6b8[2];
         sync_z_item_state();
     }
+
+    s_engineMixItemActed = bVar1;
 
     return HOOK_SKIP_ORIGINAL;
 }

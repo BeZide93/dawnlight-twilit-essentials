@@ -66,28 +66,6 @@ void on_wait_proc_post(ModContext*, void* args, void*, void*) {
     u8 curX = collect2D->mCursorX;
     u8 curY = collect2D->mCursorY;
 
-    // DIAGNOSTIC (2026-09-18): confirm whether field_0x184/field_0x1d8 (the
-    // name/desc msgID cache on_set_item_name_string_pre writes) are correct
-    // for hidden-column (x<3) SLOTS OF OURS specifically. MUST run before the
-    // onEquip early-return below - every one of our custom slots (Deity
-    // Sword, Mirror Shield, etc.) has onEquip set, so placing this after that
-    // check made it dead code for exactly the cells being investigated (this
-    // is why the previous attempt logged nothing at all). Remove once
-    // concluded.
-    if (curX < 3 && curY <= 2) {
-        if (const SlotSpec* slot = slot_at(curX, curY)) {
-            static u8 s_lastLogX = 0xFF, s_lastLogY = 0xFF;
-            if (curX != s_lastLogX || curY != s_lastLogY) {
-                log_collect_info("hidden-col slot(%d,%d) '%s': field_0x184=0x%x (want 0x%x) field_0x1d8=0x%x (want 0x%x)",
-                                 curX, curY, slot->name.str ? slot->name.str : "?",
-                                 collect2D->field_0x184[curX][curY], slot_name_id(slot),
-                                 collect2D->field_0x1d8[curX][curY], slot_desc_id(slot));
-                s_lastLogX = curX;
-                s_lastLogY = curY;
-            }
-        }
-    }
-
     if (const SlotSpec* slot = slot_at(curX, curY)) {
         if (slot->onEquip) {
             if (collect2D->mIsWolf) {
