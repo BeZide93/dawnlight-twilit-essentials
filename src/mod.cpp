@@ -2305,7 +2305,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_flurry_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
-    init_free_camera_toggle(svc_hook);
+    //init_free_camera_toggle(svc_hook);
     s_hpBarsInitialized = init_hp_bars(svc_hook, error) == MOD_OK;
     log_init_result("hp_bars", s_hpBarsInitialized);
     s_bossBarInitialized = init_boss_bar(svc_hook, error) == MOD_OK;
