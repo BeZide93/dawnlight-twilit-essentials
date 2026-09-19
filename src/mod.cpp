@@ -2,7 +2,7 @@
 #include "general/always.hpp"
 #include "general/damage_vignette.hpp"
 #include "general/hud_auto_fade.hpp"
-#include "general/drowning_warning.hpp"
+#include "general/oxygen_vignette.hpp"
 #include "general/sprint_fov_kick.hpp"
 #include "general/horse_cam.hpp"
 
@@ -68,8 +68,6 @@
 #include "m_Do/m_Do_ext.h"
 #include "dusk/config_var.hpp"
 #include "JSystem/JUtility/JUTFont.h"
-#include "JSystem/J2DGraph/J2DScreen.h"
-#include "JSystem/J2DGraph/J2DTextBox.h"
 
 #include <cstdio>
 #include <string_view>
@@ -78,10 +76,6 @@ static constexpr float kHudAutoFadeIdleSeconds = 8.0f;
 static constexpr float kHudAutoFadeFadeSeconds = 0.75f;
 static constexpr float kHudAutoFadeRestAlpha   = 0.0f;
 
-#define MOD_TITLE_VERSION_TEXT "v" TWILIT_ESSENTIALS_VERSION
-
-DEFINE_HOOK(&dDlst_daTitle_c::draw, DlstTitleDrawHook);
-DEFINE_HOOK(&daTitle_c::loadWait_proc, TitleLoadWaitProcHook);
 DEFINE_HOOK(&daTitle_c::fastLogoDispInit, TitleFastLogoDispInitHook);
 DEFINE_HOOK(&daTitle_c::fastLogoDisp, TitleFastLogoDispExecuteHook);
 DEFINE_HOOK(&mDoCPd_c::read, FreeCamPadReadHook);
@@ -111,76 +105,7 @@ struct daTitle_Access : public fopAc_ac_c {
     u8 field_0x604;
 };
 
-static void on_title_load_wait_proc_post(ModContext*, void* args, void*, void*) {
-    if (!args) return;
-    daTitle_Access* title = (daTitle_Access*)mods::arg<daTitle_c*>(args, 0);
-    if (!title || !title->mTitle.Scr) return;
-
-    if (title->mTitle.Scr->search(MULTI_CHAR('m_mod')) == nullptr) {
-        JUTFont* font = mDoExt_getSubFont();
-        if (font == nullptr) {
-            font = mDoExt_getMesgFont();
-        }
-        ResFONT* resFont = (font != nullptr) ? font->getResFont() : nullptr;
-
-        const f32 posX = 473.5f;
-        const f32 posY = 255.0f;
-        const f32 fontSize = 16.0f;
-        const f32 charSpace = -1.8f;
-
-        static const f32 offsets[16][2] = {
-            { 0.95f,  0.00f}, { 0.88f,  0.36f}, { 0.67f,  0.67f}, { 0.36f,  0.88f},
-            { 0.00f,  0.95f}, {-0.36f,  0.88f}, {-0.67f,  0.67f}, {-0.88f,  0.36f},
-            {-0.95f,  0.00f}, {-0.88f, -0.36f}, {-0.67f, -0.67f}, {-0.36f, -0.88f},
-            { 0.00f, -0.95f}, { 0.36f, -0.88f}, { 0.67f, -0.67f}, { 0.88f, -0.36f}
-        };
-
-        for (int i = 0; i < 16; i++) {
-            u32 tag = MULTI_CHAR('m_s0') + i;
-            JGeometry::TBox2<f32> shadowBox(posX + offsets[i][0], posY + offsets[i][1], posX + offsets[i][0] + 150.0f, posY + offsets[i][1] + 30.0f);
-            J2DTextBox* shadow = JKR_NEW J2DTextBox(
-                tag,
-                shadowBox,
-                resFont,
-                MOD_TITLE_VERSION_TEXT,
-                64,
-                HBIND_LEFT,
-                VBIND_CENTER
-            );
-            if (shadow != nullptr) {
-                if (font != nullptr) shadow->setFont(font);
-                shadow->setFontSize(fontSize, fontSize);
-                shadow->setCharSpace(charSpace);
-                shadow->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(0, 0, 0, 255));
-                shadow->setFontColor(JUtility::TColor(0, 0, 0, 255), JUtility::TColor(0, 0, 0, 255));
-                shadow->setAlpha(255);
-                title->mTitle.Scr->appendChild(shadow);
-            }
-        }
-
-        JGeometry::TBox2<f32> box(posX, posY, posX + 150.0f, posY + 30.0f);
-        J2DTextBox* modText = JKR_NEW J2DTextBox(
-            MULTI_CHAR('m_mod'),
-            box,
-            resFont,
-            MOD_TITLE_VERSION_TEXT,
-            64,
-            HBIND_LEFT,
-            VBIND_CENTER
-        );
-        if (modText != nullptr) {
-            if (font != nullptr) modText->setFont(font);
-            modText->setFontSize(fontSize, fontSize);
-            modText->setCharSpace(charSpace);
-            modText->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 255, 255, 255));
-            modText->setFontColor(JUtility::TColor(255, 255, 255, 255), JUtility::TColor(130, 10, 250, 255));
-            modText->setAlpha(255);
-            title->mTitle.Scr->appendChild(modText);
-        }
-    }
-}
-
-static void on_title_fast_logo_disp_init_post(ModContext*, void* args, void*, void*) {
+void on_title_fast_logo_disp_init_post(ModContext*, void* args, void*, void*) {
     if (!args) return;
     daTitle_Access* title = (daTitle_Access*)mods::arg<daTitle_c*>(args, 0);
     if (title && s_titleModActive) {
@@ -199,31 +124,6 @@ static HookAction on_title_fast_logo_disp_pre(ModContext*, void* args, void*, vo
         title->field_0x5f9 = 1;
         title->field_0x5fa = 1;
         title->mIsDispLogo = 1;
-    }
-    return HOOK_CONTINUE;
-}
-
-static HookAction on_title_draw_pre(ModContext*, void* args, void*, void*) {
-    if (!args) return HOOK_CONTINUE;
-    dDlst_daTitle_c* titleDraw = mods::arg<dDlst_daTitle_c*>(args, 0);
-    if (!titleDraw || !titleDraw->Scr) return HOOK_CONTINUE;
-
-    J2DPane* modText = titleDraw->Scr->search(MULTI_CHAR('m_mod'));
-
-    if (!s_titleModActive) {
-        if (modText != nullptr) modText->hide();
-        for (int i = 0; i < 16; i++) {
-            u32 tag = MULTI_CHAR('m_s0') + i;
-            J2DPane* shadow = titleDraw->Scr->search(tag);
-            if (shadow != nullptr) shadow->hide();
-        }
-    } else {
-        if (modText != nullptr) modText->show();
-        for (int i = 0; i < 16; i++) {
-            u32 tag = MULTI_CHAR('m_s0') + i;
-            J2DPane* shadow = titleDraw->Scr->search(tag);
-            if (shadow != nullptr) shadow->show();
-        }
     }
     return HOOK_CONTINUE;
 }
@@ -423,11 +323,10 @@ static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
 static ConfigVarHandle s_varGeneralLockonLetterbox = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
-static ConfigVarHandle s_varGeneralDrowningWarning = 0;
+static ConfigVarHandle s_varGeneralDrowningVignette = 0;
 static ConfigVarHandle s_varGeneralSprintFovKick = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varDamageVignetteIntensity = 0;
-static ConfigVarHandle s_varDamageVignettePulse = 0;
 static ConfigVarHandle s_varHpBars = 0;
 static ConfigVarHandle s_varHpBarsShowNumbers = 0;
 static ConfigVarHandle s_varBossBar = 0;
@@ -456,9 +355,11 @@ static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
 static ConfigVarHandle s_varStaminaSrcRolls = 0;
 static ConfigVarHandle s_varStaminaSrcClimb = 0;
+static ConfigVarHandle s_varStaminaSrcHang = 0;
 static ConfigVarHandle s_varStaminaSrcSwim = 0;
 static ConfigVarHandle s_varStaminaSrcPushPull = 0;
 static ConfigVarHandle s_varStaminaSrcWolfDash = 0;
+static ConfigVarHandle s_varStaminaSrcHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaSprint = 0;
 static ConfigVarHandle s_varStaminaSrcSprint = 0;
 static ConfigVarHandle s_varStaminaSprintSpeed = 0;
@@ -473,7 +374,6 @@ static ConfigVarHandle s_varStaminaCostRoll = 0;
 static ConfigVarHandle s_varStaminaCostSidestep = 0;
 static ConfigVarHandle s_varStaminaCostClimb = 0;
 static ConfigVarHandle s_varStaminaCostHang = 0;
-static ConfigVarHandle s_varStaminaCostLadder = 0;
 static ConfigVarHandle s_varStaminaCostCrawl = 0;
 static ConfigVarHandle s_varStaminaCostSwim = 0;
 static ConfigVarHandle s_varStaminaCostPushPull = 0;
@@ -481,6 +381,7 @@ static ConfigVarHandle s_varStaminaCostWolfDash = 0;
 static ConfigVarHandle s_varStaminaCostSprint = 0;
 static ConfigVarHandle s_varStaminaCostWolfSprint = 0;
 static ConfigVarHandle s_varStaminaCostSwimSprint = 0;
+static ConfigVarHandle s_varStaminaCostHiddenSkills = 0;
 static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
@@ -494,10 +395,12 @@ static ConfigVarHandle s_varBossRushVanillaGear = 0;
 static ConfigVarHandle s_varBossRushTimer = 0;
 static ConfigVarHandle s_varBossRushShowBestTimer = 0;
 static ConfigVarHandle s_varBossRushBestTimes = 0;
+static ConfigVarHandle s_varBossRushChainBest = 0;
 static ConfigVarHandle s_varBossRushPortal = 0;
 
 static bool s_generalInitialized = false;
 static bool s_damageVignetteInitialized = false;
+static bool s_oxygenVignetteInitialized = false;
 static bool s_flurryVignetteInitialized = false;
 static bool s_hpBarsInitialized = false;
 static bool s_bossBarInitialized = false;
@@ -602,17 +505,19 @@ static void on_damage_vignette_intensity_changed(ModContext*, ConfigVarHandle, c
         if (g_configDamageVignetteEnabled) {
             damage_vignette_request_preview();
         }
+        if (g_configOxygenVignetteEnabled) {
+            oxygen_vignette_request_preview();
+        }
     }
 }
 
-static void on_damage_vignette_pulse_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+static void on_oxygen_vignette_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
-        g_configDamageVignettePulse = value->bool_value;
+        g_configOxygenVignetteEnabled = value->bool_value;
+        if (g_configOxygenVignetteEnabled) {
+            oxygen_vignette_request_preview();
+        }
     }
-}
-
-static bool is_damage_vignette_sub_disabled(ModContext*, void*) {
-    return !g_configDamageVignetteEnabled;
 }
 
 static bool is_boss_rush_timer_sub_disabled(ModContext* ctx, void* user) {
@@ -742,6 +647,9 @@ static void on_stamina_src_rolls_changed(ModContext*, ConfigVarHandle, const Con
 static void on_stamina_src_climb_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcClimb = value->bool_value;
 }
+static void on_stamina_src_hang_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcHang = value->bool_value;
+}
 static void on_stamina_src_swim_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcSwim = value->bool_value;
 }
@@ -750,6 +658,10 @@ static void on_stamina_src_push_pull_changed(ModContext*, ConfigVarHandle, const
 }
 static void on_stamina_src_wolf_dash_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcWolfDash = value->bool_value;
+}
+
+static void on_stamina_src_hidden_skills_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcHiddenSkills = value->bool_value;
 }
 
 static void on_stamina_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -859,12 +771,6 @@ static void on_general_lockon_letterbox_changed(ModContext*, ConfigVarHandle, co
 static void on_hud_auto_fade_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configHudAutoFadeEnabled = value->bool_value;
-    }
-}
-
-static void on_general_drowning_warning_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configDrowningWarningEnabled = value->bool_value;
     }
 }
 
@@ -1033,10 +939,12 @@ static void stamina_dialog_toggle(ModContext* ctx, UiElementHandle pane, const c
 static ModResult build_stamina_dialog(ModContext* ctx, UiElementHandle pane, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
     stamina_dialog_toggle(ctx, pane, "Sword attacks", s_varStaminaSrcAttacks);
+    stamina_dialog_toggle(ctx, pane, "Hidden Skills", s_varStaminaSrcHiddenSkills);
     stamina_dialog_toggle(ctx, pane, "Jump & spin attacks", s_varStaminaSrcJumpSpin);
     stamina_dialog_toggle(ctx, pane, "Rolls, side hops & backflips", s_varStaminaSrcRolls);
     stamina_dialog_toggle(ctx, pane, "Sprint", s_varStaminaSrcSprint);
-    stamina_dialog_toggle(ctx, pane, "Climbing, hanging & ladders", s_varStaminaSrcClimb);
+    stamina_dialog_toggle(ctx, pane, "Climbing walls", s_varStaminaSrcClimb);
+    stamina_dialog_toggle(ctx, pane, "Hanging on ledges", s_varStaminaSrcHang);
     stamina_dialog_toggle(ctx, pane, "Swimming", s_varStaminaSrcSwim);
     stamina_dialog_toggle(ctx, pane, "Pushing & pulling", s_varStaminaSrcPushPull);
     stamina_dialog_toggle(ctx, pane, "Wolf sprint", s_varStaminaSrcWolfDash);
@@ -1093,6 +1001,10 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
         "<p>Stamina cost per jump attack - the leaping stab and the big leaping "
         "overhead (default: 14).</p>",
         s_varStaminaCostJumpAttack);
+    stamina_dialog_number(ctx, pane, "Hidden skill",
+        "<p>Stamina cost per hidden skill move - Shield Attack, Back Slice, Helm "
+        "Splitter, Ending Blow and Mortal Draw (default: 14).</p>",
+        s_varStaminaCostHiddenSkills);
     stamina_dialog_number(ctx, pane, "Spin attack (extra)",
         "<p>Extra charge on top of the swing the spin input already costs, so a spin "
         "totals swing + this (default: 10 extra).</p>",
@@ -1111,9 +1023,6 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
     stamina_dialog_number(ctx, pane, "Ledge hang & shimmy",
         "<p>Hanging on a ledge and shuffling sideways drain per frame (default: 0.45).</p>",
         s_varStaminaCostHang);
-    stamina_dialog_number(ctx, pane, "Ladders",
-        "<p>Climbing ladders drain per frame (default: 0.30).</p>",
-        s_varStaminaCostLadder);
     stamina_dialog_number(ctx, pane, "Crawling",
         "<p>Crawling drain per frame (default: 0.22).</p>",
         s_varStaminaCostCrawl);
@@ -1363,31 +1272,27 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>No black bars on the screen while Z-targeting.</p>");
     ui_add_toggle(left, "Enable HUD auto fade", s_varHudAutoFade,
         "<p>Fades the whole HUD out while Link stands still, and back in the moment he moves.</p>");
-    ui_add_toggle(left, "Drowning warning", s_varGeneralDrowningWarning,
-        "<p>The screen edges pulse blue while the air meter runs low.</p>");
     ui_add_toggle(left, "Sprint FOV kick", s_varGeneralSprintFovKick,
         "<p>The camera zooms out slightly while sprinting.</p>");
 
-    svc_ui->pane_add_section(mod_ctx, left, "Damage Vignette");
-    ui_add_toggle(left, "Enabled", s_varDamageVignette,
+    svc_ui->pane_add_section(mod_ctx, left, "Indicator");
+    ui_add_toggle(left, "Damage vignette", s_varDamageVignette,
         "<p>Red screen-edge flash when hit, plus a pulsing vignette at low health.</p>");
+    ui_add_toggle(left, "Drowning vignette", s_varGeneralDrowningVignette,
+        "<p>Blue screen-edge vignette while the air meter runs low.</p>");
     if (s_varDamageVignetteIntensity != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Intensity";
-        c.help_rml = "<p>Overlay strength in percent (default: 50%).</p>";
+        c.help_rml = "<p>Overlay strength in percent for both vignettes (default: 50%).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varDamageVignetteIntensity;
-        c.is_disabled = is_damage_vignette_sub_disabled;
         c.min = 5;
         c.max = 100;
         c.step = 5;
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
-    ui_add_toggle(left, "Low-health pulse", s_varDamageVignettePulse,
-        "<p>The screen edges pulse while health is low.</p>",
-        is_damage_vignette_sub_disabled);
     return MOD_OK;
 }
 
@@ -1449,6 +1354,10 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
 
 static void on_start_boss_rush_pressed(ModContext*, void*) {
     start_boss_rush();
+}
+
+static void on_kill_current_boss_pressed(ModContext*, void*) {
+    boss_rush_debug_kill_current_boss();
 }
 
 static void on_export_boss_rush_save_pressed(ModContext*, void*) {
@@ -1644,6 +1553,17 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     ui_add_toggle(left, "Map portal", s_varBossRushPortal,
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
         "into the Boss Rush chamber.</p>");
+
+#if 0
+    {
+        UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
+        ctrl.kind = UI_CONTROL_BUTTON;
+        ctrl.label = "DEBUG: Kill current boss";
+        ctrl.help_rml = "<p>Sets the current boss's HP to 0. Testing only.</p>";
+        ctrl.on_pressed = on_kill_current_boss_pressed;
+        svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
+    }
+#endif
 
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");
@@ -1845,15 +1765,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varHudAutoFade, on_hud_auto_fade_changed, nullptr, nullptr);
         }
 
-        ConfigVarDesc descGeneralDrowningWarning = CONFIG_VAR_DESC_INIT;
-        descGeneralDrowningWarning.name = "generalDrowningWarning";
-        descGeneralDrowningWarning.type = CONFIG_VAR_BOOL;
-        descGeneralDrowningWarning.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descGeneralDrowningWarning, &s_varGeneralDrowningWarning) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varGeneralDrowningWarning, &g_configDrowningWarningEnabled);
-            svc_config->subscribe(mod_ctx, s_varGeneralDrowningWarning, on_general_drowning_warning_changed, nullptr, nullptr);
-        }
-
         ConfigVarDesc descGeneralSprintFovKick = CONFIG_VAR_DESC_INIT;
         descGeneralSprintFovKick.name = "generalSprintFovKick";
         descGeneralSprintFovKick.type = CONFIG_VAR_BOOL;
@@ -1872,6 +1783,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varDamageVignette, on_damage_vignette_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descGeneralDrowningVignette = CONFIG_VAR_DESC_INIT;
+        descGeneralDrowningVignette.name = "oxygenVignetteEnabled";
+        descGeneralDrowningVignette.type = CONFIG_VAR_BOOL;
+        descGeneralDrowningVignette.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descGeneralDrowningVignette, &s_varGeneralDrowningVignette) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralDrowningVignette, &g_configOxygenVignetteEnabled);
+            svc_config->subscribe(mod_ctx, s_varGeneralDrowningVignette, on_oxygen_vignette_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descDamageVignetteIntensity = CONFIG_VAR_DESC_INIT;
         descDamageVignetteIntensity.name = "damageVignetteIntensity";
         descDamageVignetteIntensity.type = CONFIG_VAR_INT;
@@ -1881,15 +1801,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varDamageVignetteIntensity, &intensity);
             g_configDamageVignetteIntensity = static_cast<int>(intensity);
             svc_config->subscribe(mod_ctx, s_varDamageVignetteIntensity, on_damage_vignette_intensity_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descDamageVignettePulse = CONFIG_VAR_DESC_INIT;
-        descDamageVignettePulse.name = "damageVignettePulse";
-        descDamageVignettePulse.type = CONFIG_VAR_BOOL;
-        descDamageVignettePulse.default_bool = true;
-        if (svc_config->register_var(mod_ctx, &descDamageVignettePulse, &s_varDamageVignettePulse) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varDamageVignettePulse, &g_configDamageVignettePulse);
-            svc_config->subscribe(mod_ctx, s_varDamageVignettePulse, on_damage_vignette_pulse_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descGeneralSceneTransitions = CONFIG_VAR_DESC_INIT;
@@ -2220,9 +2131,11 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaSrcRolls",    &s_varStaminaSrcRolls,    &g_configStaminaSrcRolls,    on_stamina_src_rolls_changed },
             { "staminaSrcSprint",   &s_varStaminaSrcSprint,   &g_configStaminaSrcSprint,   on_stamina_src_sprint_changed },
             { "staminaSrcClimb",    &s_varStaminaSrcClimb,    &g_configStaminaSrcClimb,    on_stamina_src_climb_changed },
+            { "staminaSrcHang",     &s_varStaminaSrcHang,     &g_configStaminaSrcHang,     on_stamina_src_hang_changed },
             { "staminaSrcSwim",     &s_varStaminaSrcSwim,     &g_configStaminaSrcSwim,     on_stamina_src_swim_changed },
             { "staminaSrcPushPull", &s_varStaminaSrcPushPull, &g_configStaminaSrcPushPull, on_stamina_src_push_pull_changed },
             { "staminaSrcWolfDash", &s_varStaminaSrcWolfDash, &g_configStaminaSrcWolfDash, on_stamina_src_wolf_dash_changed },
+            { "staminaSrcHiddenSkills", &s_varStaminaSrcHiddenSkills, &g_configStaminaSrcHiddenSkills, on_stamina_src_hidden_skills_changed },
         };
         for (auto& sv : staminaSrcVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -2244,7 +2157,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostSidestep",   &s_varStaminaCostSidestep,   &g_configStaminaCostSidestep },
             { "staminaCostClimb",      &s_varStaminaCostClimb,      &g_configStaminaCostClimb },
             { "staminaCostHang",       &s_varStaminaCostHang,       &g_configStaminaCostHang },
-            { "staminaCostLadder",     &s_varStaminaCostLadder,     &g_configStaminaCostLadder },
             { "staminaCostCrawl",      &s_varStaminaCostCrawl,      &g_configStaminaCostCrawl },
             { "staminaCostSwim",       &s_varStaminaCostSwim,       &g_configStaminaCostSwim },
             { "staminaCostPushPull",   &s_varStaminaCostPushPull,   &g_configStaminaCostPushPull },
@@ -2252,6 +2164,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostSprint",     &s_varStaminaCostSprint,     &g_configStaminaCostSprint },
             { "staminaCostWolfSprint", &s_varStaminaCostWolfSprint, &g_configStaminaCostWolfSprint },
             { "staminaCostSwimSprint", &s_varStaminaCostSwimSprint, &g_configStaminaCostSwimSprint },
+            { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -2381,6 +2294,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         svc_config->register_var(mod_ctx, &descBossRushBestTimes, &s_varBossRushBestTimes);
         boss_rush_timer_init(svc_config, mod_ctx, s_varBossRushBestTimes);
 
+        ConfigVarDesc descBossRushChainBest = CONFIG_VAR_DESC_INIT;
+        descBossRushChainBest.name = "bossRushChainBest";
+        descBossRushChainBest.type = CONFIG_VAR_STRING;
+        descBossRushChainBest.default_string = "";
+        svc_config->register_var(mod_ctx, &descBossRushChainBest, &s_varBossRushChainBest);
+        boss_rush_timer_init_chain_best(svc_config, mod_ctx, s_varBossRushChainBest);
+
         ConfigVarDesc descBossRushPortal = CONFIG_VAR_DESC_INIT;
         descBossRushPortal.name = "bossRushPortal";
         descBossRushPortal.type = CONFIG_VAR_BOOL;
@@ -2411,8 +2331,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     if (svc_hook) {
-        mods::hook::add_pre<DlstTitleDrawHook>(svc_hook, on_title_draw_pre);
-        mods::hook::add_post<TitleLoadWaitProcHook>(svc_hook, on_title_load_wait_proc_post);
         mods::hook::add_post<TitleFastLogoDispInitHook>(svc_hook, on_title_fast_logo_disp_init_post);
         mods::hook::add_pre<TitleFastLogoDispExecuteHook>(svc_hook, on_title_fast_logo_disp_pre);
     }
@@ -2422,6 +2340,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     s_damageVignetteInitialized =
         init_damage_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("damage_vignette", s_damageVignetteInitialized);
+    s_oxygenVignetteInitialized =
+        init_oxygen_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
+    log_init_result("oxygen_vignette", s_oxygenVignetteInitialized);
     s_flurryVignetteInitialized =
         init_flurry_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
@@ -2464,6 +2385,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 MOD_EXPORT ModResult mod_update(ModError*) {
     if (s_generalInitialized) update_general(svc_log, mod_ctx);
     if (s_damageVignetteInitialized) update_damage_vignette(svc_log, mod_ctx);
+    if (s_oxygenVignetteInitialized) update_oxygen_vignette(svc_log, mod_ctx);
     if (s_hpBarsInitialized) update_hp_bars(svc_log, mod_ctx);
     if (s_bossBarInitialized) update_boss_bar(svc_log, mod_ctx);
     if (s_bossRushInitialized) update_boss_rush(svc_log, mod_ctx);
@@ -2510,6 +2432,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("free_camera_toggle", shutdown_free_camera_toggle);
     run_shutdown_step("general", shutdown_general);
     run_shutdown_step("damage_vignette", shutdown_damage_vignette);
+    run_shutdown_step("oxygen_vignette", shutdown_oxygen_vignette);
     run_shutdown_step("flurry_vignette", shutdown_flurry_vignette);
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
     run_shutdown_step("hp_bars", shutdown_hp_bars);

@@ -157,17 +157,7 @@ void draw_boss_rush_master_sword_label(const daAlink_c* link, float floorY) {
 
     char timeBuf[24];
     u32 totalCs = 0;
-    bool anyBest = false;
-    const size_t count = g_bossGalleryCount < kMaxBossGalleryEntries ? g_bossGalleryCount
-                                                                     : kMaxBossGalleryEntries;
-    for (size_t i = 0; i < count; ++i) {
-        u32 cs = 0;
-        if (boss_rush_timer_best_cs(static_cast<int>(i), &cs)) {
-            totalCs += cs;
-            anyBest = true;
-        }
-    }
-    if (anyBest) {
+    if (boss_rush_timer_chain_best_cs(&totalCs)) {
         char t[16];
         boss_rush_timer_format(totalCs, t, sizeof(t));
         std::snprintf(timeBuf, sizeof(timeBuf), "Best  %s", t);

@@ -35,6 +35,7 @@ int boss_rush_current_target_index();
 void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx, const char* reason);
 void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ctx);
 void boss_rush_request_retry();
+void boss_rush_debug_kill_current_boss();
 
 extern bool g_configBossRushSuggestedItems;
 

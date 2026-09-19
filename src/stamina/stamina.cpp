@@ -35,9 +35,11 @@ bool g_configStaminaSrcAttacks  = true;
 bool g_configStaminaSrcJumpSpin  = true;
 bool g_configStaminaSrcRolls     = true;
 bool g_configStaminaSrcClimb     = true;
+bool g_configStaminaSrcHang      = true;
 bool g_configStaminaSrcSwim      = true;
 bool g_configStaminaSrcPushPull  = true;
 bool g_configStaminaSrcWolfDash  = true;
+bool g_configStaminaSrcHiddenSkills = true;
 
 int g_configStaminaCostAttack     = 100;
 int g_configStaminaCostJumpAttack = 100;
@@ -46,7 +48,6 @@ int g_configStaminaCostRoll       = 100;
 int g_configStaminaCostSidestep   = 100;
 int g_configStaminaCostClimb      = 100;
 int g_configStaminaCostHang       = 100;
-int g_configStaminaCostLadder     = 100;
 int g_configStaminaCostCrawl      = 100;
 int g_configStaminaCostSwim       = 100;
 int g_configStaminaCostPushPull   = 100;
@@ -54,19 +55,22 @@ int g_configStaminaCostWolfDash   = 100;
 int g_configStaminaCostSprint     = 100;
 int g_configStaminaCostWolfSprint = 100;
 int g_configStaminaCostSwimSprint = 100;
+int g_configStaminaCostHiddenSkills = 100;
 
 enum StamCat {
     STAM_ATTACKS = 1,
     STAM_JUMPSPIN,
     STAM_ROLLS,
+    STAM_HIDDENSKILLS,
 };
 
 static bool stam_cat_enabled(int cat) {
     switch (cat) {
-    case STAM_ATTACKS:  return g_configStaminaSrcAttacks;
-    case STAM_JUMPSPIN: return g_configStaminaSrcJumpSpin;
-    case STAM_ROLLS:    return g_configStaminaSrcRolls;
-    default:            return true;
+    case STAM_ATTACKS:      return g_configStaminaSrcAttacks;
+    case STAM_JUMPSPIN:     return g_configStaminaSrcJumpSpin;
+    case STAM_ROLLS:        return g_configStaminaSrcRolls;
+    case STAM_HIDDENSKILLS: return g_configStaminaSrcHiddenSkills;
+    default:                return true;
     }
 }
 
@@ -80,6 +84,11 @@ DEFINE_HOOK(&daAlink_c::procSideStepInit,  StamSideStep);
 DEFINE_HOOK(&daAlink_c::procCutJumpInit,            StamCutJump);
 DEFINE_HOOK(&daAlink_c::procCutLargeJumpChargeInit, StamCutLargeJump);
 DEFINE_HOOK(&daAlink_c::procCutTurnInit, StamCutSpin);
+DEFINE_HOOK(&daAlink_c::procCutFinishInit, StamCutFinish);
+DEFINE_HOOK(&daAlink_c::procCutFinishJumpUpInit, StamCutBackSlice);
+DEFINE_HOOK(&daAlink_c::procCutDownInit, StamCutDown);
+DEFINE_HOOK(&daAlink_c::procCutHeadInit, StamCutHead);
+DEFINE_HOOK(&daAlink_c::procGuardAttackInit, StamGuardAttack);
 DEFINE_HOOK(&daAlink_c::checkRestHPAnime, StaminaTiredCheck);
 
 static f32 s_stamina    = 100.0f;
@@ -121,12 +130,8 @@ static f32 drain_rate(u16 proc) {
     case daAlink_c::PROC_HANG_CLIMB:
     case daAlink_c::PROC_HANG_UP:
     case daAlink_c::PROC_HANG_WALL_CATCH:
-        return g_configStaminaSrcClimb
+        return g_configStaminaSrcHang
                    ? stamina_impl::cost_scaled(0.45f, g_configStaminaCostHang)
-                   : 0.0f;
-    case daAlink_c::PROC_LADDER_MOVE:
-        return g_configStaminaSrcClimb
-                   ? stamina_impl::cost_scaled(0.30f, g_configStaminaCostLadder)
                    : 0.0f;
     case daAlink_c::PROC_CRAWL_MOVE:
     case daAlink_c::PROC_CRAWL_AUTO_MOVE:
@@ -196,7 +201,19 @@ static void deny() {
     }
 }
 
-static void spend(f32 cost) {
+// A hidden skill move is made up of rolls, jumps and swings that each carry
+// their own charge. To keep the whole move at its single hidden-skill price,
+// recently spent stamina is refunded when the move starts and all other
+// charges are suppressed while the move runs. The lock is short - it only
+// bridges transitions - and stays alive through the hidden skill procs.
+static f32 s_otherSpend = 0.0f;
+
+static int  s_hiddenSkillLock = 0;
+
+static constexpr int kHiddenSkillLockFrames = 20;
+static constexpr f32 kRecentSpendDecay       = 0.25f;
+
+static void spend_raw(f32 cost) {
     s_stamina -= cost;
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     s_regenDelay = 50;
@@ -204,12 +221,64 @@ static void spend(f32 cost) {
     s_pulse = 1.0f;
 }
 
+static void spend(f32 cost) {
+    spend_raw(cost);
+    s_otherSpend += cost;
+}
+
 static f32 cost_for_id(int id);
+
+static constexpr f32 kSwingCost      = 10.0f;
+static constexpr f32 kJumpAttackCost = 14.0f;
+static constexpr f32 kHiddenSkillCost = 14.0f;
+
+enum StamCostId {
+    STAMC_ROLL = 1,
+    STAMC_SIDESTEP,
+    STAMC_SPIN,
+    STAMC_HIDDENSKILL,
+};
+
+static f32 cost_for_id(int id) {
+    switch (id) {
+    case STAMC_ROLL:        return stamina_impl::cost_scaled(14.0f, g_configStaminaCostRoll);
+    case STAMC_SIDESTEP:    return stamina_impl::cost_scaled(12.0f, g_configStaminaCostSidestep);
+    case STAMC_SPIN:        return stamina_impl::cost_scaled(10.0f, g_configStaminaCostSpin);
+    case STAMC_HIDDENSKILL: return stamina_impl::cost_scaled(kHiddenSkillCost, g_configStaminaCostHiddenSkills);
+    default:                return 0.0f;
+    }
+}
+
+static void hidden_skill_spend() {
+    const f32 cost = cost_for_id(STAMC_HIDDENSKILL);
+    const f32 refund = s_otherSpend < cost ? s_otherSpend : cost;
+    if (refund > 0.0f) {
+        s_stamina += refund;
+        s_otherSpend -= refund;
+        if (s_stamina > stamina_max()) s_stamina = stamina_max();
+    }
+    s_hiddenSkillLock = kHiddenSkillLockFrames;
+    spend_raw(cost);
+}
 
 static HookAction action_cost_pre(ModContext*, void*, void* retval, void* userdata) {
     if (!g_configStaminaEnabled || !in_gameplay()) return HOOK_CONTINUE;
     const std::intptr_t packed = reinterpret_cast<std::intptr_t>(userdata);
-    if (!stam_cat_enabled(static_cast<int>(packed >> 16))) return HOOK_CONTINUE;
+    const int cat = static_cast<int>(packed >> 16);
+    if (!stam_cat_enabled(cat)) return HOOK_CONTINUE;
+    if (cat == STAM_HIDDENSKILLS) {
+        // A proc init marks the start of a new move, so it always charges - the
+        // lock must never suppress it (spamming re-enters the same proc while
+        // the previous move's lock is still alive).
+        if (empty()) {
+            if (retval) *static_cast<int*>(retval) = 0;
+            deny();
+            return HOOK_SKIP_ORIGINAL;
+        }
+        hidden_skill_spend();
+        return HOOK_CONTINUE;
+    }
+    if (s_hiddenSkillLock > 0) return HOOK_CONTINUE;
     const f32 cost = cost_for_id(static_cast<int>(packed & 0xFFFF));
     if (empty()) {
         if (retval) *static_cast<int*>(retval) = 0;
@@ -220,27 +289,28 @@ static HookAction action_cost_pre(ModContext*, void*, void* retval, void* userda
     return HOOK_CONTINUE;
 }
 
-static constexpr f32 kSwingCost      = 10.0f;
-static constexpr f32 kJumpAttackCost = 14.0f;
+// daAlink_CutFinishParamType from d_a_alink_cut.inc; Mortal Draw is the
+// procCutFinishInit variant of the hidden skills.
+static constexpr int kCutFinishMortalDrawA = 3;
+static constexpr int kCutFinishMortalDrawB = 4;
 
-enum StamCostId {
-    STAMC_ROLL = 1,
-    STAMC_SIDESTEP,
-    STAMC_SPIN,
-};
-
-static f32 cost_for_id(int id) {
-    switch (id) {
-    case STAMC_ROLL:     return stamina_impl::cost_scaled(14.0f, g_configStaminaCostRoll);
-    case STAMC_SIDESTEP: return stamina_impl::cost_scaled(12.0f, g_configStaminaCostSidestep);
-    case STAMC_SPIN:     return stamina_impl::cost_scaled(10.0f, g_configStaminaCostSpin);
-    default:             return 0.0f;
+static HookAction cut_finish_pre(ModContext*, void* args, void* retval, void*) {
+    if (!g_configStaminaEnabled || !in_gameplay()) return HOOK_CONTINUE;
+    if (!g_configStaminaSrcHiddenSkills) return HOOK_CONTINUE;
+    const int type = mods::arg<int>(args, 1);
+    if (type != kCutFinishMortalDrawA && type != kCutFinishMortalDrawB) return HOOK_CONTINUE;
+    if (empty()) {
+        if (retval) *static_cast<int*>(retval) = 0;
+        deny();
+        return HOOK_SKIP_ORIGINAL;
     }
+    hidden_skill_spend();
+    return HOOK_CONTINUE;
 }
 
 static HookAction sword_swing_pre(ModContext*, void*, void* retval, void*) {
     if (!g_configStaminaEnabled || !g_configStaminaSrcAttacks) return HOOK_CONTINUE;
-    if (!in_gameplay() || !empty()) return HOOK_CONTINUE;
+    if (!in_gameplay() || s_hiddenSkillLock > 0 || !empty()) return HOOK_CONTINUE;
     if (retval) *static_cast<int*>(retval) = 0;
     deny();
     return HOOK_SKIP_ORIGINAL;
@@ -248,7 +318,7 @@ static HookAction sword_swing_pre(ModContext*, void*, void* retval, void*) {
 
 static void sword_swing_post(ModContext*, void*, void* retval, void*) {
     if (!g_configStaminaEnabled || !in_gameplay()) return;
-    if (!g_configStaminaSrcAttacks) return;
+    if (!g_configStaminaSrcAttacks || s_hiddenSkillLock > 0) return;
     if (s_suppressSwingCharge > 0) { s_swungThisFrame = true; return; }
     if (s_swungThisFrame) return;
     if (retval && *static_cast<int*>(retval) != 0) {
@@ -259,7 +329,7 @@ static void sword_swing_post(ModContext*, void*, void* retval, void*) {
 
 static HookAction jump_attack_pre(ModContext*, void*, void* retval, void*) {
     if (!g_configStaminaEnabled || !g_configStaminaSrcJumpSpin) return HOOK_CONTINUE;
-    if (!in_gameplay()) return HOOK_CONTINUE;
+    if (!in_gameplay() || s_hiddenSkillLock > 0) return HOOK_CONTINUE;
     if (empty()) {
         if (retval) *static_cast<int*>(retval) = 0;
         deny();
@@ -276,6 +346,24 @@ static HookAction jump_attack_pre(ModContext*, void*, void* retval, void*) {
     return HOOK_CONTINUE;
 }
 
+static bool is_hidden_skill_proc_state(daAlink_c* link) {
+    switch (link->mProcID) {
+    case daAlink_c::PROC_GUARD_ATTACK:
+    case daAlink_c::PROC_CUT_FINISH_JUMP_UP:
+    case daAlink_c::PROC_CUT_FINISH_JUMP_UP_LAND:
+    case daAlink_c::PROC_CUT_DOWN:
+    case daAlink_c::PROC_CUT_DOWN_LAND:
+    case daAlink_c::PROC_CUT_HEAD:
+    case daAlink_c::PROC_CUT_HEAD_LAND:
+        return true;
+    case daAlink_c::PROC_CUT_FINISH:
+        return link->getCutType() == daAlink_c::CUT_TYPE_MORTAL_DRAW_A ||
+               link->getCutType() == daAlink_c::CUT_TYPE_MORTAL_DRAW_B;
+    default:
+        return false;
+    }
+}
+
 void update_stamina(const LogService*, ModContext*) {
     s_blockedThisFrame = false;
     s_swungThisFrame = false;
@@ -284,11 +372,18 @@ void update_stamina(const LogService*, ModContext*) {
     if (s_suppressSwingCharge > 0) s_suppressSwingCharge--;
     if (s_jumpChargeCd > 0) s_jumpChargeCd--;
     if (s_denyCooldown > 0) s_denyCooldown--;
+    if (s_hiddenSkillLock > 0) s_hiddenSkillLock--;
+    if (s_otherSpend > 0.0f) {
+        s_otherSpend -= kRecentSpendDecay;
+        if (s_otherSpend < 0.0f) s_otherSpend = 0.0f;
+    }
 
     if (!g_configStaminaEnabled) {
         s_stamina = s_display = stamina_max();
         s_regenDelay = s_showTimer = 0;
         s_alpha = s_pulse = s_emptyFlash = 0.0f;
+        s_hiddenSkillLock = 0;
+        s_otherSpend = 0.0f;
         s_extraDrain = 0.0f;
         return;
     }
@@ -302,6 +397,12 @@ void update_stamina(const LogService*, ModContext*) {
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+
+    // Keep the charge lock alive while a hidden skill move is still running,
+    // so its follow-up swings and landings stay free.
+    if (s_hiddenSkillLock > 0 && link != nullptr && is_hidden_skill_proc_state(link)) {
+        s_hiddenSkillLock = kHiddenSkillLockFrames;
+    }
 
     const f32 extra = s_extraDrain;
     s_extraDrain = 0.0f;
@@ -429,6 +530,12 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<StamCutJump>(hook_svc, jump_attack_pre);
     mods::hook::add_pre<StamCutLargeJump>(hook_svc, jump_attack_pre);
     hook_cost<StamCutSpin>(hook_svc, STAM_JUMPSPIN, STAMC_SPIN);
+
+    mods::hook::add_pre<StamCutFinish>(hook_svc, cut_finish_pre);
+    hook_cost<StamCutBackSlice>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
+    hook_cost<StamCutDown>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
+    hook_cost<StamCutHead>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
+    hook_cost<StamGuardAttack>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
     return MOD_OK;
 }
 
@@ -444,4 +551,6 @@ void shutdown_stamina() {
     s_jumpChargeCd = 0;
     s_denyCooldown = 0;
     s_extraDrain = 0.0f;
+    s_hiddenSkillLock = 0;
+    s_otherSpend = 0.0f;
 }

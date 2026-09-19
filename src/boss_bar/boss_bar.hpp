@@ -14,6 +14,8 @@ void shutdown_boss_bar();
 bool boss_bar_is_boss_name(int16_t name);
 
 bool boss_bar_consume_defeat_event();
+void boss_bar_force_defeat_event();
+void boss_bar_rearm_defeat(unsigned int actorId);
 
 bool boss_bar_debug_snapshot(char* buf, size_t bufSize);
 

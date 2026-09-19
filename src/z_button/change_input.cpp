@@ -2,6 +2,7 @@
 
 #include "change_input.hpp"
 #include "z_mobile.hpp"
+#include "z_item_actions.hpp"
 #include "../quick_access/quick_access.hpp"
 #include "../controls/controls.hpp"
 
@@ -10,7 +11,16 @@ DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, MidnaTalkTriggerHook);
 
 void on_pad_read_post(ModContext*, void*, void*, void*) {
-    if (!g_configCustomZButtonEnabled || isTitleOrMainMenu()) {
+    if (isTitleOrMainMenu()) {
+        return;
+    }
+
+    // Iron Boots come off as soon as they are no longer assigned to any
+    // button (e.g. another item was placed over them on X). Polled after the
+    // game update so only settled assignment states are observed.
+    check_iron_boots_unequip_on_overwrite();
+
+    if (!g_configCustomZButtonEnabled) {
         return;
     }
 

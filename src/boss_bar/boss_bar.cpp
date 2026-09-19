@@ -152,6 +152,14 @@ bool boss_bar_consume_defeat_event() {
     return r;
 }
 
+void boss_bar_force_defeat_event() {
+    s_justDefeated = true;
+}
+
+void boss_bar_rearm_defeat(unsigned int actorId) {
+    s_defeated.erase(actorId);
+}
+
 bool boss_bar_debug_snapshot(char* buf, size_t bufSize) {
     if (buf == nullptr || bufSize == 0 || !s_boss.valid) {
         return false;
@@ -1250,28 +1258,30 @@ void update_boss_bar(const LogService*, ModContext*) {
         }
         if (s_boss.engaged) s_recentEngagedFrames = 150;
 
-        const bool phase1Empty = (best->name == fpcNm_B_OB_e && s_obPhase < 4) ||
-                                 (best->name == fpcNm_B_DS_e && s_dsPhase < 4) ||
-                                 (best->name == fpcNm_B_YO_e && s_yoPhase < 4) ||
-                                 (best->name == fpcNm_B_TN_e && s_tnPhase < 4) ||
-                                 (best->name == fpcNm_B_DR_e && s_drPhase < 4) ||
-                                 (best->name == fpcNm_B_ZANT_e && s_znState != 4) ||
-                                 (best->name == fpcNm_B_GND_e && s_gndState != 3) ||
-                                 (best->name == fpcNm_B_MGN_e && s_mgnDbgAct != daB_MGN_c::ACTION_DEATH_e);
-        if (s_boss.engaged && s_boss.live01 <= 0.02f && !phase1Empty) s_boss.deadTimer++;
-        else s_boss.deadTimer = 0;
+            const bool phase1Empty = (best->name == fpcNm_B_OB_e && s_obPhase < 4) ||
+                                  (best->name == fpcNm_B_BQ_e && !s_diaP2Started) ||
+                                  (best->name == fpcNm_B_DS_e && s_dsPhase < 4) ||
+                                  (best->name == fpcNm_B_YO_e && s_yoPhase < 4) ||
+                                  (best->name == fpcNm_B_TN_e && s_tnPhase < 4) ||
+                                  (best->name == fpcNm_B_DR_e && s_drPhase < 4) ||
+                                  (best->name == fpcNm_B_ZANT_e && s_znState != 4) ||
+                                  (best->name == fpcNm_B_GND_e && s_gndState != 3) ||
+                                  (best->name == fpcNm_B_MGN_e && s_mgnDbgAct != daB_MGN_c::ACTION_DEATH_e);
+            if (s_boss.engaged && s_boss.live01 <= 0.02f && !phase1Empty) s_boss.deadTimer++;
+            else s_boss.deadTimer = 0;
 
-    } else if (s_boss.valid) {
-        s_boss.missingFrames++;
-        if (s_boss.engaged) {
-            const bool fyrusFinalDownVanished = (s_boss.name == fpcNm_E_FM_e) && s_fmFinalDown;
-            const bool deathSwordVanished = (s_boss.name == fpcNm_E_VT_e);
-            const bool likelyDead = ((!s_boss.custom || fyrusFinalDownVanished || deathSwordVanished) && s_boss.live01 < 0.45f);
-            if (likelyDead) {
-                s_boss.live01 += (0.0f - s_boss.live01) * 0.35f;
-                if (s_boss.live01 < 0.01f) s_boss.live01 = 0.0f;
-            }
-            if (s_boss.missingFrames > (likelyDead ? 10 : 60)) s_boss.gone = true;
+        } else if (s_boss.valid) {
+            s_boss.missingFrames++;
+            if (s_boss.engaged) {
+                const bool fyrusFinalDownVanished = (s_boss.name == fpcNm_E_FM_e) && s_fmFinalDown;
+                const bool deathSwordVanished = (s_boss.name == fpcNm_E_VT_e);
+                const bool diaPhase1 = (s_boss.name == fpcNm_B_BQ_e) && !s_diaP2Started;
+                const bool likelyDead = (!diaPhase1 && (!s_boss.custom || fyrusFinalDownVanished || deathSwordVanished) && s_boss.live01 < 0.45f);
+                if (likelyDead) {
+                    s_boss.live01 += (0.0f - s_boss.live01) * 0.35f;
+                    if (s_boss.live01 < 0.01f) s_boss.live01 = 0.0f;
+                }
+                if (s_boss.missingFrames > (likelyDead ? 10 : 60)) s_boss.gone = true;
             if (s_boss.missingFrames > (likelyDead ? 24 : 240)) {
                 if (likelyDead) {
                     s_defeated.insert(s_boss.id);

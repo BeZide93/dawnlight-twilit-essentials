@@ -47,7 +47,7 @@ add_mod(twilit_essentials
             src/general/lockon_letterbox.cpp
             src/general/hud_auto_fade.cpp
             src/general/damage_vignette.cpp
-            src/general/drowning_warning.cpp
+            src/general/oxygen_vignette.cpp
             src/general/sprint_fov_kick.cpp
             src/hp_bars/hp_bars.cpp
             src/boss_bar/boss_bar.cpp
@@ -91,7 +91,6 @@ add_mod(twilit_essentials
         TEXTURES_DIR textures
 )
 
-target_compile_definitions(twilit_essentials PRIVATE TWILIT_ESSENTIALS_VERSION="${TWILIT_ESSENTIALS_VER}")
 target_link_libraries(twilit_essentials PRIVATE collection_lib)
 
 # Dusklight internal headers (dusk/settings.h) for the L+A free camera toggle.
@@ -104,6 +103,32 @@ add_custom_command(TARGET twilit_essentials POST_BUILD
         -DREADME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/README.md"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SyncReadmeVersion.cmake"
 )
+
+# Automatically regenerate the logo texture (embeds the version from mod.json) before packaging.
+# Local-only on purpose: the Ravenna font only exists on the dev machine and CI builds keep using
+# the committed texture. Also skipped when Python3/Pillow is unavailable.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+set(LOGO_GENERATION_AVAILABLE FALSE)
+set(_ci "$ENV{CI}")
+if (Python3_EXECUTABLE AND NOT _ci)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import PIL"
+            RESULT_VARIABLE _pillow_result
+            OUTPUT_QUIET ERROR_QUIET)
+    if (_pillow_result EQUAL 0)
+        set(LOGO_GENERATION_AVAILABLE TRUE)
+        add_custom_target(generate_logo
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_logo.py"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_logo.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tools/logo_base.png"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/mod.json"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            VERBATIM)
+        add_dependencies(twilit_essentials_package generate_logo)
+    endif ()
+endif ()
+if (NOT LOGO_GENERATION_AVAILABLE)
+    message(STATUS "Logo texture generation skipped (needs local Python3 with Pillow, runs outside CI only) - using committed texture")
+endif ()
 
 # Prevent MSVC linker from stripping mod metadata section records (/OPT:REF)
 if (MSVC)

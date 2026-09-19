@@ -156,7 +156,8 @@ void draw_boss_rush_texts(float floorY) {
         }
     }
 
-    draw_boss_rush_master_sword_label(link, floorY);
+    // Master sword spawn disabled for now.
+    // draw_boss_rush_master_sword_label(link, floorY);
 
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port) port->setup2D();
@@ -176,7 +177,8 @@ void draw_boss_rush_fight_timer() {
     bool isRecord = false;
     const bool showingResult = boss_rush_timer_result(&resultCs, &isRecord);
 
-    if (!boss_rush_is_fighting_here() && !boss_rush_is_returning_to_chamber() && !showingResult) {
+    if (!boss_rush_is_fighting_here() && !boss_rush_is_returning_to_chamber() && !showingResult &&
+        !boss_rush_timer_chain_active()) {
         return;
     }
 
@@ -196,7 +198,14 @@ void draw_boss_rush_fight_timer() {
 
     const int tIdx = boss_rush_current_target_index();
     u32 bestCs = 0;
-    const bool hasBest = g_configBossRushShowBestTimer && (tIdx >= 0) && boss_rush_timer_best_cs(tIdx, &bestCs) && !showingResult;
+    bool hasBest = false;
+    if (boss_rush_timer_chain_active()) {
+        hasBest = g_configBossRushShowBestTimer && boss_rush_timer_chain_best_cs(&bestCs);
+    } else {
+        hasBest = g_configBossRushShowBestTimer && (tIdx >= 0) &&
+                  boss_rush_timer_best_cs(tIdx, &bestCs);
+    }
+    hasBest = hasBest && !showingResult;
     boss_rush_timer_v2_draw(showingResult ? resultCs : cs, showingResult, isRecord,
                             hasBest, hasBest ? bestCs : 0);
 }

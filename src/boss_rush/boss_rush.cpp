@@ -290,11 +290,29 @@ static bool s_bossRushModeActive = false;
 static ModContext* s_modCtx = nullptr;
 static const LogService* s_logSvc = nullptr;
 
+#include <cstdarg>
+static void rush_debug_logf(const char* fmt, ...) {
+    if (s_logSvc == nullptr || s_modCtx == nullptr) return;
+    char msg[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    s_logSvc->info(s_modCtx, msg);
+}
+
 static int s_activeFightIndex = -1;
 
 static int s_pendingFightIndex = -1;
 
+static bool s_rushRunActive = false;
+static size_t s_rushRunOrder[kMaxBossGalleryEntries];
+static size_t s_rushRunCount = 0;
+static size_t s_rushRunPos = 0;
+
 static bool s_pendingFightFromArena = false;
+static int s_warpWatchdogFrames = 0;
+static int s_killWatchdogFrames = 0;
 
 static bool s_pendingWarpSawEnableNextStage = false;
 
@@ -1001,6 +1019,10 @@ static const char* s_recordReturnReason = nullptr;
 
 void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
                                   const char* reason) {
+    if (s_rushRunActive) {
+        s_rushRunActive = false;
+        boss_rush_timer_end_chain_run();
+    }
     if (reason != nullptr && std::strstr(reason, "defeated") != nullptr) {
         boss_rush_timer_notify_defeat();
         if (s_recordReturnReason == nullptr && s_recordReturnFrames < 0 &&
@@ -3151,7 +3173,7 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
     }
 
     draw_boss_rush_texts(kBossChamberFloorY);
-    draw_boss_rush_debug_coords(link);
+    //draw_boss_rush_debug_coords(link);
 }
 
 static bool link_near_gallery_statue() {
@@ -3178,7 +3200,8 @@ static bool link_near_gallery_statue() {
 }
 
 static void show_statue_fight_a_status() {
-    if (link_near_gallery_statue() || boss_rush_master_sword_near()) {
+    // Master sword spawn/prompt disabled for now.
+    if (link_near_gallery_statue() /* || boss_rush_master_sword_near() */) {
         g_dComIfG_gameInfo.play.setDoStatus(BUTTON_STATUS_OPEN, BUTTON_STATUS_FLAG_NONE);
     }
 }
@@ -3197,12 +3220,12 @@ static void on_action_string_post(ModContext*, void* args, void* retval, void*) 
     }
 
     static char fight[] = "Fight";
-    static char startBossRush[] = "Start boss rush";
+    // static char startBossRush[] = "Start boss rush";  // Master sword spawn/prompt disabled for now.
     static char leave[] = "Leave Boss Rush";
     if (link_near_gallery_statue()) {
         *static_cast<char**>(retval) = fight;
-    } else if (boss_rush_master_sword_near()) {
-        *static_cast<char**>(retval) = startBossRush;
+    // } else if (boss_rush_master_sword_near()) {
+    //     *static_cast<char**>(retval) = startBossRush;
     } else {
         *static_cast<char**>(retval) = leave;
     }
@@ -3785,6 +3808,8 @@ void exit_boss_rush() {
     s_exitingBossRush = true;
     s_activeFightIndex = -1;
     s_pendingFightIndex = -1;
+    s_rushRunActive = false;
+    boss_rush_timer_end_chain_run();
     s_pendingInitialInventory = false;
     s_returningToChamber = false;
     s_returnSawFadeOut = false;
@@ -3836,12 +3861,22 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
 
     s_pendingFightFromArena = !is_in_chamber_room();
     s_pendingWarpSawEnableNextStage = false;
+    s_activeFightIndex = -1;
+    rush_debug_logf("[rush] commit '%s' stage=%s room=%d arenaFrom=%d",
+                    boss.displayName, boss.stage, (int)boss.room,
+                    (int)s_pendingFightFromArena);
 
     if (link != nullptr) {
         link->speed.set(0.0f, 0.0f, 0.0f);
         link->speedF = 0.0f;
-        if (std::strcmp(boss.displayName, "Morpheel") != 0 && link->checkEquipHeavyBoots()) {
-            link->setHeavyBoots(0);
+        if (std::strcmp(boss.displayName, "Morpheel") != 0) {
+            if (link->checkEquipHeavyBoots()) {
+                link->setHeavyBoots(0);
+            }
+            if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_ZORA_e) {
+                dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+                dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+            }
         }
     }
     s_sawSwordDrawnAtCommit = (link != nullptr && link->checkSwordDraw());
@@ -3899,8 +3934,11 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                std::strcmp(boss.displayName, "Diababa") == 0) {
         cDmr_SkipInfo = 60;
     }
-    if (std::strcmp(boss.displayName, "Death Sword") == 0) {
+    if (std::strcmp(boss.displayName, "Death Sword") == 0 ||
+        std::strcmp(boss.displayName, "Beast Ganon") == 0) {
         dComIfGs_setTransformStatus(TF_STATUS_WOLF);
+    } else {
+        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
     }
 
     if (std::strcmp(boss.displayName, "Dangoro") == 0) {
@@ -3963,6 +4001,99 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
                                log_svc, mod_ctx);
 }
 
+static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_ctx) {
+    if (s_rushRunActive || s_pendingFightIndex != -1 || s_returningToChamber) {
+        return;
+    }
+
+    s_rushRunActive = true;
+    s_rushRunPos = 0;
+    s_rushRunCount = 0;
+    const size_t activeCount = boss_rush_get_active_gallery_count();
+    for (size_t s = 0; s < activeCount && s_rushRunCount < kMaxBossGalleryEntries; ++s) {
+        s_rushRunOrder[s_rushRunCount++] = boss_rush_get_active_gallery_table_index(s);
+    }
+    if (s_rushRunCount == 0) {
+        s_rushRunActive = false;
+        return;
+    }
+
+    apply_boss_rush_loadout();
+    reset_boss_rush_save_flags();
+    dComIfGs_setLife(dComIfGs_getMaxLife());
+    boss_rush_timer_begin_chain_run();
+
+    commit_boss_rush_fight_warp(s_rushRunOrder[0], daAlink_getAlinkActorClass(),
+                               log_svc, mod_ctx);
+}
+
+static void advance_boss_rush_run(const LogService* log_svc, ModContext* mod_ctx,
+                                  const char* reason) {
+    if (s_pendingFightIndex != -1 || s_returningToChamber) {
+        return;
+    }
+    if (s_rushRunActive && s_rushRunPos + 1 < s_rushRunCount) {
+        ++s_rushRunPos;
+        boss_rush_timer_notify_defeat();
+        commit_boss_rush_fight_warp(s_rushRunOrder[s_rushRunPos], daAlink_getAlinkActorClass(),
+                                   log_svc, mod_ctx);
+        return;
+    }
+
+    s_rushRunActive = false;
+    boss_rush_timer_commit_chain_total();
+    boss_rush_timer_end_chain_run();
+    return_to_boss_rush_chamber(log_svc, mod_ctx, reason);
+}
+
+static fopAc_ac_c* boss_rush_find_current_boss_actor() {
+    const int idx = boss_rush_target_index();
+    if (idx < 0 || static_cast<size_t>(idx) >= g_bossGalleryCount) {
+        return nullptr;
+    }
+
+    const char* name = g_bossGalleryTable[idx].displayName;
+    int profile = -1;
+    if (std::strcmp(name, "Ook") == 0) profile = fpcNm_E_MK_e;
+    else if (std::strcmp(name, "Diababa") == 0) profile = fpcNm_B_BQ_e;
+    else if (std::strcmp(name, "Dangoro") == 0) profile = fpcNm_E_GOB_e;
+    else if (std::strcmp(name, "Fyrus") == 0) profile = fpcNm_E_FM_e;
+    else if (std::strcmp(name, "Deku Toad") == 0) profile = fpcNm_E_DT_e;
+    else if (std::strcmp(name, "Morpheel") == 0) profile = fpcNm_B_OB_e;
+    else if (std::strcmp(name, "Death Sword") == 0) profile = fpcNm_E_VT_e;
+    else if (std::strcmp(name, "Stallord") == 0) profile = fpcNm_B_DS_e;
+    else if (std::strcmp(name, "Darkhammer") == 0) profile = fpcNm_E_TH_e;
+    else if (std::strcmp(name, "Blizzeta") == 0) profile = fpcNm_B_YO_e;
+    else if (std::strcmp(name, "Darknut") == 0) profile = fpcNm_B_TN_e;
+    else if (std::strcmp(name, "Armogohma") == 0) profile = fpcNm_B_GM_e;
+    else if (std::strcmp(name, "Aeralfos") == 0) profile = fpcNm_B_GG_e;
+    else if (std::strcmp(name, "Argorok") == 0) profile = fpcNm_B_DR_e;
+    else if (std::strcmp(name, "Zant") == 0) profile = fpcNm_B_ZANT_e;
+    else if (std::strcmp(name, "Puppet Zelda") == 0) profile = fpcNm_E_PH_e;
+    else if (std::strcmp(name, "Beast Ganon") == 0) profile = fpcNm_B_MGN_e;
+    else if (std::strcmp(name, "Horseback Ganon") == 0 ||
+             std::strcmp(name, "Ganondorf") == 0) profile = fpcNm_B_GND_e;
+    if (profile < 0) {
+        return nullptr;
+    }
+
+    return fopAcM_SearchByName(static_cast<s16>(profile));
+}
+
+void boss_rush_debug_kill_current_boss() {
+    if (!boss_rush_is_fighting_here()) {
+        return;
+    }
+
+    fopAc_ac_c* boss = boss_rush_find_current_boss_actor();
+    if (boss != nullptr) {
+        boss->health = 0;
+    }
+
+    s_killWatchdogFrames = 0;
+    advance_boss_rush_run(s_logSvc, s_modCtx, "Debug kill boss");
+}
+
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (s_spuriousReloadBlockLogTimer > 0) {
         --s_spuriousReloadBlockLogTimer;
@@ -3977,9 +4108,20 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
     if (s_pendingFightIndex != -1) {
         const size_t idx = static_cast<size_t>(s_pendingFightIndex);
-        if (idx < g_bossGalleryCount &&
-            std::strcmp(g_bossGalleryTable[idx].displayName, "Fyrus") == 0) {
-            cDmr_SkipInfo = 1;
+        if (idx < g_bossGalleryCount) {
+            const char* name = g_bossGalleryTable[idx].displayName;
+            if (std::strcmp(name, "Darkhammer") == 0 ||
+                std::strcmp(name, "Fyrus") == 0 ||
+                std::strcmp(name, "Deku Toad") == 0 ||
+                std::strcmp(name, "Death Sword") == 0 ||
+                std::strcmp(name, "Blizzeta") == 0 ||
+                std::strcmp(name, "Stallord") == 0 ||
+                std::strcmp(name, "Dangoro") == 0) {
+                cDmr_SkipInfo = 1;
+            } else if (std::strcmp(name, "Morpheel") == 0 ||
+                       std::strcmp(name, "Diababa") == 0) {
+                cDmr_SkipInfo = 60;
+            }
         }
     }
 
@@ -4044,22 +4186,39 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     }
 
     if (s_pendingFightIndex != -1) {
-        JUTFader* fader = mDoGph_gInf_c::getFader();
-        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
-        const bool fullyFaded = (faderStatus == JUTFader::None);
-        const bool leftChamber = !is_in_chamber_room();
+        ++s_warpWatchdogFrames;
+        if (s_warpWatchdogFrames % 60 == 0) {
+            const char* st = dComIfGp_getStartStageName();
+            JUTFader* fader = mDoGph_gInf_c::getFader();
+            const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+            rush_debug_logf("[rush] warp pending f=%d ens=%d peek=%d fader=%d stage=%s room=%d",
+                            s_warpWatchdogFrames, (int)dComIfGp_isEnableNextStage(),
+                            (int)fopOvlpM_IsPeek(), (int)faderStatus,
+                            st ? st : "?", (int)dComIfGp_roomControl_getStayNo());
+        }
 
         if (dComIfGp_isEnableNextStage()) {
             s_pendingWarpSawEnableNextStage = true;
         }
-        const bool stageSwapProcessed = s_pendingWarpSawEnableNextStage &&
-                                        !dComIfGp_isEnableNextStage() && !fopOvlpM_IsPeek();
 
-        const bool landingInFight = s_pendingFightFromArena
-            ? stageSwapProcessed
-            : (fullyFaded || leftChamber);
+        const bool isGanonGauntlet = !g_configBossRushSeparateGanon &&
+                                     (std::strcmp(g_bossGalleryTable[s_pendingFightIndex].displayName, "Ganondorf") == 0);
+        const char* expStage = isGanonGauntlet ? "D_MN09A" : g_bossGalleryTable[s_pendingFightIndex].stage;
+        const char* curStage = dComIfGp_getStartStageName();
+        const bool atTargetStage = (curStage != nullptr && std::strcmp(curStage, expStage) == 0);
+
+        const bool landingInFight = s_pendingWarpSawEnableNextStage &&
+                                    !dComIfGp_isEnableNextStage() &&
+                                    !is_in_chamber_room() &&
+                                    atTargetStage;
 
         if (landingInFight) {
+            rush_debug_logf("[rush] landed '%s' stage=%s room=%d arena=%d",
+                            g_bossGalleryTable[s_pendingFightIndex].displayName,
+                            g_bossGalleryTable[s_pendingFightIndex].stage,
+                            (int)dComIfGp_roomControl_getStayNo(),
+                            (int)s_pendingFightFromArena);
+            s_warpWatchdogFrames = 0;
             s_pendingFightFromArena = false;
             s_pendingWarpSawEnableNextStage = false;
             s_activeFightIndex = s_pendingFightIndex;
@@ -4105,21 +4264,20 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                                 break;
                             }
                         }
-                    } else {
-                        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
                     }
                 } else if (g_configBossRushSuggestedItems) {
                     apply_boss_suggested_items(boss);
-                } else {
-                    if (std::strcmp(boss.displayName, "Beast Ganon") == 0) {
-                        dComIfGs_setTransformStatus(TF_STATUS_WOLF);
-                    } else {
-                        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
-                    }
                 }
 
-                if (std::strcmp(boss.displayName, "Death Sword") == 0) {
+                if (std::strcmp(boss.displayName, "Death Sword") == 0 ||
+                    std::strcmp(boss.displayName, "Beast Ganon") == 0) {
                     dComIfGs_setTransformStatus(TF_STATUS_WOLF);
+                } else {
+                    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+                }
+
+                if (s_rushRunActive) {
+                    dComIfGs_setLife(dComIfGs_getMaxLife());
                 }
 
                 if (g_configBossRushSeparateGanon && std::strcmp(boss.displayName, "Ganondorf") == 0) {
@@ -4213,8 +4371,44 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_zant_instant_fight();
     update_beastganon_instant_fight(false);
 
+    if (s_activeFightIndex >= 0 && static_cast<size_t>(s_activeFightIndex) < g_bossGalleryCount &&
+        !is_in_chamber_room()) {
+        static int s_activeFightLogTimer = 0;
+        JUTFader* fader = mDoGph_gInf_c::getFader();
+        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+        if (++s_activeFightLogTimer % 60 == 0) {
+            fopAc_ac_c* boss = boss_rush_find_current_boss_actor();
+            rush_debug_logf("[rush] fight '%s' st=%s rm=%d fader=%d peek=%d ev=%d boss=%p",
+                            g_bossGalleryTable[s_activeFightIndex].displayName,
+                            dComIfGp_getStartStageName() ? dComIfGp_getStartStageName() : "?",
+                            (int)dComIfGp_roomControl_getStayNo(),
+                            (int)faderStatus, (int)fopOvlpM_IsPeek(),
+                            (int)dComIfGp_event_runCheck(), boss);
+        }
+
+        static int s_blackScreenWatchdog = 0;
+        if (faderStatus == JUTFader::None || fopOvlpM_IsPeek()) {
+            if (++s_blackScreenWatchdog >= 30) {
+                if (fopOvlpM_IsPeek()) {
+                    fopOvlpM_Cancel();
+                }
+                if (fader != nullptr) {
+                    fader->setStatus(JUTFader::Wait, 0);
+                }
+                mDoGph_gInf_c::offFade();
+                s_blackScreenWatchdog = 0;
+            }
+        } else {
+            s_blackScreenWatchdog = 0;
+        }
+    }
+
     static bool s_wasInChamber = false;
     const bool nowInChamber = is_in_boss_rush_chamber();
+    if (s_rushRunActive && nowInChamber && s_pendingFightIndex == -1 && !s_returningToChamber) {
+        s_rushRunActive = false;
+        boss_rush_timer_end_chain_run();
+    }
     if (!s_wasInChamber && nowInChamber) {
         s_needsChamberSpawn = true;
         s_chamberSpawnFrames = 0;
@@ -4367,6 +4561,19 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
+    if (s_killWatchdogFrames > 0) {
+        --s_killWatchdogFrames;
+        fopAc_ac_c* dying = boss_rush_find_current_boss_actor();
+        if (dying != nullptr) {
+            dying->health = 0;
+        }
+        if (boss_bar_boss_defeated_now()) {
+            s_killWatchdogFrames = 0;
+        } else if (s_killWatchdogFrames == 0) {
+            boss_bar_force_defeat_event();
+        }
+    }
+
     if (boss_rush_is_fighting_here() && boss_bar_consume_defeat_event()) {
         const int gt = boss_rush_target_index();
         if (!g_configBossRushSeparateGanon && gt >= 0 && static_cast<size_t>(gt) < g_bossGalleryCount &&
@@ -4375,11 +4582,11 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             const bool isGroundDuel = (curStage != nullptr && std::strcmp(curStage, "D_MN09B") == 0 &&
                                        g_dComIfG_gameInfo.info.getDan().isSwitch(1));
             if (isGroundDuel) {
-                return_to_boss_rush_chamber(log_svc, mod_ctx, "Ganondorf defeated");
+                advance_boss_rush_run(log_svc, mod_ctx, "Ganondorf defeated");
                 return;
             }
         } else {
-            return_to_boss_rush_chamber(log_svc, mod_ctx, "Boss defeated");
+            advance_boss_rush_run(log_svc, mod_ctx, "Boss defeated");
             return;
         }
     }
@@ -4408,7 +4615,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 if (--s_horsebackGanonKoTimer <= 0) {
                     s_horsebackGanonKoTimer = -1;
                     s_horsebackGanonSawHorse = false;
-                    return_to_boss_rush_chamber(log_svc, mod_ctx, "Horseback Ganon defeated");
+                    advance_boss_rush_run(log_svc, mod_ctx, "Horseback Ganon defeated");
                     return;
                 }
             } else if (s_horsebackGanonKoTimer < 0 && s_horsebackGanonSawHorse) {
@@ -4441,7 +4648,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             if (s_beastGanonKoTimer > 0) {
                 if (--s_beastGanonKoTimer <= 0) {
                     s_beastGanonKoTimer = -1;
-                    return_to_boss_rush_chamber(log_svc, mod_ctx, "Beast Ganon defeated");
+                    advance_boss_rush_run(log_svc, mod_ctx, "Beast Ganon defeated");
                     return;
                 }
             } else if (s_beastGanonKoTimer < 0) {
@@ -4491,6 +4698,11 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             }
         }
     }
+
+    // Master sword spawn/prompt/interaction disabled for now.
+    // if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
+    //     start_boss_rush_full_run(log_svc, mod_ctx);
+    // }
 }
 
 ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,

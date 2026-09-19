@@ -4,7 +4,6 @@
 #include "human_warp.hpp"
 #include "faster_midna_cancel.hpp"
 #include "hud_auto_fade.hpp"
-#include "drowning_warning.hpp"
 #include "sprint_fov_kick.hpp"
 
 ModResult init_general(const HookService* hook_svc, ModError* error) {
@@ -18,7 +17,6 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     init_faster_transitions(hook_svc, error);
     init_lockon_letterbox(hook_svc, error);
     init_hud_auto_fade(hook_svc, error);
-    init_drowning_warning(hook_svc, error);
     init_sprint_fov_kick(hook_svc, error);
     return MOD_OK;
 }
@@ -29,7 +27,6 @@ void update_general(const LogService* log_svc, ModContext* mod_ctx) {
     update_dominion_sword();
     update_human_warp(log_svc, mod_ctx);
     update_hud_auto_fade();
-    update_drowning_warning();
     update_sprint_fov_kick();
 }
 
@@ -42,6 +39,5 @@ void shutdown_general() {
     shutdown_faster_transitions();
     shutdown_lockon_letterbox();
     shutdown_hud_auto_fade();
-    shutdown_drowning_warning();
     shutdown_sprint_fov_kick();
 }

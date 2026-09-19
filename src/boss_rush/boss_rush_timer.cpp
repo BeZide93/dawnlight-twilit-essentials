@@ -37,6 +37,18 @@ long long s_provisionalMs = 0;
 std::chrono::steady_clock::time_point s_lastTick;
 bool s_haveLastTick = false;
 
+// Chain-run mode (full boss rush): s_elapsedMs keeps accumulating across the
+// whole run and only ticks while a fight is actually running. Per-fight times
+// for the best-time records are measured relative to s_chainCheckpointMs, the
+// value the long timer had when the current fight engaged.
+bool s_chainRun = false;
+unsigned long long s_chainCheckpointMs = 0;
+
+const ConfigService* s_chainCfg = nullptr;
+ModContext*          s_chainCtx = nullptr;
+ConfigVarHandle      s_chainVar = 0;
+u32                  s_chainBestCs = 0;
+
 inline u32 cs_now() { return static_cast<u32>(s_elapsedMs / 10ull); }
 
 void load_from_string(const char* s) {
@@ -83,7 +95,9 @@ bool s_eventActive = false;
 void finalize() {
     if (s_state != RUNNING) return;
     s_state = FINISHED;
-    s_finalCs = cs_now();
+    const unsigned long long fightMs = s_chainRun ? (s_elapsedMs - s_chainCheckpointMs)
+                                                  : s_elapsedMs;
+    s_finalCs = static_cast<u32>(fightMs / 10ull);
 
     const u32 prev = (s_idx >= 0 && s_idx < static_cast<int>(kMaxBossGalleryEntries))
                          ? s_best[s_idx] : 0;
@@ -91,7 +105,9 @@ void finalize() {
     if (s_isRecord && s_idx >= 0 && s_idx < static_cast<int>(kMaxBossGalleryEntries)) {
         s_best[s_idx] = s_finalCs;
         save_to_string();
-        Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        if (!s_chainRun) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
     }
 }
 
@@ -112,6 +128,25 @@ void boss_rush_timer_init(const ConfigService* config_svc, ModContext* mod_ctx,
         size_t len = 0;
         if (s_cfg->get_string(s_ctx, s_var, buf, sizeof(buf), &len) == MOD_OK) {
             load_from_string(buf);
+        }
+    }
+}
+
+void boss_rush_timer_init_chain_best(const ConfigService* config_svc, ModContext* mod_ctx,
+                                     ConfigVarHandle var) {
+    s_chainCfg = config_svc;
+    s_chainCtx = mod_ctx;
+    s_chainVar = var;
+    s_chainBestCs = 0;
+
+    if (s_chainCfg != nullptr && s_chainVar != 0) {
+        char buf[32];
+        size_t len = 0;
+        if (s_chainCfg->get_string(s_chainCtx, s_chainVar, buf, sizeof(buf), &len) == MOD_OK) {
+            const long cs = std::strtol(buf, nullptr, 10);
+            if (cs > 0) {
+                s_chainBestCs = static_cast<u32>(cs);
+            }
         }
     }
 }
@@ -149,7 +184,11 @@ void boss_rush_timer_update() {
         bool engaged = true;
         if (boss_bar_current_fight_state(&lbl, engaged) && engaged) {
             s_state = RUNNING;
-            s_elapsedMs = 0;
+            if (s_chainRun) {
+                s_chainCheckpointMs = s_elapsedMs;
+            } else {
+                s_elapsedMs = 0;
+            }
             s_provisionalMs = 0;
             s_haveLastTick = false;
             s_eventActive = false;
@@ -200,6 +239,9 @@ void boss_rush_timer_update() {
         break;
     }
     case FINISHED:
+        if (s_chainRun && idx != s_idx) {
+            s_state = IDLE;
+        }
         break;
     }
 }
@@ -211,7 +253,9 @@ void boss_rush_timer_notify_defeat() {
 
 void boss_rush_timer_reset_run() {
     if (s_state == RUNNING) s_state = IDLE;
-    s_elapsedMs = 0;
+    if (!s_chainRun) {
+        s_elapsedMs = 0;
+    }
     s_provisionalMs = 0;
     s_haveLastTick = false;
 }
@@ -219,7 +263,14 @@ void boss_rush_timer_reset_run() {
 bool boss_rush_timer_active_cs(unsigned int* outCs) {
     if (!g_configBossRushTimer) return false;
     if (s_state == RUNNING)  { if (outCs) *outCs = cs_now(); return true; }
-    if (s_state == FINISHED) { if (outCs) *outCs = s_finalCs; return true; }
+    if (s_state == FINISHED) {
+        if (outCs) *outCs = s_chainRun ? cs_now() : s_finalCs;
+        return true;
+    }
+    if (s_chainRun && s_elapsedMs > 0) {
+        if (outCs) *outCs = cs_now();
+        return true;
+    }
     return false;
 }
 
@@ -231,6 +282,7 @@ bool boss_rush_timer_best_cs(int tableIndex, unsigned int* outCs) {
 }
 
 bool boss_rush_timer_result(unsigned int* outCs, bool* outIsRecord) {
+    if (s_chainRun) return false;
     if (s_state != FINISHED) return false;
     if (outCs) *outCs = s_finalCs;
     if (outIsRecord) *outIsRecord = s_isRecord;
@@ -244,6 +296,58 @@ bool boss_rush_timer_last_was_record() {
 void boss_rush_timer_clear_best() {
     for (u32& b : s_best) b = 0;
     save_to_string();
+}
+
+void boss_rush_timer_begin_chain_run() {
+    s_chainRun = true;
+    s_chainCheckpointMs = 0;
+    s_state = IDLE;
+    s_elapsedMs = 0;
+    s_provisionalMs = 0;
+    s_haveLastTick = false;
+    s_idx = -1;
+    s_finalCs = 0;
+    s_isRecord = false;
+}
+
+void boss_rush_timer_end_chain_run() {
+    s_chainRun = false;
+    s_chainCheckpointMs = 0;
+}
+
+bool boss_rush_timer_chain_active() {
+    return s_chainRun;
+}
+
+bool boss_rush_timer_chain_best_cs(unsigned int* outCs) {
+    if (s_chainBestCs == 0) return false;
+    if (outCs) *outCs = s_chainBestCs;
+    return true;
+}
+
+void boss_rush_timer_commit_chain_total() {
+    if (!s_chainRun) return;
+
+    const u32 totalCs = cs_now();
+    if (totalCs == 0) return;
+
+    const bool record = (s_chainBestCs == 0) || (totalCs < s_chainBestCs);
+    if (record) {
+        s_chainBestCs = totalCs;
+        if (s_chainCfg != nullptr && s_chainCtx != nullptr && s_chainVar != 0) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%u", totalCs);
+            s_chainCfg->set_string(s_chainCtx, s_chainVar, buf);
+        }
+        Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
+
+    // Present the full-run total as the end-of-run result (golden panel on the
+    // chamber return when it was a record).
+    s_state = FINISHED;
+    s_finalCs = totalCs;
+    s_isRecord = record;
+    s_idx = -1;
 }
 
 void boss_rush_timer_format(unsigned int cs, char* buf, size_t bufLen) {

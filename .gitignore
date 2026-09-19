@@ -3,3 +3,6 @@
 /dusklight/
 .idea/
 .DS_Store
+/tools/generate_logo.py
+/tools/logo_base.png
+__pycache__/

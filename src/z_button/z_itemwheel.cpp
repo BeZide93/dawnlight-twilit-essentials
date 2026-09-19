@@ -1,6 +1,7 @@
 #pragma once
 
 #include "z_itemwheel.hpp"
+#include "z_item_actions.hpp"
 #include <d/d_menu_item_explain.h>
 #include <JSystem/JUtility/JUTFont.h>
 #include <cmath>
@@ -521,6 +522,7 @@ HookAction on_set_select_item_index_pre(ModContext*, void* args, void*, void*) {
 
     return HOOK_CONTINUE;
 }
+
 
 HookAction on_set_mix_item_pre(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !args) {
