@@ -156,8 +156,7 @@ void draw_boss_rush_texts(float floorY) {
         }
     }
 
-    // Master sword spawn disabled for now.
-    // draw_boss_rush_master_sword_label(link, floorY);
+    draw_boss_rush_master_sword_label(link, floorY);
 
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port) port->setup2D();

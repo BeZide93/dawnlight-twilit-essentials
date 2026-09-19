@@ -1051,6 +1051,5 @@ void draw_boss_rush_models(float floorY) {
         }
     }
 
-    // Master sword spawn disabled for now.
-    // draw_boss_rush_master_sword(floorY);
+    draw_boss_rush_master_sword(floorY);
 }

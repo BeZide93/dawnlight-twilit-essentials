@@ -1,5 +1,9 @@
 #include "collection_lib/custom_equip.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
@@ -406,6 +410,60 @@ static bool bmd_vertex_format_ok(const void* bmd) {
     return true;   // no VTX1 chunk found - not ours to judge
 }
 
+// Several entries can end up holding the SAME JKRArchive instance:
+// JKRArchive::mount() returns the already-mounted volume when the same path
+// is mounted again (every custom sword shares the overlay's
+// Object/AlSwords.arc). Unmounting that shared instance because ONE entry
+// failed or got removed leaves every other entry's e.arc - and the model
+// equipped from it - pointing at freed memory; the next getResource() then
+// returns stale bytes that still pass the magic header check and fault
+// inside J3DModelLoader ("Fairy Sword crashes after a few equip/unequip
+// cycles"). Only unmount when this entry is the last user of the archive.
+static bool arc_used_by_other_entry(const Entry* except, const JKRArchive* arc, bool iconArc) {
+    for (int i = 0; i < s_count; i++) {
+        if (&s_entries[i] == except) continue;
+        if ((iconArc ? s_entries[i].iconArc : s_entries[i].arc) == arc) return true;
+    }
+    return false;
+}
+
+static void release_entry_arc(Entry& e) {
+    if (e.arc == nullptr) return;
+    if (!e.arcIsGame && !arc_used_by_other_entry(&e, e.arc, false)) {
+        JKRUnmountArchive(e.arc);
+    }
+    e.arc = nullptr;
+}
+
+static void release_entry_icon_arc(Entry& e) {
+    if (e.iconArc == nullptr) return;
+    if (!arc_used_by_other_entry(&e, e.iconArc, true)) {
+        JKRUnmountArchive(e.iconArc);
+    }
+    e.iconArc = nullptr;
+}
+
+#ifdef _WIN32
+// Last-resort net: the stock loader faults on malformed or stale model
+// buffers. A buffer can even die between the validation above and the loader
+// (freed archive memory keeps its bytes until the heap reuses them), so
+// downgrade any access violation during the parse to a nullptr return and let
+// the caller degrade to "no custom model" instead of killing the game.
+static J3DModelData* seh_load_model_data(const void* bmd, u32 flags) {
+    __try {
+        return J3DModelLoaderDataBase::load(bmd, flags);
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
+                  ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        return nullptr;
+    }
+}
+#else
+static J3DModelData* seh_load_model_data(const void* bmd, u32 flags) {
+    return J3DModelLoaderDataBase::load(bmd, flags);
+}
+#endif
+
 static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     if (!bmd) return nullptr;
     // Sanity-check the magic header before handing raw memory to
@@ -443,7 +501,7 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     JKRHeap* rootHeap = JKRHeap::getRootHeap();
     JKRHeap* old = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
 
-    J3DModelData* data = J3DModelLoaderDataBase::load(bmd, 0x59020010);
+    J3DModelData* data = seh_load_model_data(bmd, 0x59020010);
     if (!data || data->getMaterialNum() == 0) {
         if (old != nullptr) mDoExt_setCurrentHeap(old);
         return nullptr;
@@ -496,7 +554,7 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
 }
 
 static void note_load_fail(Entry& e) {
-    if (e.arc != nullptr && !e.arcIsGame) { JKRUnmountArchive(e.arc); e.arc = nullptr; }
+    release_entry_arc(e);
     e.model = e.sheathModel = e.hatModel = e.faceModel = e.handModel = nullptr;
     if (++e.tryCount >= 30) {
         e.tried = true;
@@ -1091,8 +1149,8 @@ void custom_equip_reset_registry() {
             res->free(g_modCtx, &e.iconArcBuf);
             res->free(g_modCtx, &e.arcBuf);
         }
-        if (e.iconArc != nullptr) { JKRUnmountArchive(e.iconArc); e.iconArc = nullptr; }
-        if (e.arc != nullptr && !e.arcIsGame) JKRUnmountArchive(e.arc);
+        release_entry_icon_arc(e);
+        release_entry_arc(e);
         e = Entry{};
     }
     s_count = 0;
@@ -1116,8 +1174,8 @@ void custom_equip_remove(int id) {
         res->free(g_modCtx, &e.iconArcBuf);
         res->free(g_modCtx, &e.arcBuf);
     }
-    if (e.iconArc != nullptr) { JKRUnmountArchive(e.iconArc); e.iconArc = nullptr; }
-    if (e.arc != nullptr && !e.arcIsGame) { JKRUnmountArchive(e.arc); e.arc = nullptr; }
+    release_entry_icon_arc(e);
+    release_entry_arc(e);
 
     for (int i = id; i < s_count - 1; i++) s_entries[i] = s_entries[i + 1];
     s_count--;
@@ -2248,9 +2306,9 @@ void custom_equip_shutdown() {
             res->free(g_modCtx, &e.iconBuf);   // menu-only, never held by a world model
         }
         if (!inUse) {
-            if (e.arc != nullptr && !e.arcIsGame) JKRUnmountArchive(e.arc);
+            release_entry_arc(e);
             if (res != nullptr && g_modCtx != nullptr) res->free(g_modCtx, &e.arcBuf);
-            if (e.iconArc != nullptr) JKRUnmountArchive(e.iconArc);
+            release_entry_icon_arc(e);
             if (res != nullptr && g_modCtx != nullptr) res->free(g_modCtx, &e.iconArcBuf);
             s_entries[i] = Entry{};
         } else {
