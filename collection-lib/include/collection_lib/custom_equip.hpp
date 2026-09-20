@@ -100,4 +100,3 @@ void custom_equip_restore_from_save();
 void custom_equip_before_link_rebuild();            // changeLink PRE
 void custom_equip_on_alink_created(daAlink_c* a);   // changeLink / create POST
 void custom_equip_set_link_model_wolf(bool isWolf); // changeWolf/changeLink POST
-

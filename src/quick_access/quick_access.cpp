@@ -484,6 +484,10 @@ bool quick_access_keep_boots_equipped(daAlink_c* link) {
     return link->checkEquipHeavyBoots() != 0;
 }
 
+bool quick_access_boots_on_quick_access() {
+    return g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e;
+}
+
 static u32 qa_bti_image_size(const ResTIMG* t) {
     const u32 w = t->width;
     const u32 h = t->height;

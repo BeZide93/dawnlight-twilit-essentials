@@ -1113,12 +1113,14 @@ void on_menu_collect_2d_create_post(ModContext*, void* args, void*, void*) {
     if (!args) return;
     dMenu_Collect2D_c* collect2D = mods::arg<dMenu_Collect2D_c*>(args, 0);
     s_currentCollect2D = collect2D;
+    custom_equip_menu_doll_begin();
     if (!is_collection_menu_enabled()) return;
     collection_page_reset();   // always open on the main page
     apply_collect_shifts(collect2D);
 }
 
 HookAction on_menu_collect_2d_delete_pre(ModContext*, void*, void*, void*) {
+    custom_equip_menu_doll_end();
     s_currentCollect2D = nullptr;
     s_picTunagiKen2 = nullptr;
     s_picTunagiTate2 = nullptr;

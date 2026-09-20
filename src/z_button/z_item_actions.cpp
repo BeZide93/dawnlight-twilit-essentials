@@ -320,6 +320,8 @@ void check_iron_boots_unequip_on_overwrite() {
     if (link == nullptr) return;
 
     if (link->checkEquipHeavyBoots()) {
+        if (quick_access_boots_on_quick_access()) return;
+
         bool assigned = false;
         for (int i = 0; i < 3; i++) {
             u8 slotIdx = dComIfGs_getSelectItemIndex(i);

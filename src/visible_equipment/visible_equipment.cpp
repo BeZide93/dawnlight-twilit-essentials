@@ -1430,7 +1430,7 @@ static void on_alink_status_window_draw_post(ModContext *, void *, void *, void 
   }
 
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
-  if (!alink || !alink->mpLinkModel ||
+  if (!alink || !alink->checkStatusWindowDraw() || !alink->mpLinkModel ||
       alink->mpLinkModel->getModelData() == nullptr || isWolfOrTransforming(alink)) {
     return;
   }

@@ -1157,7 +1157,7 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     } else {
         ui_add_toggle(left, "Enabled", s_varCustomZButton,
             "<p>Enables a 3rd item slot on the Z button. Midna moves to a separate button - "
-            "both can be changed in the Controls tab.</p>");
+            "both can be changed in the Controls tab. Note: A restart may be required.</p>");
     }
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");

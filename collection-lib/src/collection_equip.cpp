@@ -400,31 +400,6 @@ HookAction on_da_alink_change_link_pre(ModContext*, void* args, void*, void*) {
         if (td != nullptr && dComIfGs_getSelectEquipClothes() != td->baseClothes) {
             dComIfGs_setSelectEquipClothes(td->baseClothes);
         }
-        // changeLink() builds mpLinkModel/Hat/Hand straight off the live
-        // checkCasualWearFlg()/checkZoraWearFlg()/... state (always correct,
-        // whatever dComIfGs_getSelectEquipClothes() says right now) - but it
-        // builds mpLinkFaceModel off the ACTOR'S OWN mArcName field instead
-        // (d_a_alink_wolf.inc, changeLink: "al_face.bmd" is fetched from
-        // mArcName, not from the same live checks). Vanilla only ever updates
-        // mArcName via setArcName(), called from the timer-driven
-        // loadModelDVD() clothes-change flow - forcing
-        // dComIfGs_setSelectEquipClothes() directly, as this hook and
-        // custom_equip_apply's per-frame pin both do, never goes through that
-        // flow, so mArcName is left holding whatever the LAST real (timer-
-        // driven) clothes change set it to - Casual/Zora/Magic Armor/Kokiri
-        // from however the player's save left them, not necessarily this
-        // tunic's baseClothes. A changeLink() call here then builds a face
-        // model from the WRONG archive - if that archive is a different vanilla
-        // one it's merely visually wrong, but if it was never actually mounted
-        // (this state machine skipped) dComIfG_getObjectRes() can return
-        // stale/malformed data, which is exactly what a "custom tunic +
-        // straight into the collection menu on the very first changeLink of
-        // the session" repro hits: calcWeightEnvelopeMtx garbage-reads it.
-        // Always resync mArcName to match the value just pinned above,
-        // regardless of whether this call needed to change it.
-        if (td != nullptr) {
-            alink->setArcName(false);
-        }
     }
     // The old captured base models are about to be freed - forget them so the
     // POST re-captures the fresh ones (otherwise the "unequip -> restore" path

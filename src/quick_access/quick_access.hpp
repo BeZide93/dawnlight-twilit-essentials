@@ -18,6 +18,7 @@ void update_quick_access(const LogService* log_svc, ModContext* mod_ctx);
 void shutdown_quick_access();
 
 bool quick_access_is_active();
+bool quick_access_boots_on_quick_access();
 bool quick_access_keep_boots_equipped(daAlink_c* link);
 bool quick_access_keep_bomb_equipped(daAlink_c* link);
 bool quick_access_keep_lantern_equipped(daAlink_c* link);

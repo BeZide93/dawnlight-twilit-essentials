@@ -363,39 +363,6 @@ static void ensure_collection_heap_capacity() {
 
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemB, CollectionLibItemBTextureHook);
 
-// The item-icon table (d_item_data.h) is indexed raw: only real vanilla items
-// resolve in the icon archive. The custom equip machinery keeps dItemNo_NONE_e
-// (0xFF) in the sword slot while no vanilla sword is selected (after a custom
-// unequip, or during an equip before the backing sword is written), and the HUD
-// and the collection screen then call changeTextureItemB with it - the original
-// fetches item_resource[0xFF]'s texture index from the icon archive and
-// OSPanics inside JKRAramArchive::fetchResource. Vanilla itself only ever calls
-// this for the four swords plus the lure rod (every other call site is guarded,
-// see d_meter2_draw.cpp), so mirror that guard here: vanilla IDs pass through
-// untouched, anything else gets the custom icon painted (if one is equipped)
-// and skips the original entirely.
-static HookAction cl_item_b_texture_pre(ModContext*, void* args, void*, void*) {
-    dMeter2Draw_c* draw = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
-    const u8 itemNo = args ? mods::arg<u8>(args, 1) : 0;
-
-    if (itemNo == dItemNo_LURE_ROD_e || itemNo == dItemNo_WOOD_STICK_e || itemNo == dItemNo_SWORD_e ||
-        itemNo == dItemNo_MASTER_SWORD_e || itemNo == dItemNo_LIGHT_SWORD_e) {
-        return HOOK_CONTINUE;
-    }
-
-    if (custom_equip_active(CE_SWORD)) {
-        ResTIMG* icon = custom_equip_icon(custom_equip_active_id(CE_SWORD));
-        if (icon != nullptr && draw != nullptr && draw->mpItemB != nullptr &&
-            draw->mpItemB->getPanePtr() != nullptr) {
-            static_cast<J2DPicture*>(draw->mpItemB->getPanePtr())->changeTexture(icon, 0);
-        }
-    }
-    if (draw != nullptr && draw->mpItemBPane != nullptr) {
-        draw->mpItemBPane->hide();
-    }
-    return HOOK_SKIP_ORIGINAL;
-}
-
 static void cl_item_b_texture_post(ModContext*, void* args, void*, void*) {
     if (!custom_equip_active(CE_SWORD)) return;
     const int id = custom_equip_active_id(CE_SWORD);
@@ -506,10 +473,7 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
         // Custom sword/shield/tunic model swap on Link (world + doll).
         custom_equip_init_hooks(hook_svc, g_saveSvc);
 
-        // HUD B-button icon override for equipped custom swords, plus a guard so
-        // unresolvable item numbers (empty sword slot after a custom unequip)
-        // never reach the original's icon fetch - that OSPanic'd the game.
-        mods::hook::add_pre<CollectionLibItemBTextureHook>(hook_svc, cl_item_b_texture_pre);
+        // HUD B-button icon override for equipped custom swords.
         mods::hook::add_post<CollectionLibItemBTextureHook>(hook_svc, cl_item_b_texture_post);
     }
     return MOD_OK;

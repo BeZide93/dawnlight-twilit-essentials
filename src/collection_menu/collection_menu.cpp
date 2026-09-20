@@ -89,7 +89,6 @@ void register_custom_tunics() {
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc,
                                const SaveService* save_svc, ModContext* mod_ctx,
                                ModError* error) {
-    return MOD_OK;
     sync_collection_ordon_hero_page();
 
     collectionlib_set_register_callback([]() {
@@ -135,8 +134,8 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
         }
 
         register_custom_swords();
-        register_custom_shields();
-        register_custom_tunics();
+        //register_custom_shields();
+        //register_custom_tunics();
     });
 
     return collectionlib_init(hook_svc, log_svc, save_svc, mod_ctx, error);
