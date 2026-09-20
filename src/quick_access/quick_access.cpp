@@ -6,6 +6,7 @@
 #include "../controls/controls.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_ext.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -2182,7 +2183,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
 static dusk::config::ConfigVar<f32>* s_qaHudScaleVar = nullptr;
 
-static f32 qa_user_hud_scale() {
+f32 qa_user_hud_scale() {
     if (s_qaHudScaleVar != nullptr) {
         f32 scale = s_qaHudScaleVar->getValue();
         if (scale < 0.5f) scale = 0.5f;
@@ -2190,6 +2191,35 @@ static f32 qa_user_hud_scale() {
         return scale;
     }
     return 1.0f;
+}
+
+static bool s_scaledHudActive = false;
+static JGeometry::TBox2<f32> s_savedHudOrtho;
+
+void qa_hud_scale_begin(f32 anchorX, f32 anchorY) {
+    const f32 s = qa_user_hud_scale();
+    if (s == 1.0f || s_scaledHudActive) return;
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port == nullptr) return;
+    auto* ortho = reinterpret_cast<J2DOrthoGraph*>(port);
+    s_savedHudOrtho = *ortho->getOrtho();
+    ortho->setOrtho(anchorX + (s_savedHudOrtho.i.x - anchorX) / s,
+                    anchorY + (s_savedHudOrtho.i.y - anchorY) / s,
+                    s_savedHudOrtho.getWidth() / s, s_savedHudOrtho.getHeight() / s, -1.0f, 1.0f);
+    ortho->setPort();
+    s_scaledHudActive = true;
+}
+
+void qa_hud_scale_end() {
+    if (!s_scaledHudActive) return;
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port != nullptr) {
+        auto* ortho = reinterpret_cast<J2DOrthoGraph*>(port);
+        ortho->setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
+                        mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(), -1.0f, 1.0f);
+        ortho->setPort();
+    }
+    s_scaledHudActive = false;
 }
 
 static void draw_strip_hud_icon(J2DScreen* screen) {
@@ -2321,7 +2351,6 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
     }
 
     quick_access_strip_draw(screenW, screenH, alpha, glow);
-    quick_access_strip_cursor_present();
 }
 
 ModResult init_quick_access(const HookService* hook_svc, const SaveService* save_svc,

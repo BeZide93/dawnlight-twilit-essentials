@@ -100,6 +100,7 @@ static bool item_state_badge(u8 itemNo) {
 
 void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
+    qa_hud_scale_begin(screenW * 0.5f, 0.0f);
     const f32 centerX = screenW * 0.5f;
     const f32 centerY = BAR_Y;
 
@@ -186,6 +187,10 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         }
     }
 
+    quick_access_strip_cursor_present();
+    qa_hud_scale_end();
+    qa_hud_scale_begin(screenW * 0.5f, screenH);
+
     const f32 hintY = screenH - 40.0f;
     const bool iconsReady = qa_hint_button_ready();
     const char* hintText = iconsReady ? "Customize" : "X Customize";
@@ -204,4 +209,5 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     qa_draw_text(hintText, hintX, hintY, hintFontW, hintFontH,
                  JUtility::TColor(255, 248, 210, alpha), JUtility::TColor(235, 185, 65, alpha),
                  alpha);
+    qa_hud_scale_end();
 }

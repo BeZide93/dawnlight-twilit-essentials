@@ -74,6 +74,10 @@ void qa_sel_cursor_destroy();
 
 bool itemwheel_filter_active();
 
+f32 qa_user_hud_scale();
+void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
+void qa_hud_scale_end();
+
 void quick_access_radial_select(f32 stickX, f32 stickY, f32 stickMag);
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow);
 void quick_access_radial_reset();

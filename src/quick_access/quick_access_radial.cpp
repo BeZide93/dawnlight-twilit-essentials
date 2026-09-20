@@ -197,6 +197,7 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate) {
 
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     (void)glow;
+    qa_hud_scale_begin(centerX, centerY);
     const f32 radius = 92.0f;
 
     centerY -= (1.0f - s_menuAlpha) * 16.0f;
@@ -290,6 +291,8 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     }
 
     const f32 screenH = centerY * 2.0f;
+    qa_hud_scale_end();
+    qa_hud_scale_begin(centerX, screenH);
     const f32 hintY = screenH - 40.0f;
     const bool iconsReady = qa_hint_button_ready();
     const char* hintText = iconsReady ? "Customize" : "X Customize";
@@ -308,4 +311,5 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     qa_draw_text(hintText, hintX, hintY, hintFontW, hintFontH,
                  JUtility::TColor(255, 248, 210, alpha), JUtility::TColor(235, 185, 65, alpha),
                  alpha);
+    qa_hud_scale_end();
 }

@@ -660,6 +660,7 @@ static void bottles_radial_select(f32 stickX, f32 stickY, f32 stickMag) {
 }
 
 static void bottles_radial_draw(f32 screenW, f32 screenH, u8 alpha) {
+    qa_hud_scale_begin(screenW * 0.5f, screenH * 0.5f);
     f32 centerX = screenW * 0.5f;
     f32 centerY = screenH * 0.5f;
 
@@ -727,7 +728,10 @@ static void bottles_radial_draw(f32 screenW, f32 screenH, u8 alpha) {
         }
     }
 
+    qa_hud_scale_end();
+    qa_hud_scale_begin(screenW * 0.5f, screenH);
     draw_bottle_hint(screenW * 0.5f, screenH, alpha);
+    qa_hud_scale_end();
 }
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawBottlesHook);

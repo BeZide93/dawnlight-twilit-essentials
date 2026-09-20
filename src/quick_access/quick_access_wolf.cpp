@@ -140,6 +140,7 @@ static void draw_wolf_cursor(f32 cx, f32 cy, u8 alpha) {
 
 void quick_access_wolf_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
+    qa_hud_scale_begin(screenW * 0.5f, screenH * 0.5f);
 
     const f32 radius = 92.0f;
     f32 centerX = screenW * 0.5f;
@@ -158,5 +159,8 @@ void quick_access_wolf_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     draw_wolf_icon(centerX, slotY, 32.0f, alpha);
     draw_wolf_cursor(centerX, slotY, alpha);
     draw_label_centered("Sun Song", centerX, slotY + 32.0f, alpha);
+    qa_hud_scale_end();
+    qa_hud_scale_begin(screenW * 0.5f, screenH);
     draw_wolf_hint(centerX, screenH, alpha);
+    qa_hud_scale_end();
 }

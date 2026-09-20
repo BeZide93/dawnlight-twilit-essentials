@@ -5,6 +5,8 @@
 #include "z_mobile.hpp"
 #include "../boss_rush/boss_rush_midna.hpp"
 
+f32 qa_user_hud_scale();
+
 DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawDrawHook);
 DEFINE_HOOK(&dMeter2Draw_c::drawButtonZ, DrawButtonZHook);
 DEFINE_HOOK(&dMeter2Draw_c::setButtonIconMidonaAlpha, MidonaAlphaHook);
@@ -341,10 +343,11 @@ void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
 
     if (zbtnPane != nullptr) {
         const JGeometry::TBox2<f32>& bounds = zbtnPane->getGlbBounds();
-        baseX = bounds.i.x;
-        baseY = bounds.i.y;
-        iconW = bounds.getWidth();
-        iconH = bounds.getHeight();
+        const f32 hudScale = qa_user_hud_scale();
+        iconW = bounds.getWidth() * hudScale;
+        iconH = bounds.getHeight() * hudScale;
+        baseX = bounds.i.x - bounds.getWidth() * (1.0f - hudScale) * 0.5f;
+        baseY = bounds.i.y + bounds.getHeight() * (1.0f - hudScale) * 0.5f;
     }
 
     f32 touchX, touchY, touchW, touchH;

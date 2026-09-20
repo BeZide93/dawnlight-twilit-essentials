@@ -771,6 +771,7 @@ static void draw_hint_row(f32 centerX, f32 y, u8 alpha) {
 
 void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
+    qa_hud_scale_begin(screenW * 0.5f, 0.0f);
 
     const f32 centerX = screenW * 0.5f;
 
@@ -818,6 +819,7 @@ void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     if (s_editCount <= 0) {
         draw_centered_label("No items", GRID_TOP_Y, 9.0f, 11.5f, alpha,
                             JUtility::TColor(255, 248, 210, alpha), JUtility::TColor(235, 185, 65, alpha), centerX);
+        qa_hud_scale_end();
         return;
     }
 
@@ -882,5 +884,8 @@ void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         }
     }
 
+    qa_hud_scale_end();
+    qa_hud_scale_begin(screenW * 0.5f, screenH);
     draw_hint_row(centerX, static_cast<f32>(screenH) - 24.0f, static_cast<u8>(alpha * 0.95f));
+    qa_hud_scale_end();
 }
