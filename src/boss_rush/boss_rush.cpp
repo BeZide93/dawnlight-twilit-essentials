@@ -67,6 +67,7 @@ extern const SaveService* svc_save;
 #include "SSystem/SComponent/c_lib.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 #include "dusk/config_var.hpp"
+#include "../general/faster_transitions.hpp"
 
 #include <algorithm>
 #include <array>
@@ -289,6 +290,33 @@ namespace {
 static bool s_bossRushModeActive = false;
 static ModContext* s_modCtx = nullptr;
 static const LogService* s_logSvc = nullptr;
+
+static bool s_transitionsUserSnapshot = true;
+static bool s_transitionsSnapshotValid = false;
+static dusk::config::ConfigVar<bool>* s_bossRushFastTransitionsVar = nullptr;
+
+static void force_boss_rush_fast_transitions() {
+    if (!s_transitionsSnapshotValid) {
+        s_transitionsUserSnapshot = g_configFasterTransitions;
+        s_transitionsSnapshotValid = true;
+    }
+    if (s_bossRushFastTransitionsVar != nullptr && !s_bossRushFastTransitionsVar->getValue()) {
+        s_bossRushFastTransitionsVar->setOverrideValue(true);
+    }
+    if (!g_configFasterTransitions) {
+        g_configFasterTransitions = true;
+        faster_transitions_apply_mode();
+    }
+}
+
+static void restore_boss_rush_fast_transitions() {
+    if (s_bossRushFastTransitionsVar != nullptr) {
+        s_bossRushFastTransitionsVar->clearOverride();
+    }
+    g_configFasterTransitions = s_transitionsUserSnapshot;
+    faster_transitions_apply_mode();
+    s_transitionsSnapshotValid = false;
+}
 
 #include <cstdarg>
 static void rush_debug_logf(const char* fmt, ...) {
@@ -3341,6 +3369,8 @@ static void init_boss_rush_qol_overrides(const HookService* hook_svc) {
     if (hook_svc->resolve(s_modCtx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK) {
         s_bossRushGetConfigVar = reinterpret_cast<BossRushGetConfigVarFn>(addr);
         s_bossRushAutoSaveVar = s_bossRushGetConfigVar("game.autoSave");
+        s_bossRushFastTransitionsVar =
+            static_cast<dusk::config::ConfigVar<bool>*>(s_bossRushGetConfigVar("game.fastTransitions"));
     }
 
     addr = nullptr;
@@ -3468,6 +3498,7 @@ static void prepare_boss_rush_state() {
 
     persist_boss_rush_session_marker();
     s_bossRushModeActive = true;
+    force_boss_rush_fast_transitions();
     s_activeFightIndex = -1;
     s_pendingFightIndex = -1;
     s_returningToChamber = false;
@@ -4095,6 +4126,10 @@ void boss_rush_debug_kill_current_boss() {
 }
 
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
+    if (s_bossRushModeActive) {
+        force_boss_rush_fast_transitions();
+    }
+
     if (s_spuriousReloadBlockLogTimer > 0) {
         --s_spuriousReloadBlockLogTimer;
     }
@@ -4182,6 +4217,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 svc_save->delete_blob(s_modCtx, kBossRushLocationBlobName);
                 clear_boss_rush_session_marker();
             }
+            restore_boss_rush_fast_transitions();
         }
     }
 
@@ -4757,6 +4793,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         if (is_in_chamber_room()) {
             resumedBossRush = true;
             s_bossRushModeActive = true;
+            force_boss_rush_fast_transitions();
             s_needsChamberSpawn = true;
             s_chamberSpawnFrames = 0;
             s_chamberCamArmFrames = 30;
@@ -4817,6 +4854,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
                 }
                 resumedBossRush = true;
                 s_bossRushModeActive = true;
+                force_boss_rush_fast_transitions();
                 s_activeFightIndex = static_cast<int>(i);
                 break;
             }

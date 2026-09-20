@@ -471,6 +471,10 @@ HookAction z_mobile_guard_heavy_boots(void* args, void* retval) {
         hb_clear_lock();
         return HOOK_CONTINUE;
     }
+    if (enable == 0 && s_hbGuardLink == link && s_hbManualToggleOff) {
+        hb_clear_lock();
+        return HOOK_CONTINUE;
+    }
     if (enable != 0 && z_mobile_hb_locked(link)) {
         if (retval) *static_cast<int*>(retval) = 0;
         return HOOK_SKIP_ORIGINAL;

@@ -108,6 +108,8 @@ void on_draw(ModContext*, const GfxDrawContext* ctx, const void* payload, size_t
     wgpuBindGroupRelease(group);
 }
 
+bool ensure_pipeline();
+
 void on_stage_frame(ModContext*, const GfxStageContext*, void*) {
     if (s_gfx == nullptr || s_drawType == 0) {
         return;
@@ -115,6 +117,10 @@ void on_stage_frame(ModContext*, const GfxStageContext*, void*) {
 
     const float level = effect_level_now();
     if (level < 0.004f) {
+        return;
+    }
+
+    if (!ensure_pipeline() || s_pipeline == nullptr) {
         return;
     }
 
@@ -185,6 +191,26 @@ ModResult build_pipeline(ModError* error) {
         return mods::set_error(error, MOD_ERROR, "failed to get flurry vignette bind group layout");
     }
     return MOD_OK;
+}
+
+bool ensure_pipeline() {
+    GfxRenderTargetLayout layout = GFX_RENDER_TARGET_LAYOUT_INIT;
+    if (s_gfx->get_scene_target_layout(s_ctx, &layout) != MOD_OK) {
+        return false;
+    }
+    if (s_pipeline != nullptr && layout.key == s_sceneLayout.key) {
+        return true;
+    }
+    if (s_bindGroupLayout != nullptr) {
+        wgpuBindGroupLayoutRelease(s_bindGroupLayout);
+        s_bindGroupLayout = nullptr;
+    }
+    if (s_pipeline != nullptr) {
+        wgpuRenderPipelineRelease(s_pipeline);
+        s_pipeline = nullptr;
+    }
+    s_sceneLayout = layout;
+    return build_pipeline(nullptr) == MOD_OK;
 }
 
 }

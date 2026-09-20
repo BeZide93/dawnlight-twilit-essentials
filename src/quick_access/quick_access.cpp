@@ -2,6 +2,7 @@
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
 #include "../z_button/z_button.hpp"
+#include "../z_button/z_mobile.hpp"
 #include "../controls/controls.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
@@ -27,6 +28,7 @@
 #undef protected
 #undef private
 #include "d/d_pane_class.h"
+#include "dusk/config_var.hpp"
 #include "d/d_select_cursor.h"
 #include "d/d_meter_HIO.h"
 #include "JSystem/J2DGraph/J2DScreen.h"
@@ -970,6 +972,41 @@ HookAction on_qa_boots_equip_init_pre(ModContext*, void* args, void* retval, voi
     return HOOK_CONTINUE;
 }
 
+static bool qa_boots_in_water(daAlink_c* link) {
+    if (link->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
+        link->checkNoResetFlg0(daPy_py_c::FLG0_WATER_IN_MOVE))
+    {
+        return true;
+    }
+    switch (link->mProcID) {
+    case daAlink_c::PROC_SWIM_UP:
+    case daAlink_c::PROC_SWIM_WAIT:
+    case daAlink_c::PROC_SWIM_MOVE:
+    case daAlink_c::PROC_SWIM_DIVE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void qa_toggle_boots_underwater(daAlink_c* link, bool equipped) {
+    u8 oldGpItem = dComIfGp_getSelectItem(2);
+    g_dComIfG_gameInfo.play.setSelectItem(2, dItemNo_HVY_BOOTS_e);
+    const int procType = link->checkNewItemChange(2);
+    s_qaBootsEquipAllowed = true;
+    if (procType != 0) {
+        z_mobile_hb_lock(link, true);
+        link->changeItemTriggerKeepProc(2, procType);
+    } else {
+        link->setHeavyBoots(equipped ? 0 : 1);
+    }
+    s_qaBootsEquipAllowed = false;
+    g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
+    s_qaBootsDesired = !equipped;
+    s_qaBootsGraceFrames = 45;
+    play_ok_se();
+}
+
 static void execute_iron_boots() {
     if (s_qaBootsCooldown > 0) {
         return;
@@ -986,6 +1023,12 @@ static void execute_iron_boots() {
 
     if (link->checkNotHeavyBootsStage() || link->checkReinRide() || link->checkCanoeRide()) {
         play_error_se();
+        return;
+    }
+
+    const bool equipped = link->checkEquipHeavyBoots() != 0;
+    if (qa_boots_in_water(link)) {
+        qa_toggle_boots_underwater(link, equipped);
         return;
     }
 
@@ -2137,6 +2180,18 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     suppress_menu_buttons(pad);
 }
 
+static dusk::config::ConfigVar<f32>* s_qaHudScaleVar = nullptr;
+
+static f32 qa_user_hud_scale() {
+    if (s_qaHudScaleVar != nullptr) {
+        f32 scale = s_qaHudScaleVar->getValue();
+        if (scale < 0.5f) scale = 0.5f;
+        if (scale > 2.0f) scale = 2.0f;
+        return scale;
+    }
+    return 1.0f;
+}
+
 static void draw_strip_hud_icon(J2DScreen* screen) {
     u8 assigned = s_assignedItem;
     if (assigned == QA_ITEM_NONE || !qa_is_item_available(assigned)) {
@@ -2155,16 +2210,21 @@ static void draw_strip_hud_icon(J2DScreen* screen) {
         return;
     }
 
+    const f32 hudScale = qa_user_hud_scale();
     bool isLantern = (assigned == dItemNo_KANTERA_e || assigned == dItemNo_KANTERA2_e);
-    f32 targetH = isLantern ? 29.5f : 26.0f;
+    f32 targetH = (isLantern ? 29.5f : 26.0f);
     f32 targetW = 18.0f;
     if (img != nullptr && img->width > 0 && img->height > 0) {
         targetW = targetH * (static_cast<f32>(img->width) / static_cast<f32>(img->height));
     }
 
     const JGeometry::TBox2<f32>& bounds = juji->getGlbBounds();
-    f32 drawX = bounds.i.x + (bounds.getWidth() - targetW) * 0.30f;
-    f32 drawY = isLantern ? (bounds.i.y + 31.5f) : (bounds.i.y + 33.0f);
+    const f32 growW = bounds.getWidth() * (1.0f - hudScale) * 0.5f;
+    const f32 shrinkH = bounds.getHeight() * (1.0f - hudScale) * 0.5f;
+    f32 drawX = bounds.i.x + (bounds.getWidth() - targetW) * 0.30f * hudScale + growW;
+    f32 drawY = bounds.i.y + (isLantern ? 31.5f : 33.0f) * hudScale + shrinkH;
+    targetW *= hudScale;
+    targetH *= hudScale;
 
     u8 alpha = juji->getAlpha();
     J2DPane* midnaPane = screen->search(MULTI_CHAR('midona_n'));
@@ -2279,6 +2339,15 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
 
     s_saveSvc = save_svc;
     s_modCtx = mod_ctx;
+    if (hook_svc != nullptr && s_modCtx != nullptr) {
+        void* addr = nullptr;
+        using QaGetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
+        if (hook_svc->resolve(s_modCtx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK) {
+            s_qaHudScaleVar =
+                static_cast<dusk::config::ConfigVar<f32>*>(
+                    reinterpret_cast<QaGetConfigVarFn>(addr)("game.hudScale"));
+        }
+    }
     if (save_svc != nullptr && mod_ctx != nullptr) {
         save_svc->observe_saves(mod_ctx, on_new_save_reset_items,
                                 on_save_loaded_restore_items, nullptr, nullptr,
