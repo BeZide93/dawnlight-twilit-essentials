@@ -37,11 +37,40 @@ DEFINE_HOOK(&daAlink_c::draw, CeAlinkDrawHook);
 DEFINE_HOOK(&daAlink_c::statusWindowDraw, CeAlinkSwDrawHook);
 DEFINE_HOOK(&daAlink_c::modelDraw, CeModelDrawHook);          // world shield/sword draw
 DEFINE_HOOK(&daAlink_c::basicModelDraw, CeBasicModelDrawHook); // doll shield/sword draw
+DEFINE_HOOK(&daAlink_c::modelCalc, CeAlinkModelCalcHook);     // safe model calculation
 DEFINE_HOOK(&daAlink_c::setWaterDropColor, CeSetWaterDropColorHook); // bounds-checked water drop color
 DEFINE_HOOK(&dDlst_shadowControl_c::addReal, CeShadowAddRealHook); // redirect real-time shadow to custom models
 DEFINE_HOOK(&daAlink_c::shadowDraw, CeAlinkShadowDrawHook);       // swap vanilla equip out of Link's real shadow
 DEFINE_HOOK(&dMenu_Collect3D_c::_create, CeCollect3DCreateHook);  // collection doll session start
 DEFINE_HOOK(&dMenu_Collect3D_c::_delete, CeCollect3DDeleteHook);  // collection doll session end
+DEFINE_HOOK(&daAlink_c::statusWindowExecute, CeStatusWindowExecuteHook); // last-resort vanilla-model guard, right before the doll calcs itself
+DEFINE_HOOK(&daAlink_c::initStatusWindow, CeInitStatusWindowHook); // reconnect world-style joint callbacks for the doll
+
+template <typename Tag, typename Tag::type M>
+struct Rob {
+    friend typename Tag::type get_rob(Tag) { return M; }
+};
+
+struct J3DJointTree_mInvJointMtx_Tag {
+    typedef BE(Mtx)* J3DJointTree::*type;
+    friend type get_rob(J3DJointTree_mInvJointMtx_Tag);
+};
+
+struct J3DJointTree_mWEvlpMtxNum_Tag {
+    typedef u16 J3DJointTree::*type;
+    friend type get_rob(J3DJointTree_mWEvlpMtxNum_Tag);
+};
+
+template struct Rob<J3DJointTree_mInvJointMtx_Tag, &J3DJointTree::mInvJointMtx>;
+template struct Rob<J3DJointTree_mWEvlpMtxNum_Tag, &J3DJointTree::mWEvlpMtxNum>;
+
+static inline BE(Mtx)*& get_joint_tree_inv_mtx(J3DJointTree& jt) {
+    return jt.*get_rob(J3DJointTree_mInvJointMtx_Tag());
+}
+
+static inline u16& get_joint_tree_wevlp_num(J3DJointTree& jt) {
+    return jt.*get_rob(J3DJointTree_mWEvlpMtxNum_Tag());
+}
 
 namespace {
 
@@ -206,7 +235,21 @@ bool is_full_wolf(daAlink_c* a) {
 daAlink_c* player() { return static_cast<daAlink_c*>(dComIfGp_getPlayer(0)); }
 
 static bool is_title_or_menu() {
-    daPy_py_c* p = daPy_getLinkPlayerActorClass();
+    // Deliberately player() (dComIfGp_getPlayer(0)) here, NOT
+    // daPy_getLinkPlayerActorClass()/dComIfGp_getLinkPlayer() - those read a
+    // SEPARATE actor-pointer slot (mPlayerPtr[LINK_PTR] vs. player()'s own
+    // mPlayerInfo[0].mpPlayer) that isn't guaranteed to update in lockstep
+    // with it. custom_equip_update() calls this every frame and, if it
+    // returns true, wipes s_activeId[] (and s_dollSwapActive) WITHOUT
+    // touching a->mpLinkModel/Hat/Face/Hand at all - if that other slot ever
+    // reads null for even one frame while player() still sees the live actor
+    // (e.g. during the collection menu's doll session), this went from
+    // "nothing equipped" bookkeeping to a custom model still physically on
+    // the actor, with nothing left to notice or protect it (2026-09-20: this
+    // is what produced the "tunic=-1 but mpLinkModel still custom" log entry
+    // and the resulting crash). Use the SAME accessor as the rest of this
+    // file so both agree on whether the player actor exists.
+    daAlink_c* p = player();
     if (p == nullptr) return true;
     const char* stage = dComIfGp_getStartStageName();
     if (stage != nullptr) {
@@ -464,7 +507,7 @@ static J3DModelData* seh_load_model_data(const void* bmd, u32 flags) {
 }
 #endif
 
-static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
+static J3DModel* load_single_bmd(void* bmd, u32 mdlFlags = 0x80000, u32 diffFlags = 0x11000084) {
     if (!bmd) return nullptr;
     // Sanity-check the magic header before handing raw memory to
     // J3DModelLoaderDataBase::load() - it has no validation of its own and
@@ -505,6 +548,44 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     if (!data || data->getMaterialNum() == 0) {
         if (old != nullptr) mDoExt_setCurrentHeap(old);
         return nullptr;
+    }
+
+    // If the model specifies envelopes but has no inverse joint matrix table
+    // (common in hand-converted custom BMDs): the shapes' own draw-matrix-flag
+    // table (J3DModelLoader::readDraw, parsed from the file's DRW1 chunk
+    // independently of WEvlpMtxNum) already commits certain draw-matrix slots
+    // to "use the weight/envelope matrix" - that commitment can't be undone
+    // from here, the file already baked it in. Zeroing WEvlpMtxNum (the old
+    // fix here) stops J3DMtxBuffer::create()/createWeightEnvelopeMtx() from
+    // ever allocating mpWeightEvlpMtx at all, so J3DShapeMtxConcatView::load()
+    // later resolves a NULL pointer for those slots and OSPanics in
+    // setModelDrawMtx (J3D_ASSERT_NULLPTR) - trading the crash in
+    // calcWeightEnvelopeMtx for a different one at draw time instead of
+    // actually fixing anything.
+    //
+    // Give calcWeightEnvelopeMtx() a harmless, valid table to read instead:
+    // one identity matrix per joint (indices read from the envelope mix data
+    // can reference any joint, not just the envelope count). This keeps
+    // WEvlpMtxNum truthful so mpWeightEvlpMtx gets properly allocated to the
+    // size shapes expect, and the calc produces a stable (if not perfectly
+    // accurate) result instead of crashing either way.
+    if (data->getWEvlpMtxNum() > 0 && get_joint_tree_inv_mtx(data->getJointTree()) == nullptr) {
+        const u16 jointNum = data->getJointNum();
+        BE(Mtx)* identityMtx = (jointNum > 0) ? JKR_NEW_ARRAY(BE(Mtx), jointNum) : nullptr;
+        if (identityMtx != nullptr) {
+            for (u16 i = 0; i < jointNum; i++) {
+                for (int r = 0; r < 3; r++) {
+                    for (int c = 0; c < 4; c++) {
+                        identityMtx[i].contents[r][c] = (r == c) ? 1.0f : 0.0f;
+                    }
+                }
+            }
+            get_joint_tree_inv_mtx(data->getJointTree()) = identityMtx;
+        } else {
+            // Allocation failed (or no joints at all) - fall back to the old
+            // behavior rather than leave a null table in place.
+            get_joint_tree_wevlp_num(data->getJointTree()) = 0;
+        }
     }
 
     // Some custom BMDs carry TEX1 entries the host's strict static-texture
@@ -548,7 +629,10 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
         data->makeSharedDL();
     }
 
-    J3DModel* model = mDoExt_J3DModel__create(data, 0x80000, diffFlags);
+    J3DModel* model = mDoExt_J3DModel__create(data, mdlFlags, diffFlags);
+    if (model != nullptr) {
+        model->calc();
+    }
     if (old != nullptr) mDoExt_setCurrentHeap(old);
     return model;
 }
@@ -650,19 +734,19 @@ void load_model(Entry& e) {
         void* hatBmd = find_bmd_matching(e.arc, "head");
         if (!hatBmd) hatBmd = get_arc_res(e.arc, "al_head.bmd", 0x0010);
         if (hatBmd) {
-            e.hatModel = load_single_bmd(hatBmd, 0x11000084);
+            e.hatModel = load_single_bmd(hatBmd, 0, 0x11000022);
         }
 
         void* faceBmd = find_bmd_matching(e.arc, "face");
         if (!faceBmd) faceBmd = get_arc_res(e.arc, "al_face.bmd", 0x000E);
         if (faceBmd) {
-            e.faceModel = load_single_bmd(faceBmd, 0x11020284);
+            e.faceModel = load_single_bmd(faceBmd, 0x20200, 0x11020284);
         }
 
         void* handBmd = find_bmd_matching(e.arc, "hand");
         if (!handBmd) handBmd = get_arc_res(e.arc, "al_hands.bmd", 0x000F);
         if (handBmd) {
-            e.handModel = load_single_bmd(handBmd, 0x11000084);
+            e.handModel = load_single_bmd(handBmd, 0, 0x11000022);
         }
 
         void* bodyBmd = nullptr;
@@ -677,7 +761,7 @@ void load_model(Entry& e) {
             bodyBmd = get_arc_res(e.arc, "al.bmd");
         }
         if (bodyBmd) {
-            e.model = load_single_bmd(bodyBmd, 0x11000084);
+            e.model = load_single_bmd(bodyBmd, 0x80000, 0x11000084);
         }
     } else {
         void* bmd = nullptr;
@@ -686,14 +770,14 @@ void load_model(Entry& e) {
             if (bmd == nullptr) bmd = e.arc->getIdxResource(e.def.modelFileId);
         }
         if (bmd != nullptr) {
-            e.model = load_single_bmd(bmd, 0x11000084);
+            e.model = load_single_bmd(bmd, 0, 0x11000022);
         }
 
         if (e.def.kind == CE_SWORD && e.def.sheathFileId != 0xFFFF) {
             void* sBmd = e.arc->getResource(static_cast<u16>(e.def.sheathFileId));
             if (sBmd == nullptr) sBmd = e.arc->getIdxResource(e.def.sheathFileId);
             if (sBmd != nullptr) {
-                e.sheathModel = load_single_bmd(sBmd, 0x11000084);
+                e.sheathModel = load_single_bmd(sBmd, 0, 0x11000022);
             }
         }
     }
@@ -728,6 +812,21 @@ HookAction on_alink_model_draw_pre(ModContext*, void* args, void*, void*) {
     if (active_entry(CE_SHIELD) != nullptr) {
         if (m == a->mShieldModel) {
             return HOOK_SKIP_ORIGINAL;
+        }
+    }
+    return HOOK_CONTINUE;
+}
+
+// Safely ensure envelope matrices are initialized before modelCalc
+HookAction on_alink_model_calc_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
+    J3DModel*  m = args ? mods::arg<J3DModel*>(args, 1) : nullptr;
+    if (!m || !a) return HOOK_CONTINUE;
+
+    if (a->mClothesChangeWaitTimer == 0) {
+        J3DModelData* md = m->getModelData();
+        if (md != nullptr && md->getWEvlpMtxNum() > 0 && get_joint_tree_inv_mtx(md->getJointTree()) == nullptr) {
+            get_joint_tree_wevlp_num(md->getJointTree()) = 0;
         }
     }
     return HOOK_CONTINUE;
@@ -1330,6 +1429,21 @@ void custom_equip_clear(CustomEquipKind kind) {
             pl->setShieldModel();
             pl->setItemMatrix(0);
         }
+        // CE_TUNIC: unlike sword/shield, deliberately NOT touched here. A
+        // tunic body IS a->mpLinkModel/Hat/Face/Hand directly, and this
+        // function is called from on_change_clothes_pre right before it
+        // triggers a REAL vanilla clothes change (setClothesChange(0), the
+        // async loadModelDVD()/changeLink(1) flow). An earlier version of
+        // this branch called force_link_vanilla_now() (a synchronous
+        // changeLink(0)) here to close a doll-crash window - but that
+        // collided with the async change starting a moment later and froze
+        // the game on a black screen (2026-09-20). The doll-open window that
+        // needed fixing is now covered by the statusWindowExecute PRE hook's
+        // own guard further down instead. Everywhere else (world draw), the
+        // normal per-frame poll (custom_equip_apply's swap-out branch) sees
+        // active_entry(CE_TUNIC) == nullptr on the next tick and reverts the
+        // actor to vanilla via the same lightweight, already-tested path it
+        // always has - no synchronous rebuild needed from in here.
     }
 
     if (kind == CE_SWORD) {
@@ -1511,8 +1625,17 @@ u64 custom_equip_frame_tag(int id) { return static_cast<u64>(0x63656700) + id; }
 static void on_custom_equip_save_loaded(ModContext*, uint32_t, void*) {
     s_activeId[0] = s_activeId[1] = s_activeId[2] = -1;
     s_restoredFromSave = false;
-    custom_equip_restore_from_save();
-    s_restoredFromSave = true;
+    // custom_equip_restore_from_save() itself no-ops until is_gameplay_ready()
+    // (the player actor usually doesn't exist yet at the moment a save finishes
+    // loading - this callback tends to fire well before the new stage/actor is
+    // up). Only mark the restore done when it actually ran, or the equip state
+    // is permanently skipped for this load: is_title_or_menu()'s per-frame
+    // reset of s_restoredFromSave stops as soon as gameplay begins, so nothing
+    // else would ever retry it once this is wrongly marked true.
+    if (is_gameplay_ready()) {
+        custom_equip_restore_from_save();
+        s_restoredFromSave = true;
+    }
 }
 
 static void on_custom_equip_new_save(ModContext*, uint32_t, void*) {
@@ -1527,6 +1650,8 @@ static void on_custom_equip_new_save(ModContext*, uint32_t, void*) {
 // retarget_face_material_anims, which itself sits below this point).
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*);
 HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*);
+HookAction on_status_window_execute_pre(ModContext*, void*, void*, void*);
+void on_init_status_window_post(ModContext*, void*, void*, void*);
 
 void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* save_svc) {
     if (save_svc != nullptr && g_modCtx != nullptr) {
@@ -1535,6 +1660,7 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     if (!hook_svc) return;
     mods::hook::add_pre<CeModelDrawHook>(hook_svc, on_alink_model_draw_pre);
     mods::hook::add_pre<CeBasicModelDrawHook>(hook_svc, on_alink_model_draw_pre);
+    mods::hook::add_pre<CeAlinkModelCalcHook>(hook_svc, on_alink_model_calc_pre);
     mods::hook::add_post<CeAlinkDrawHook>(hook_svc, on_alink_draw_post);
     mods::hook::add_post<CeAlinkSwDrawHook>(hook_svc, on_alink_draw_post);
     mods::hook::add_pre<CeSetWaterDropColorHook>(hook_svc, on_set_water_drop_color_pre);
@@ -1544,6 +1670,8 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     mods::hook::add_post<CeAlinkShadowDrawHook>(hook_svc, on_alink_shadow_draw_post);
     mods::hook::add_pre<CeCollect3DCreateHook>(hook_svc, on_collect_3d_create_pre);
     mods::hook::add_pre<CeCollect3DDeleteHook>(hook_svc, on_collect_3d_delete_pre);
+    mods::hook::add_pre<CeStatusWindowExecuteHook>(hook_svc, on_status_window_execute_pre);
+    mods::hook::add_post<CeInitStatusWindowHook>(hook_svc, on_init_status_window_post);
 }
 
 // Runs once per stage change.
@@ -1674,52 +1802,162 @@ static void doll_session_watchdog() {
     }
 }
 
+// Unconditionally makes a->mpLinkModel/Hat/Face/Hand vanilla RIGHT NOW via a
+// real changeLink(0) rebuild. Factored out of custom_equip_menu_doll_begin so
+// the statusWindowExecute PRE hook below can call the exact same
+// guaranteed-vanilla logic as a last-resort safety net immediately before the
+// doll calcs itself, independent of whatever happened (or didn't) when the
+// menu session started.
+//
+// Always rebuilds fresh rather than restoring a cached s_originalLinkModel
+// snapshot (an earlier version of this function preferred the cache,
+// believing changeLink(0) could no-op when dComIfGs_getSelectEquipClothes()
+// hadn't "changed" - disproven by reading changeLink()'s actual source
+// (d_a_alink_wolf.inc): it unconditionally rebuilds every sub-model from
+// whatever checkCasualWearFlg()/checkZoraWearFlg()/... currently says,
+// every single call, no change-detection at all). Preferring the cache
+// instead left the doll showing whatever vanilla state was captured the
+// FIRST time something custom was ever swapped in this session, never
+// updating again - reported 2026-09-20 as "the doll stays on the model from
+// before the custom tunic change" after equipping a different/newer custom
+// tunic. A fresh rebuild always reflects the CURRENTLY active tunic's
+// baseClothes (custom_equip_apply keeps dComIfGs_getSelectEquipClothes()
+// pinned to it), and changeLink()'s own body already sets
+// field_0x064C/field_0x06c0 and mArcName correctly (see the changeLink PRE
+// hook in collection_equip.cpp) - no manual patching needed here.
+static void force_link_vanilla_now(daAlink_c* a) {
+    if (a == nullptr || is_wolf(a)) return;
+
+    a->changeLink(0);
+    a->mClothesChangeWaitTimer = 0;
+    if (a->mpLinkModel) a->mpLinkModel->calc();
+    if (a->mpLinkHatModel) a->mpLinkHatModel->calc();
+    if (a->mpLinkFaceModel) a->mpLinkFaceModel->calc();
+    if (a->mpLinkHandModel) a->mpLinkHandModel->calc();
+    s_originalLinkModel = a->mpLinkModel;
+    s_originalHatModel  = a->mpLinkHatModel;
+    s_originalFaceModel = a->mpLinkFaceModel;
+    s_originalHandModel = a->mpLinkHandModel;
+    s_origShape_06d0    = a->field_0x06d0;
+    s_origShape_06d4    = a->field_0x06d4;
+    s_origShape_06d8    = a->field_0x06d8;
+    s_origShape_06dc    = a->field_0x06dc;
+    s_origShape_06e0    = a->field_0x06e0;
+    s_origShape_06e8    = a->field_0x06e8;
+    s_origShape_06ec    = a->field_0x06ec;
+    s_origShape_06f0    = a->field_0x06f0;
+}
+
 static void custom_equip_menu_doll_begin() {
-    s_dollSwapActive = false;
+    s_dollSwapActive = true;
     daAlink_c* a = player();
     if (a == nullptr || is_wolf(a)) return;
-    Entry* tunicEntry = active_entry(CE_TUNIC);
-    if (tunicEntry == nullptr || tunicEntry->model == nullptr) return;
-    // Only meaningful when the custom tunic is actually on the actor and the
-    // vanilla set it replaced is still captured.
-    if (a->mpLinkModel != tunicEntry->model) return;
-    if (s_originalLinkModel == nullptr || s_originalLinkModel == tunicEntry->model) return;
-    if (a->mpLinkModel == nullptr || a->mpLinkHatModel == nullptr ||
-        a->mpLinkFaceModel == nullptr || a->mpLinkHandModel == nullptr) {
-        return;
-    }
-    if (s_originalLinkModel == nullptr || s_originalHatModel == nullptr ||
-        s_originalFaceModel == nullptr || s_originalHandModel == nullptr) {
-        return;
-    }
 
-    a->mpLinkModel     = s_originalLinkModel;
-    a->mpLinkHatModel  = s_originalHatModel;
-    a->mpLinkFaceModel = s_originalFaceModel;
-    a->mpLinkHandModel = s_originalHandModel;
-    a->field_0x06d0    = s_origShape_06d0;
-    a->field_0x06d4    = s_origShape_06d4;
-    a->field_0x06d8    = s_origShape_06d8;
-    a->field_0x06dc    = s_origShape_06dc;
-    a->field_0x06e0    = s_origShape_06e0;
-    a->field_0x06e8    = s_origShape_06e8;
-    a->field_0x06ec    = s_origShape_06ec;
-    a->field_0x06f0    = s_origShape_06f0;
-    a->mpLinkModel->setUserArea((uintptr_t)a);
-    if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
+    log_collect_info(
+        "doll_begin: tunic=%d sword=%d shield=%d mpLinkModel=%p s_originalLinkModel=%p",
+        s_activeId[CE_TUNIC], s_activeId[CE_SWORD], s_activeId[CE_SHIELD],
+        (void*)a->mpLinkModel, (void*)s_originalLinkModel);
 
-    retarget_face_material_anims(a);
-    a->changeModelDataDirect(1);
+    // 2026-09-20: briefly tried letting the custom model stay on the actor
+    // for the doll, reconnecting "world-style" joint callbacks via the
+    // CeInitStatusWindowHook POST hook below (the same flag-toggle trick
+    // daAlink_c::resetStatusWindow() itself uses) instead of forcing vanilla
+    // here. Confirmed NOT sufficient - the SAME calcWeightEnvelopeMtx crash
+    // still reproduced calc()-ing mpLinkModel inside statusWindowExecute()
+    // right after. daAlink_modelCallBack itself most likely re-checks
+    // FLG2_STATUS_WINDOW_DRAW on every invocation (not just once when
+    // attached), and that flag is back ON by the time statusWindowExecute()
+    // actually calc()s - so reconnecting the callback pointer alone doesn't
+    // reproduce true world-mode behavior. Back to the confirmed-safe
+    // approach: force vanilla for the doll's entire session. The
+    // CeInitStatusWindowHook reconnect is harmless (and correct) for a
+    // vanilla model too, so it stays.
+    if (active_entry(CE_TUNIC) == nullptr) return;
 
     a->mEyeHL1.remove();
-    if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
-        a->mEyeHL1.entry(a->mpLinkFaceModel->getModelData(), "highlight02");
+    force_link_vanilla_now(a);
+}
+
+// POST (daAlink_c::initStatusWindow): the doll-open equivalent of
+// daAlink_c::create()'s changeLink() - it's what assigns the body's joint
+// mtx-calc/callbacks for the CURRENT session, via changeModelDataDirect(0).
+// But it does so with FLG2_STATUS_WINDOW_DRAW SET, and changeModelDataDirect()
+// branches on that flag (d_a_alink_swindow.inc): with it set, joints 0/1/16
+// get their mtx-calc cleared to NULL and joints 0-34 get NULL callbacks,
+// instead of the real ones (field_0x1f20/field_0x1f24, daAlink_modelCallBack)
+// the WORLD path wires up. Those real callbacks are what populate
+// mMtxBuffer's mpAnmMtx entries for those joints every frame - without them,
+// calcWeightEnvelopeMtx() later reads whatever garbage was already sitting in
+// mpAnmMtx for a joint the envelope mix data references, which is exactly
+// "works fine walking around (real callbacks), OSPanics/garbage-reads the
+// instant the collection doll calcs itself (nulled callbacks)" - reported
+// 2026-09-20 after equipping the custom tunic and opening the menu.
+//
+// daAlink_c::resetStatusWindow() (the vanilla doll-session cleanup, called
+// automatically from dMenu_Collect3D_c::_delete()) uses exactly this trick
+// itself to reconnect world-style callbacks once the doll session ends:
+// briefly clear FLG2_STATUS_WINDOW_DRAW, call changeModelDataDirect(1), then
+// restore the flag. Do the same thing here, immediately, instead of waiting
+// for the doll session to end - so whatever's on the actor (custom or
+// vanilla, doesn't matter) gets real, populated mpAnmMtx entries for the
+// whole time the doll is open, not just after it closes.
+void on_init_status_window_post(ModContext*, void* args, void*, void*) {
+    daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
+    if (a == nullptr || is_wolf(a)) return;
+
+    const bool wasStatusWindow = a->checkNoResetFlg2(daPy_py_c::FLG2_STATUS_WINDOW_DRAW) != 0;
+    if (wasStatusWindow) a->offNoResetFlg2(daPy_py_c::FLG2_STATUS_WINDOW_DRAW);
+    retarget_face_material_anims(a);
+    a->changeModelDataDirect(1);
+    if (wasStatusWindow) a->onNoResetFlg2(daPy_py_c::FLG2_STATUS_WINDOW_DRAW);
+}
+
+// PRE (daAlink_c::statusWindowExecute): last-resort guard. This runs ONE call
+// away from mpLinkModel->calc()/mpLinkFaceModel->calc() etc - if, for
+// whatever reason, custom_equip_menu_doll_begin()'s protection didn't leave
+// the actor on a vanilla model, this is the last point before the crash
+// where it can still be corrected.
+HookAction on_status_window_execute_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
+    if (a == nullptr) return HOOK_CONTINUE;
+
+    // Compare directly against the last known-good vanilla baseline rather
+    // than trusting active_entry(CE_TUNIC) - 2026-09-20 log finding: a path
+    // can clear s_activeId[CE_TUNIC] without ever touching a->mpLinkModel,
+    // leaving active_entry(CE_TUNIC) == nullptr while the actor is still
+    // physically on the custom body.
+    const bool mismatchesKnownVanilla =
+        s_originalLinkModel != nullptr && a->mpLinkModel != s_originalLinkModel;
+
+    // Belt-and-suspenders for the case no vanilla baseline was ever captured
+    // but the actor is still sitting on a model that matches one of our OWN
+    // registered tunic entries - only our own swap-in code could ever have
+    // put it there.
+    bool matchesRegisteredCustom = false;
+    for (int i = 0; i < s_count && !matchesRegisteredCustom; i++) {
+        const Entry& e = s_entries[i];
+        if (e.def.kind != CE_TUNIC) continue;
+        if ((e.model != nullptr && a->mpLinkModel == e.model) ||
+            (e.faceModel != nullptr && a->mpLinkFaceModel == e.faceModel) ||
+            (e.hatModel != nullptr && a->mpLinkHatModel == e.hatModel) ||
+            (e.handModel != nullptr && a->mpLinkHandModel == e.handModel)) {
+            matchesRegisteredCustom = true;
+        }
     }
 
-    s_dollSwapActive = true;
+    // This hook runs every frame the doll is on screen - only log (and act)
+    // on the rare case there's actually something to correct, not every tick.
+    if (mismatchesKnownVanilla || matchesRegisteredCustom) {
+        log_collect_info(
+            "statusWindowExecute pre: forcing vanilla (mismatchesKnownVanilla=%d matchesRegisteredCustom=%d mpLinkModel=%p s_originalLinkModel=%p)",
+            mismatchesKnownVanilla, matchesRegisteredCustom, (void*)a->mpLinkModel, (void*)s_originalLinkModel);
+        force_link_vanilla_now(a);
+    }
+    return HOOK_CONTINUE;
 }
 
 static void custom_equip_menu_doll_end() {
+    log_collect_info("doll_end");
     // Re-applying the custom tunic is left to the regular per-frame poll
     // (custom_equip_apply's swap branch), which owns the position watchdog and
     // all the edge cases - this only re-opens the gate.
@@ -1727,7 +1965,7 @@ static void custom_equip_menu_doll_end() {
 }
 
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*) {
-    if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
+    custom_equip_menu_doll_begin();
     return HOOK_CONTINUE;
 }
 
@@ -1988,22 +2226,26 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                 // first 1-2 frames post-swap, this just gives it margin.
                 s_tunicPosClampFrames = 10;
 
-                if (s_originalLinkModel == nullptr) {
-                    s_originalLinkModel = a->mpLinkModel;
-                    s_originalHatModel  = a->mpLinkHatModel;
-                    s_originalFaceModel = a->mpLinkFaceModel;
-                    s_originalHandModel = a->mpLinkHandModel;
-                    s_origShape_06d0 = a->field_0x06d0;
-                    s_origShape_06d4 = a->field_0x06d4;
-                    s_origShape_06d8 = a->field_0x06d8;
-                    s_origShape_06dc = a->field_0x06dc;
-                    s_origShape_06e0 = a->field_0x06e0;
-                    s_origShape_06e8 = a->field_0x06e8;
-                    s_origShape_06ec = a->field_0x06ec;
-                    s_origShape_06f0 = a->field_0x06f0;
+                if (s_originalLinkModel == nullptr || s_originalLinkModel == tunicEntry->model) {
+                    if (a->mpLinkModel != tunicEntry->model) {
+                        s_originalLinkModel = a->mpLinkModel;
+                        s_originalHatModel  = a->mpLinkHatModel;
+                        s_originalFaceModel = a->mpLinkFaceModel;
+                        s_originalHandModel = a->mpLinkHandModel;
+                        s_origShape_06d0 = a->field_0x06d0;
+                        s_origShape_06d4 = a->field_0x06d4;
+                        s_origShape_06d8 = a->field_0x06d8;
+                        s_origShape_06dc = a->field_0x06dc;
+                        s_origShape_06e0 = a->field_0x06e0;
+                        s_origShape_06e8 = a->field_0x06e8;
+                        s_origShape_06ec = a->field_0x06ec;
+                        s_origShape_06f0 = a->field_0x06f0;
+                    }
                 }
 
                 // 1. Swap Body
+                log_collect_info("tunic swap-in: dollSwapActive=%d duringRebuild=%d mpLinkModel %p -> %p",
+                                  s_dollSwapActive, duringRebuild, (void*)a->mpLinkModel, (void*)tunicEntry->model);
                 a->mpLinkModel = tunicEntry->model;
                 a->mpLinkModel->setUserArea((uintptr_t)a);
 
@@ -2155,6 +2397,10 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                 // count is what entryTexMtxAnimator() must index within.
                 retarget_face_material_anims(a);
                 a->changeModelDataDirect(1);
+                // See the doll-restore path's comment on the same line - force
+                // field_0x064C back in sync rather than trust
+                // changeModelDataDirect(1) alone.
+                a->field_0x064C = a->mpLinkModel->getModelData();
 
                 a->mEyeHL1.remove();
                 if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
@@ -2265,6 +2511,10 @@ void custom_equip_shutdown() {
             // animators onto the vanilla face BEFORE entering them.
             retarget_face_material_anims(a);
             a->changeModelDataDirect(1);
+            // See the doll-restore path's comment on the same line - force
+            // field_0x064C back in sync rather than trust
+            // changeModelDataDirect(1) alone.
+            a->field_0x064C = a->mpLinkModel->getModelData();
 
             a->mEyeHL1.remove();
             if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {

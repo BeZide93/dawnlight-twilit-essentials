@@ -17,19 +17,27 @@ DEFINE_HOOK(&daAlink_c::allUnequip, QaAllUnequipHook);
 HookAction on_qa_all_unequip_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
     const int param0 = mods::arg<int>(args, 1);
-    if (alink != nullptr && g_configQuickAccessEnabled && param0 != 0 &&
-        quick_access_keep_lantern_equipped(alink) &&
+    if (alink == nullptr || !g_configQuickAccessEnabled) {
+        return HOOK_CONTINUE;
+    }
+
+    if (param0 != 0 && quick_access_keep_lantern_equipped(alink) &&
         alink->mEquipItem == dItemNo_KANTERA_e &&
         !alink->doTrigger() &&
         !alink->checkEventRun())
     {
-        // B was pressed while the quick access lantern is out. The engine treats
-        // the lantern as "on no button" and puts it away via allUnequip - block
-        // that and draw the sword instead; the keep-alive relights the flame
-        // (native face-button behaviour).
         alink->swordEquip(TRUE);
         return HOOK_SKIP_ORIGINAL;
     }
+
+    if (quick_access_keep_boots_equipped(alink) &&
+        alink->mEquipItem == dItemNo_HVY_BOOTS_e &&
+        !alink->doTrigger() &&
+        !alink->checkEventRun())
+    {
+        return HOOK_SKIP_ORIGINAL;
+    }
+
     return HOOK_CONTINUE;
 }
 

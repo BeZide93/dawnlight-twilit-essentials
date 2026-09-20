@@ -939,7 +939,39 @@ static void qa_extinguish_lantern_for_item() {
     link->mZ2Link.setKanteraState(0);
 }
 
+static bool s_qaBootsDesired = false;
+static int s_qaBootsGraceFrames = 0;
+static int s_qaBootsCooldown = 0;
+static bool s_qaBootsEquipAllowed = false;
+
+DEFINE_HOOK(&daAlink_c::procBootsEquipInit, QaBootsEquipInitHook);
+
+HookAction on_qa_boots_equip_init_pre(ModContext*, void* args, void* retval, void*) {
+    daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
+        if (s_qaBootsEquipAllowed) {
+            s_qaBootsEquipAllowed = false;
+            return HOOK_CONTINUE;
+        }
+        if (retval != nullptr) {
+            *static_cast<int*>(retval) = 1;
+        }
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    return HOOK_CONTINUE;
+}
+
 static void execute_iron_boots() {
+    if (s_qaBootsCooldown > 0) {
+        return;
+    }
+    s_qaBootsCooldown = 25;
+
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
 
@@ -953,21 +985,20 @@ static void execute_iron_boots() {
         return;
     }
 
-    u8 oldGpItem = dComIfGp_getSelectItem(2);
-    g_dComIfG_gameInfo.play.setSelectItem(2, dItemNo_HVY_BOOTS_e);
-
-    int proc_type = link->checkNewItemChange(2);
-    if (proc_type != 0) {
-        link->changeItemTriggerKeepProc(2, proc_type);
+    if (link->checkEquipHeavyBoots()) {
+        s_qaBootsDesired = false;
+        s_qaBootsGraceFrames = 45;
+        s_qaBootsEquipAllowed = true;
+        link->procBootsEquipInit();
         play_ok_se();
-    } else if (link->checkEquipHeavyBoots()) {
-        link->setHeavyBoots(0);
-        play_ok_se();
-    } else {
-        play_error_se();
+        return;
     }
 
-    g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
+    s_qaBootsDesired = true;
+    s_qaBootsGraceFrames = 45;
+    s_qaBootsEquipAllowed = true;
+    link->procBootsEquipInit();
+    play_ok_se();
 }
 
 static void execute_horse_call() {
@@ -998,10 +1029,6 @@ static void execute_horse_call() {
     g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
 }
 
-// Mirror of FLG2_UNK_1 while the quick access lantern is the tracked flame. The
-// engine's daAlink_c::execute() snuffs a burning lantern that no face button
-// holds (that check inlines checkItemSetButton, so hooking the latter is not
-// reliable) - we relight it here to match native face-button behaviour.
 static bool s_qaLanternLit = false;
 
 static void execute_lantern() {
@@ -1024,8 +1051,6 @@ static void execute_lantern() {
     }
 
     if (qa_is_lantern_active()) {
-        // Lit but holstered (sword/other item drawn): this press puts the flame out
-        // on purpose - drop the keep-alive so it stays out.
         s_qaLanternLit = false;
     }
 
@@ -1201,6 +1226,36 @@ bool quick_access_keep_lantern_equipped(daAlink_c* link) {
 }
 
 DEFINE_HOOK(&daAlink_c::execute, QaAlinkExecuteHook);
+DEFINE_HOOK(&daAlink_c::setHeavyBoots, QaSetHeavyBootsHook);
+
+HookAction on_qa_set_heavy_boots_pre(ModContext*, void* args, void* retval, void*) {
+    if (!g_configQuickAccessEnabled) {
+        return HOOK_CONTINUE;
+    }
+
+    const int enable = mods::arg<int>(args, 1);
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || enable != 0 || s_assignedItem != dItemNo_HVY_BOOTS_e) {
+        return HOOK_CONTINUE;
+    }
+
+    const bool forced =
+        link->checkWolf() || link->checkEventRun() || link->checkDeadHP() ||
+        link->checkNotHeavyBootsStage() || link->checkCanoeRide() ||
+        link->checkHorseRide() || link->checkBoardRide() || link->checkSpinnerRide() ||
+        link->checkModeFlg(0x40000) ||
+        link->checkNoResetFlg0(daPy_py_c::FLG0_WATER_IN_MOVE) ||
+        link->mProcID == daAlink_c::PROC_DIVE_JUMP ||
+        link->mProcID == daAlink_c::PROC_SMALL_JUMP;
+    if (forced) {
+        return HOOK_CONTINUE;
+    }
+
+    if (retval != nullptr) {
+        *static_cast<int*>(retval) = 0;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
 
 static u8 s_qaPreEquipItem = 0xFF;
 
@@ -1216,6 +1271,9 @@ HookAction on_qa_alink_execute_pre(ModContext*, void*, void*, void*) {
 }
 
 static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
+    if (s_qaBootsCooldown > 0) {
+        s_qaBootsCooldown--;
+    }
     if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
         s_qaLanternLit = false;
         return;
@@ -1224,7 +1282,35 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr || link->checkWolf()) {
         s_qaLanternLit = false;
+        s_qaBootsDesired = false;
         return;
+    }
+
+    if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
+        if (s_qaBootsGraceFrames > 0) {
+            s_qaBootsGraceFrames--;
+        }
+
+        const bool actualWorn = link->checkEquipHeavyBoots() != 0;
+        if (s_qaBootsDesired && !actualWorn && s_qaBootsGraceFrames == 0 &&
+            link->mProcID != daAlink_c::PROC_BOOTS_EQUIP) {
+            const bool forced =
+                link->checkWolf() || link->checkEventRun() || link->checkDeadHP() ||
+                link->checkNotHeavyBootsStage() || link->checkCanoeRide() ||
+                link->checkHorseRide() || link->checkBoardRide() || link->checkSpinnerRide() ||
+                link->checkModeFlg(0x40000) || link->checkMagneBootsOn() ||
+                link->checkNoResetFlg0(daPy_py_c::FLG0_WATER_IN_MOVE) ||
+                link->mProcID == daAlink_c::PROC_DIVE_JUMP ||
+                link->mProcID == daAlink_c::PROC_SMALL_JUMP;
+            if (forced) {
+                s_qaBootsDesired = false;
+            } else {
+                link->setHeavyBoots(1);
+            }
+        }
+    } else {
+        s_qaBootsDesired = false;
+        s_qaBootsGraceFrames = 0;
     }
 
     const bool lanternAssigned =
@@ -1240,11 +1326,6 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    // The flame went out this frame while we tracked it as burning. Only keep it
-    // alive when a real item (sword, bow, ...) is out and the engine snuffed it
-    // merely because no face button holds the lantern. Anything else is an
-    // intentional end: put-away (extinguished while still equipped), sheathing
-    // (nothing equipped and nothing pending), empty oil, water or an A press.
     if (s_qaPreEquipItem == dItemNo_KANTERA_e) {
         s_qaLanternLit = false;
         return;
@@ -1263,8 +1344,6 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     }
 
     if (link->doTrigger()) {
-        // A was pressed (put-away context): the engine snuffed the flame on
-        // purpose so the sheath can proceed - let it stay out.
         s_qaLanternLit = false;
         return;
     }
@@ -2190,6 +2269,8 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<QaCheckReadyItemHook>(hook_svc, on_check_ready_item_qa_post);
         mods::hook::add_pre<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_pre);
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
+        mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre);
+        mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
     }
 
     s_saveSvc = save_svc;

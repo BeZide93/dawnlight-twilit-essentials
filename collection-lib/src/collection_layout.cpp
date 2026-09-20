@@ -834,7 +834,7 @@ void apply_collect_shifts(dMenu_Collect2D_c* collect2D) {
     if (tate_gm) tate_gm->show();
     if (tate_g1) tate_g1->show();
 
-    if (fuku_go) { if (cl_column_claimed(1, 1)) fuku_go->show(); else fuku_go->hide(); }
+    if (fuku_go) { if (cl_column_claimed(3, 1)) fuku_go->show(); else fuku_go->hide(); }
     if (fuku_g0) fuku_g0->show();
     if (fuku_g1) fuku_g1->show();
     if (fuku_g2) fuku_g2->show();
@@ -903,8 +903,8 @@ void apply_collect_shifts(dMenu_Collect2D_c* collect2D) {
     // 3. Clothes
     // The ordon-clothes slot (3,2) exists only with the starter-equip option; its
     // panes aren't even created otherwise, but guard the show() too.
-    if (slot_icon(3, 2)) { if (cl_column_claimed(1, 1)) slot_icon(3, 2)->show(); else slot_icon(3, 2)->hide(); }
-    if (slot_iconPic(3, 2)) { if (cl_column_claimed(1, 1)) slot_iconPic(3, 2)->show(); else slot_iconPic(3, 2)->hide(); }
+    if (slot_icon(3, 2)) { if (cl_column_claimed(3, 1)) slot_icon(3, 2)->show(); else slot_icon(3, 2)->hide(); }
+    if (slot_iconPic(3, 2)) { if (cl_column_claimed(3, 1)) slot_iconPic(3, 2)->show(); else slot_iconPic(3, 2)->hide(); }
 
     bool showKokiriClothes = hasKokiriClothes && !cl_column_occupied(3, 2);
     if (fuku_n0) { if (showKokiriClothes) fuku_n0->show(); else fuku_n0->hide(); }
@@ -1224,7 +1224,7 @@ void on_screen_set_post(ModContext*, void* args, void*, void*) {
         setupSelPm(6, 0, collect2D->mpScreen->search(MULTI_CHAR('heart_n')));
 
         // Shields
-        setupSelPm(3, 1, cl_column_claimed(1, 1)
+        setupSelPm(3, 1, cl_column_claimed(2, 1)
                              ? collect2D->mpScreen->search(MULTI_CHAR('tate_n0'))
                              : nullptr);
         setupSelPm(4, 1, slot_icon(4, 1));
@@ -1232,10 +1232,16 @@ void on_screen_set_post(ModContext*, void* args, void*, void*) {
         // (6,1) is set up by the auto-managed-slot loop below.
 
         // Clothes
-        setupSelPm(3, 2, slot_icon(3, 2));
+        setupSelPm(3, 2, cl_column_claimed(3, 1)
+                             ? (slot_icon(3, 2) ? slot_icon(3, 2) : collect2D->mpScreen->search(MULTI_CHAR('fuku_ord')))
+                             : nullptr);
         setupSelPm(4, 2, collect2D->mpScreen->search(MULTI_CHAR('fuku_n0')));
         setupSelPm(5, 2, collect2D->mpScreen->search(MULTI_CHAR('fuku_n1')));
         setupSelPm(6, 2, collect2D->mpScreen->search(MULTI_CHAR('fuku_n2')));
+
+        // Save and Options
+        setupSelPm(0, 5, collect2D->mpScreen->search(MULTI_CHAR('save_n')));
+        setupSelPm(1, 5, collect2D->mpScreen->search(MULTI_CHAR('option_n')));
 
         // Auto-managed mod slots
         for (int i = 0; i < slot_count(); i++) {

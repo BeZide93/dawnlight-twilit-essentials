@@ -49,11 +49,9 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
         }
     }
 
-    // Any cell outside the visible 4x3 equip grid is a leftover vanilla hidden
-    // pane (the game parks its own unused cells at x0..2 / y3..5). It has a
-    // pane and a tag, so the mouse hover scan stops on it and shadows every
-    // custom slot drawn further right. Report "no item" for them.
-    if (i_tag2 >= 3 || i_tag1 < 3) {
+    // Cells with x < 3 in the upper equip grid (rows 0..2) are unused in vanilla TP
+    // when no starter/custom slot is registered there.
+    if (i_tag2 < 3 && i_tag1 < 3) {
         *(u64*)ret = 0;
         return HOOK_SKIP_ORIGINAL;
     }
@@ -92,10 +90,27 @@ J2DPane* get_target_pane(dMenu_Collect2D_c* collect2D, u8 x, u8 y) {
         if (x == 4) return slot_icon(4, 1);
         if (x == 5) return collect2D->mpScreen->search(MULTI_CHAR('tate_n1'));
     } else if (y == 2) {
-        if (x == 3) return slot_icon(3, 2);
+        if (x == 3) {
+            J2DPane* p = slot_icon(3, 2);
+            if (p) return p;
+            return collect2D->mpScreen->search(MULTI_CHAR('fuku_ord'));
+        }
         if (x == 4) return collect2D->mpScreen->search(MULTI_CHAR('fuku_n0'));
         if (x == 5) return collect2D->mpScreen->search(MULTI_CHAR('fuku_n1'));
         if (x == 6) return collect2D->mpScreen->search(MULTI_CHAR('fuku_n2'));
+    } else if (y == 3) {
+        if (x == 0) return collect2D->mpScreen->search(MULTI_CHAR('item_1_n'));
+        if (x == 1) return collect2D->mpScreen->search(MULTI_CHAR('item_0_n'));
+        if (x == 2) return collect2D->mpScreen->search(MULTI_CHAR('kabu_6n'));
+        if (x == 3) return collect2D->mpScreen->search(MULTI_CHAR('maki_5_n'));
+    } else if (y == 4) {
+        if (x == 0) return collect2D->mpScreen->search(MULTI_CHAR('wolf_n'));
+        if (x == 1) return collect2D->mpScreen->search(MULTI_CHAR('item_2_n'));
+        if (x == 2) return collect2D->mpScreen->search(MULTI_CHAR('fish_3_n'));
+        if (x == 3) return collect2D->mpScreen->search(MULTI_CHAR('lett_4_n'));
+    } else if (y == 5) {
+        if (x == 0) return collect2D->mpScreen->search(MULTI_CHAR('save_n'));
+        if (x == 1) return collect2D->mpScreen->search(MULTI_CHAR('option_n'));
     }
     if (x < 7 && y < 6 && collect2D->mpSelPm[x][y]) {
         return collect2D->mpSelPm[x][y]->getPanePtr();
@@ -176,7 +191,19 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
     u8 curY = collect2D->mCursorY;
 
     const SlotSpec* curSlot = slot_at(curX, curY);
-    bool inEquipGrid = (curX >= 3 && curX <= 6 && curY <= 2) || (curX == 6 && curY == 0) || (curSlot != nullptr && curSlot->autoLayout.on);
+    // Hijack stick nav ONLY in rows that contain registered slots: vanilla
+    // cursorMove() skips mod cells (their getItemTag() entries don't exist),
+    // so those rows need the custom walk. Every other cell - pure vanilla
+    // rows, the whole lower grid, wolf form - runs vanilla cursorMove() with
+    // UNCONSUMED stick state: reading mpStick->check*Trigger() here latches
+    // their repeat-delay state and starves the vanilla navigation running
+    // afterwards (mobile report: "menu inputs don't consistently register",
+    // lower items unreachable; Android is always widescreen and has no PC
+    // pointer early-out in wait_proc, so cursorMove runs on every frame).
+    bool hijackNav = cl_vanilla_layout_hidden() || curSlot != nullptr || slot_in_row(curY) != nullptr;
+    bool inEquipGrid = !collect2D->mIsWolf && hijackNav &&
+                       ((curX >= 3 && curX <= 6 && curY <= 2) || (curX == 6 && curY == 0) ||
+                        (curSlot != nullptr && curSlot->autoLayout.on));
     if (inEquipGrid) {
         collect2D->mpStick->checkTrigger();
 
@@ -225,9 +252,16 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                 }
             }
             if (!moved && !cl_vanilla_layout_hidden()) {
-                targetX = 2;
-                targetY = (curY == 0) ? 3 : 4;
-                moved = true;
+                // Drop into the vanilla lower grid (insects / fish / ...).
+                // Validate the target with the game's getItemTag() -
+                // field_0x22d is not maintained for these cells.
+                for (int ty = (curY == 0) ? 3 : 4; ty <= 4 && !moved; ty++) {
+                    if (collect2D->getItemTag(2, ty, true)) {
+                        targetX = 2;
+                        targetY = (u8)ty;
+                        moved = true;
+                    }
+                }
             }
         } else {                 // up (2) / down (3)
             // Pick the slot in the next row that's visually closest, so vertical
@@ -263,20 +297,89 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                 }
             }
             if (!moved && goingDown && !cl_vanilla_layout_hidden()) {
-                targetX = 3;
-                targetY = 3;
-                moved = true;
+                // Row 2 → lower grid: mirror vanilla cursorMove() EXACTLY by
+                // walking its candidate table through the game's own
+                // getItemTag(). field_0x22d is NOT maintained for the lower
+                // grid cells - a scan over it found nothing and swallowed the
+                // whole press ("row 3 slot 1 can't reach Save"). If no lower
+                // cell is valid, vanilla lands on the save/options row: same
+                // here.
+                static const u8 kDownX[8] = {3, 2, 3, 1, 2, 0, 1, 0};
+                static const u8 kDownY[8] = {3, 3, 4, 3, 4, 3, 4, 4};
+                for (int i = 0; i < 8 && !moved; i++) {
+                    if (collect2D->getItemTag(kDownX[i], kDownY[i], true)) {
+                        targetX = kDownX[i];
+                        targetY = kDownY[i];
+                        moved = true;
+                    }
+                }
+                if (!moved) {
+                    targetY = 5;
+                    targetX = (curX <= 2) ? 0 : 1;
+                    moved = true;
+                }
             }
         }
 
         if (moved) {
+            collect2D->field_0x259 = curX;
+            collect2D->field_0x25a = curY;
             collect2D->mCursorX = targetX;
             collect2D->mCursorY = targetY;
-            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            if (targetY == 5) {
+                Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            } else {
+                Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            }
             collect2D->cursorPosSet();
             collect2D->setItemNameString(collect2D->mCursorX, collect2D->mCursorY);
             return HOOK_SKIP_ORIGINAL;
         }
+        if (dir >= 0) {
+            // A direction was pressed but this grid has nowhere to go. Swallow
+            // it deliberately: falling through to vanilla cursorMove() lets it
+            // re-read the stick triggers this hook already consumed above
+            // (checkTrigger()/check*Trigger() mutate the repeat-timer state),
+            // which eats the input anyway AND desyncs the repeat timers - the
+            // source of the "menu inputs don't consistently register" reports.
+            return HOOK_SKIP_ORIGINAL;
+        }
+    } else if (curY == 3 && collect2D->mpStick->checkUpTrigger()) {
+        // UP from the vanilla lower grid (wallet / poe souls / bugs / letters /
+        // skills row) must re-enter the equip grid at the nearest VISIBLE cell.
+        // Vanilla cursorMove()'s hardcoded row-3 remap table consults only its
+        // static tag table, which still lists cells this mod replaced or hid -
+        // the cursor then sits on an invisible pane (reads as "a tone plays but
+        // nothing moves"), and the next press appears to skip a whole row.
+        // Rows are scanned top-down (tunics before shields before swords) so
+        // the closest row wins, nearest column within it.
+        int bestX = -1, bestY = -1;
+        J2DPane* fromPane = get_target_pane(collect2D, curX, curY);
+        f32 fromX = fromPane ? fromPane->getTranslateX() : 0.0f;
+        for (int ty = 2; ty >= 0 && bestX == -1; ty--) {
+            f32 bestDist = 1.0e9f;
+            for (int tx = 3; tx <= 6; tx++) {
+                if (collect2D->field_0x22d[tx][ty] != 0 && is_collect_item_unlocked(tx, ty)) {
+                    J2DPane* p = get_target_pane(collect2D, tx, ty);
+                    f32 px = p ? p->getTranslateX() : (f32)tx;
+                    f32 d = px - fromX;
+                    if (d < 0.0f) d = -d;
+                    if (d < bestDist) {
+                        bestDist = d;
+                        bestX = tx;
+                        bestY = ty;
+                    }
+                }
+            }
+        }
+        if (bestX != -1) {
+            collect2D->mCursorX = (u8)bestX;
+            collect2D->mCursorY = (u8)bestY;
+            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            collect2D->cursorPosSet();
+            collect2D->setItemNameString(collect2D->mCursorX, collect2D->mCursorY);
+        }
+        return HOOK_SKIP_ORIGINAL;
     }
     return HOOK_CONTINUE;
 }

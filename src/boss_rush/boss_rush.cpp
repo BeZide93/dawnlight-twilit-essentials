@@ -3200,7 +3200,8 @@ static bool link_near_gallery_statue() {
 }
 
 static void show_statue_fight_a_status() {
-    if (link_near_gallery_statue() || boss_rush_master_sword_near()) {
+    // Master sword spawn/prompt disabled for now.
+    if (link_near_gallery_statue() /* || boss_rush_master_sword_near() */) {
         g_dComIfG_gameInfo.play.setDoStatus(BUTTON_STATUS_OPEN, BUTTON_STATUS_FLAG_NONE);
     }
 }
@@ -3219,12 +3220,12 @@ static void on_action_string_post(ModContext*, void* args, void* retval, void*) 
     }
 
     static char fight[] = "Fight";
-    static char startBossRush[] = "Start boss rush";
+    // static char startBossRush[] = "Start boss rush";
     static char leave[] = "Leave Boss Rush";
     if (link_near_gallery_statue()) {
         *static_cast<char**>(retval) = fight;
-    } else if (boss_rush_master_sword_near()) {
-        *static_cast<char**>(retval) = startBossRush;
+    // } else if (boss_rush_master_sword_near()) {
+    //     *static_cast<char**>(retval) = startBossRush;
     } else {
         *static_cast<char**>(retval) = leave;
     }
@@ -4698,9 +4699,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
-    if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
-        start_boss_rush_full_run(log_svc, mod_ctx);
-    }
+    // if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
+    //     start_boss_rush_full_run(log_svc, mod_ctx);
+    // }
 }
 
 ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
