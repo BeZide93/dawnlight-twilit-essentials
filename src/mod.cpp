@@ -925,16 +925,16 @@ static bool is_swim_sprint_speed_disabled(ModContext*, void*) {
     return !g_configStaminaSwimSprint;
 }
 
+static bool is_controls_sprint_disabled(ModContext*, void*) {
+    return !g_configStaminaSprint && !g_configStaminaWolfSprint && !g_configStaminaSwimSprint;
+}
+
 static bool is_quick_access_sub_disabled(ModContext*, void*) {
     return !g_configQuickAccessEnabled;
 }
 
 static bool is_bottles_sub_disabled(ModContext*, void*) {
     return !g_configBottlesQuickAccessEnabled;
-}
-
-static bool is_z_slot_sub_disabled(ModContext*, void*) {
-    return !g_configCustomZButtonEnabled;
 }
 
 static ModResult build_visible_equip_dialog(ModContext* ctx, UiElementHandle pane, void*, ModError*) {
@@ -1660,12 +1660,6 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>Remap the controller buttons of the mod's features. A binding is grayed out "
         "while its feature is disabled.</p>", nullptr);
 
-    svc_ui->pane_add_section(mod_ctx, left, "Z Button Slot");
-    ui_add_select(left, "Midna button", g_controlsVars[CTRL_BIND_MIDNA],
-        "<p>While the Z Button Slot feature is enabled, Midna is called with this button "
-        "instead of Z. The item slot itself always stays on Z.</p>",
-        kControlsButtonLabels, CTRL_BTN_COUNT, is_z_slot_sub_disabled);
-
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
     ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],
         "<p>Tap to use your quick item, hold to open the Quick Access menu.</p>",
@@ -1677,10 +1671,11 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
         "to L, L no longer triggers targeting/shield.</p>",
         kControlsButtonLabels, CTRL_BTN_COUNT, is_bottles_sub_disabled);
 
-    svc_ui->pane_add_section(mod_ctx, left, "Boss Rush");
-    ui_add_select(left, "Retry button", g_controlsVars[CTRL_BIND_BOSSRUSH_RETRY],
-        "<p>During a Boss Rush fight, press to restart the fight.</p>",
-        kControlsButtonLabels, CTRL_BTN_COUNT, nullptr);
+    svc_ui->pane_add_section(mod_ctx, left, "Stamina");
+    ui_add_select(left, "Sprint button", g_controlsVars[CTRL_BIND_SPRINT],
+        "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while swimming. "
+        "Note: L3/R3 are the stick clicks.</p>",
+        kControlsButtonLabels, CTRL_BTN_COUNT, is_controls_sprint_disabled);
 
     return MOD_OK;
 }
@@ -1695,9 +1690,7 @@ static ModResult customization_tab_update(ModContext*, void*, ModError*) {
 static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle left,
                                    UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
-        "<p>Move the stamina bar and the boss bar around the screen. The default value of 0 "
-        "keeps each bar at its normal position. While you change a value, the bar is shown "
-        "as a preview at its current position; it hides again when you leave this tab.</p>",
+        "<p>Customize the bars here</p>",
         nullptr);
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina Bar");
@@ -2438,7 +2431,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varBossRushPortal, on_boss_rush_portal_changed, nullptr, nullptr);
         }
 
-        init_controls_config(svc_config, mod_ctx);
+        init_controls_config(svc_config, svc_hook, mod_ctx);
         init_stamina_bar_config(svc_config, mod_ctx);
         init_boss_bar_config(svc_config, mod_ctx);
     }

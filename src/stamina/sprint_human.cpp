@@ -2,6 +2,7 @@
 
 #include "stamina.hpp"
 #include "stamina_internal.hpp"
+#include "../controls/controls.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
@@ -42,12 +43,11 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
 
-    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const bool rollHeld = (pad.mButtonFlags & PAD_BUTTON_A) != 0;
+    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
     const bool drains   = g_configStaminaSrcSprint && g_configStaminaEnabled;
     const bool wasLatched = s_sprintLatched;
 
-    if (!rollHeld || (drains && stamina_impl::is_empty())) {
+    if (!sprintHeld || (drains && stamina_impl::is_empty())) {
         s_sprintLatched = false;
         return HOOK_CONTINUE;
     }
@@ -119,7 +119,7 @@ void update_sprint_human() {
         s_holdFrames = 0;
         return;
     }
-    if (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & PAD_BUTTON_A) {
+    if (controls_binding_held(CTRL_BIND_SPRINT)) {
         if (s_holdFrames < 0xFF) s_holdFrames++;
     } else {
         s_holdFrames = 0;
@@ -132,8 +132,8 @@ static void sprint_pad_read_post(ModContext*, void*, void*, void*) {
     if (!g_configStaminaSprint) return;
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const bool sprintHold =
-        (pad.mButtonFlags & PAD_BUTTON_A) != 0 && s_holdFrames >= kSprintHoldFrames;
+    const bool sprintHold = controls_binding_held(CTRL_BIND_SPRINT) &&
+                            s_holdFrames >= kSprintHoldFrames;
     if (!s_sprintLatched && !sprintHold) return;
 
     if (s_sprintLatched) {

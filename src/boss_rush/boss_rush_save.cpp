@@ -104,7 +104,7 @@ bool boss_rush_save_preset_available() {
     return s_presetAvailable;
 }
 
-bool boss_rush_save_apply_preset() {
+bool boss_rush_save_apply_preset(bool i_refreshLink) {
     if (!s_presetAvailable) {
         return false;
     }
@@ -125,8 +125,9 @@ bool boss_rush_save_apply_preset() {
     dComIfGp_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
     dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
 
-    if (prevSword != dItemNo_MASTER_SWORD_e || prevShield != dItemNo_HYLIA_SHIELD_e ||
-        prevTunic != dItemNo_WEAR_KOKIRI_e) {
+    if (i_refreshLink && (prevSword != dItemNo_MASTER_SWORD_e ||
+                          prevShield != dItemNo_HYLIA_SHIELD_e ||
+                          prevTunic != dItemNo_WEAR_KOKIRI_e)) {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
             link->setSelectEquipItem(FALSE);

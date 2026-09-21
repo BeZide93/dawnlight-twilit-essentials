@@ -9,7 +9,7 @@ void shutdown_boss_rush_save();
 
 bool boss_rush_save_preset_available();
 
-bool boss_rush_save_apply_preset();
+bool boss_rush_save_apply_preset(bool i_refreshLink = true);
 
 void boss_rush_save_apply_equips_to_savedata();
 

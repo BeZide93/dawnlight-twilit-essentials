@@ -4,7 +4,6 @@
 #include "z_mobile.hpp"
 #include "z_item_actions.hpp"
 #include "../quick_access/quick_access.hpp"
-#include "../controls/controls.hpp"
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadHook);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
@@ -25,7 +24,7 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const u16 midnaBit = controls_binding_bit(CTRL_BIND_MIDNA);
+    const u32 midnaBit = PAD_BUTTON_LEFT;
 
     u8 windowStatus = dMeter2Info_getWindowStatus();
     bool isMenuOrPause = (windowStatus != 0) || dMeter2Info_getPauseStatus() != 0 || dComIfGp_isPauseFlag()
@@ -38,8 +37,8 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     }
 
     const bool quickAccessOpen = quick_access_is_active();
-    g_dpadLeftHeld = !quickAccessOpen && (pad.mButtonFlags & midnaBit) != 0;
-    g_dpadLeftTrig = !quickAccessOpen && (pad.mPressedButtonFlags & midnaBit) != 0;
+    g_dpadLeftHeld = !quickAccessOpen && (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
+    g_dpadLeftTrig = !quickAccessOpen && (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
 
     if (!quickAccessOpen) {
         if (g_dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;

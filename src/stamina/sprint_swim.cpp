@@ -2,11 +2,11 @@
 
 #include "stamina.hpp"
 #include "stamina_internal.hpp"
+#include "../controls/controls.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
-#include "m_Do/m_Do_controller_pad.h"
 
 bool g_configStaminaSwimSprint = false;
 float g_configStaminaSwimSprintSpeed = 1.15f;
@@ -28,8 +28,8 @@ static bool sprint_swim_wanted(const daAlink_c* link) {
     if (is_zora_tunic(link)) return false;
     if (link->mProcID != daAlink_c::PROC_SWIM_MOVE) return false;
 
-    const bool aHeld = (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & PAD_BUTTON_A) != 0;
-    if (!aHeld) return false;
+    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
+    if (!sprintHeld) return false;
 
     if (g_configStaminaEnabled && g_configStaminaSrcSwim && stamina_impl::is_empty()) {
         return false;
@@ -56,8 +56,8 @@ void update_sprint_swim() {
         return;
     }
 
-    const bool aHeld = (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & PAD_BUTTON_A) != 0;
-    if (aHeld) {
+    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
+    if (sprintHeld) {
         if (s_holdFrames < 0xFF) s_holdFrames++;
     } else {
         s_holdFrames = 0;

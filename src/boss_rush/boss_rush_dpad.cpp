@@ -2,7 +2,6 @@
 
 #include "boss_rush.hpp"
 #include "../quick_access/quick_access.hpp"
-#include "../controls/controls.hpp"
 
 #include "mods/hook.hpp"
 #include "mods/service.hpp"
@@ -37,10 +36,9 @@ static void dpad_read_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const u32 retryBit = controls_binding_bit(CTRL_BIND_BOSSRUSH_RETRY);
-    const bool pressed = (pad.mPressedButtonFlags & retryBit) != 0;
-    pad.mPressedButtonFlags &= ~retryBit;
-    pad.mButtonFlags &= ~retryBit;
+    const bool pressed = (pad.mPressedButtonFlags & PAD_BUTTON_RIGHT) != 0;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_RIGHT;
+    pad.mButtonFlags &= ~PAD_BUTTON_RIGHT;
 
     if (pressed && fight_label_live()) {
         boss_rush_request_retry();

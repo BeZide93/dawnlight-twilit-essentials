@@ -187,7 +187,9 @@ void apply_boss_rush_equipment_restriction(const BossGalleryEntry& boss) {
 
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (link != nullptr) {
-        link->setClothesChange(0);
         link->setSelectEquipItem(FALSE);
+        if (forceKokiri) {
+            link->setClothesChange(0);
+        }
     }
 }

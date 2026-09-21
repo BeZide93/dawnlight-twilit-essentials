@@ -1524,7 +1524,7 @@ static dMeter2Draw_c* s_lastDraw = nullptr;
 static J2DScreen* s_lastScreen = nullptr;
 
 static void suppress_menu_buttons(interface_of_controller_pad& pad) {
-    const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
     pad.mButtonFlags &= ~qaBit;
     pad.mPressedButtonFlags &= ~qaBit;
 
@@ -1769,7 +1769,7 @@ static void qa_wolf_sun_song() {
 }
 
 static void wolf_quick_access_input(interface_of_controller_pad& pad) {
-    bool held = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
+    bool held = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
     if (s_dpadCancelLatch) {
         if (!held) {
             s_dpadCancelLatch = false;
@@ -1895,7 +1895,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    bool dpadDownHeld = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
+    bool dpadDownHeld = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
     if (s_dpadCancelLatch) {
         if (!dpadDownHeld) {
             s_dpadCancelLatch = false;
@@ -1905,8 +1905,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     if (quick_access_bottles_hotkey_active()) {
         dpadDownHeld = false;
     }
-    if (s_editMode && s_editDpadDownLatch &&
-        (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) == 0) {
+    if (s_editMode && s_editDpadDownLatch && !controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
         s_editDpadDownLatch = false;
     }
 
@@ -1927,7 +1926,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
             pad.mButtonFlags &= ~PAD_BUTTON_X;
             s_editDpadDownLatch = false;
-            dpadDownHeld = (pad.mButtonFlags & controls_binding_bit(CTRL_BIND_QUICK_ACCESS)) != 0;
+            dpadDownHeld = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
             leave_edit_mode(dpadDownHeld);
             play_ok_se();
             suppress_menu_buttons(pad);

@@ -202,7 +202,7 @@ static void open_bottle_menu() {
 }
 
 static void eat_bottle_trigger(interface_of_controller_pad& pad) {
-    const u16 bottleBit = controls_binding_bit(CTRL_BIND_BOTTLES);
+    const u32 bottleBit = controls_binding_bit(CTRL_BIND_BOTTLES);
     if (bottleBit == PAD_TRIGGER_L) {
         pad.mTriggerLeft = 0.0f;
         pad.mTrigLockL = false;
@@ -253,7 +253,7 @@ static void bottles_cycle_step(int dir) {
 }
 
 static void bottles_suppress_pad(interface_of_controller_pad& pad) {
-    const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
     pad.mPressedButtonFlags &= ~qaBit;
     pad.mButtonFlags &= ~qaBit;
 
@@ -420,8 +420,7 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const u16 bottleBit = controls_binding_bit(CTRL_BIND_BOTTLES);
-    const bool lPhys = (pad.mButtonFlags & bottleBit) != 0;
+    const bool lPhys = controls_binding_held(CTRL_BIND_BOTTLES);
 
     bool lHeld = lPhys;
     if (s_cancelLatchL) {
@@ -518,7 +517,7 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
         s_hotkeyActive = true;
         eat_bottle_trigger(pad);
 
-        const u16 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+        const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
         pad.mPressedButtonFlags &= ~qaBit;
         pad.mButtonFlags &= ~qaBit;
 

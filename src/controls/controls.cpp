@@ -2,24 +2,26 @@
 
 #include "m_Do/m_Do_controller_pad.h"
 
+#include "mods/hook.hpp"
+#include "mods/svc/hook.h"
+
 const char* const kControlsButtonLabels[CTRL_BTN_COUNT] = {
     "Z", "L", "R", "A", "B", "X", "Y",
-    "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
+    "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "L3", "R3",
 };
 
 static const int kControlsDefaultBinding[CTRL_BIND_COUNT] = {
-    CTRL_BTN_DPAD_LEFT, CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_DPAD_RIGHT,
+    CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_A,
 };
 
 static const char* const kControlsVarNames[CTRL_BIND_COUNT] = {
-    "controlsMidnaButton",
     "controlsQuickAccessButton",
     "controlsBottlesButton",
-    "controlsBossRushRetryButton",
+    "controlsSprintButton",
 };
 
 int g_controlsBinding[CTRL_BIND_COUNT] = {
-    CTRL_BTN_DPAD_LEFT, CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_DPAD_RIGHT,
+    CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_A,
 };
 
 ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT] = {};
@@ -31,7 +33,7 @@ static int clamp_button_index(int idx, int binding) {
     return idx;
 }
 
-u16 controls_binding_bit(int b) {
+u32 controls_binding_bit(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT) {
         return 0;
     }
@@ -51,12 +53,48 @@ u16 controls_binding_bit(int b) {
     }
 }
 
+/* Stick clicks are reported by the engine in PADStatus::extButton and never reach the game's
+ * button masks (mButtonFlags / mPressedButtonFlags), so they are polled separately. */
+static u32 controls_ext_button_bit(int button) {
+    if (button == CTRL_BTN_L3) return PAD_BUTTON_LEFT_STICK;
+    if (button == CTRL_BTN_R3) return PAD_BUTTON_RIGHT_STICK;
+    return 0;
+}
+
+/* Per-frame snapshot of the ext buttons, refreshed right after each pad read so
+ * controls_binding_pressed() can report a rising edge for them. */
+DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
+
+static u32 s_extHeldPrev = 0;
+static u32 s_extHeldCur  = 0;
+
+static void controls_pad_read_post(ModContext*, void*, void*, void*) {
+    s_extHeldPrev = s_extHeldCur;
+    s_extHeldCur = JUTGamePad::mPadStatus[PAD_1].extButton;
+}
+
 bool controls_binding_held(int b) {
-    return (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & controls_binding_bit(b)) != 0;
+    if (b < 0 || b >= CTRL_BIND_COUNT) {
+        return false;
+    }
+    const u32 bit = controls_binding_bit(b);
+    if (bit != 0) {
+        return (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & bit) != 0;
+    }
+    return (s_extHeldCur &
+            controls_ext_button_bit(clamp_button_index(g_controlsBinding[b], b))) != 0;
 }
 
 bool controls_binding_pressed(int b) {
-    return (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & controls_binding_bit(b)) != 0;
+    if (b < 0 || b >= CTRL_BIND_COUNT) {
+        return false;
+    }
+    const u32 bit = controls_binding_bit(b);
+    if (bit != 0) {
+        return (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & bit) != 0;
+    }
+    return (s_extHeldCur & ~s_extHeldPrev &
+            controls_ext_button_bit(clamp_button_index(g_controlsBinding[b], b))) != 0;
 }
 
 static void on_controls_binding_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
@@ -69,7 +107,11 @@ static void on_controls_binding_changed(ModContext*, ConfigVarHandle, const Conf
                                                     static_cast<int>(binding));
 }
 
-ModResult init_controls_config(const ConfigService* cfg, ModContext* ctx) {
+ModResult init_controls_config(const ConfigService* cfg, const HookService* hook_svc,
+                               ModContext* ctx) {
+    if (hook_svc) {
+        mods::hook::add_post<ControlsPadRead>(hook_svc, controls_pad_read_post);
+    }
     if (cfg == nullptr) {
         return MOD_OK;
     }

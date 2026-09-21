@@ -2,11 +2,11 @@
 
 #include "stamina.hpp"
 #include "stamina_internal.hpp"
+#include "../controls/controls.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
-#include "m_Do/m_Do_controller_pad.h"
 
 bool g_configStaminaWolfSprint = false;
 float g_configStaminaWolfSprintSpeed = 1.1f;
@@ -50,7 +50,7 @@ static bool sprint_wanted(const daAlink_c* link) {
         return false;
     }
     if (!link || !link->mpHIO) return false;
-    if (!(mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & PAD_BUTTON_A)) return false;
+    if (!controls_binding_held(CTRL_BIND_SPRINT)) return false;
     if (g_configStaminaEnabled && g_configStaminaSrcWolfDash && stamina_impl::is_empty()) return false;
     return true;
 }

@@ -1041,8 +1041,8 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
     }
 }
 
-static void apply_boss_rush_loadout() {
-    boss_rush_save_apply_preset();
+static void apply_boss_rush_loadout(bool i_refreshLink = true) {
+    boss_rush_save_apply_preset(i_refreshLink);
 }
 
 }
@@ -4028,7 +4028,8 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
             if (link->checkEquipHeavyBoots()) {
                 link->setHeavyBoots(0);
             }
-            if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_ZORA_e) {
+            if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_ZORA_e ||
+                dComIfGs_getSelectEquipClothes() == dItemNo_ARMOR_e) {
                 dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
                 dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
             }
@@ -4446,7 +4447,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];
 
                 if (g_configBossRushVanillaGear) {
-                    apply_boss_rush_loadout();
+                    apply_boss_rush_loadout(false);
                     reset_boss_rush_save_flags();
                     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
                     clear_boss_dungeon_clear_flags(boss.stage);
