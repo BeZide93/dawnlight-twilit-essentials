@@ -69,6 +69,7 @@
 #include "dusk/config_var.hpp"
 #include "JSystem/JUtility/JUTFont.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <string_view>
 
@@ -1156,6 +1157,22 @@ static void ui_add_select(UiElementHandle pane, const char* label, ConfigVarHand
     svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
 }
 
+/* Integer number control without a clamp range. */
+static void ui_add_number(UiElementHandle pane, const char* label, ConfigVarHandle var,
+                          const char* help_rml) {
+    if (!svc_ui || var == 0) return;
+    UiControlDesc c = UI_CONTROL_DESC_INIT;
+    c.kind = UI_CONTROL_NUMBER;
+    c.label = label;
+    c.help_rml = help_rml;
+    c.binding = UI_BINDING_CONFIG_VAR;
+    c.config_var = var;
+    c.min = INT32_MIN;
+    c.max = INT32_MAX;
+    c.step = 1;
+    svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
+}
+
 static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandle left,
                                      UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
@@ -1669,6 +1686,38 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     return MOD_OK;
 }
 
+/* While the Customization tab is visible it keeps this at 0 every frame; the
+ * moment it stops (tab switch or window close) the bar previews are hidden. */
+static unsigned int s_customizationTabIdleFrames = 0;
+
+static ModResult customization_tab_update(ModContext*, void*, ModError*) {
+    s_customizationTabIdleFrames = 0;
+    return MOD_OK;
+}
+
+static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle left,
+                                   UiElementHandle right, void*, ModError*) {
+    svc_ui->pane_add_rml(mod_ctx, right,
+        "<p>Move the stamina bar and the boss bar around the screen. The default value of 0 "
+        "keeps each bar at its normal position. While you change a value, the bar is shown "
+        "as a preview at its current position; it hides again when you leave this tab.</p>",
+        nullptr);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Stamina Bar");
+    ui_add_number(left, "X Offset", g_staminaBarVars[0],
+        "<p>Horizontal position of the stamina bar as an offset.</p>");
+    ui_add_number(left, "Y Offset", g_staminaBarVars[1],
+        "<p>Vertical position of the stamina bar as an offset.</p>");
+
+    svc_ui->pane_add_section(mod_ctx, left, "Boss Bar");
+    ui_add_number(left, "X Offset", g_bossBarVars[0],
+        "<p>Horizontal position of the boss bar as an offset.</p>");
+    ui_add_number(left, "Y Offset", g_bossBarVars[1],
+        "<p>Vertical position of the boss bar as an offset.</p>");
+
+    return MOD_OK;
+}
+
 static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "General",   tab_general,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, nullptr, nullptr },
@@ -1678,6 +1727,7 @@ static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "Menus",     tab_menus,     nullptr, nullptr },
     { sizeof(UiTabDesc), "BossRush",  tab_boss_rush, nullptr, nullptr },
     { sizeof(UiTabDesc), "Controls",  tab_controls,  nullptr, nullptr },
+    { sizeof(UiTabDesc), "Customization", tab_customization, customization_tab_update, nullptr },
 };
 
 static void on_open_mod_settings(ModContext*, void*) {
@@ -2392,6 +2442,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         }
 
         init_controls_config(svc_config, mod_ctx);
+        init_stamina_bar_config(svc_config, mod_ctx);
+        init_boss_bar_config(svc_config, mod_ctx);
     }
 
 
@@ -2469,6 +2521,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
+    /* The Customization tab refreshes its idle counter every frame while it is
+     * the visible tab; once it stops, hide any bar previews it requested. */
+    if (++s_customizationTabIdleFrames > 2) {
+        stamina_bar_preview_cancel();
+        boss_bar_preview_cancel();
+    }
+
     if (s_generalInitialized) update_general(svc_log, mod_ctx);
     if (s_damageVignetteInitialized) update_damage_vignette(svc_log, mod_ctx);
     if (s_oxygenVignetteInitialized) update_oxygen_vignette(svc_log, mod_ctx);

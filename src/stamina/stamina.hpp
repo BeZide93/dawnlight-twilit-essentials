@@ -1,9 +1,12 @@
 #pragma once
 
 #include "mods/service.hpp"
+#include "mods/svc/config.h"
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
 #include "mods/svc/hook.hpp"
+
+struct ConfigService;
 
 extern bool g_configStaminaEnabled;
 extern int  g_configStaminaMax;
@@ -11,7 +14,21 @@ extern bool g_configStaminaScaleWithHearts;
 extern int  g_configStaminaPerHeart;
 extern int  g_configStaminaRegen;
 
+/* Screen-space offset of the stamina meter from its default position. */
+extern float g_configStaminaBarX;
+extern float g_configStaminaBarY;
+
 int stamina_effective_max();
+
+/* Shows the stamina meter as a static preview at its configured position
+ * (used by the Customization tab); hidden again via cancel. */
+void stamina_bar_preview_request();
+void stamina_bar_preview_cancel();
+
+/* Config vars staminaBarX/staminaBarY ([0] = X, [1] = Y), registered by
+ * init_stamina_bar_config. */
+extern ConfigVarHandle g_staminaBarVars[2];
+ModResult init_stamina_bar_config(const ConfigService* cfg, ModContext* ctx);
 
 extern bool g_configStaminaSrcAttacks;
 extern bool g_configStaminaSrcJumpSpin;

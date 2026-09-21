@@ -5,11 +5,29 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
 #include "d/d_save.h"
+#include "d/d_meter2.h"
+#include "d/d_meter2_draw.h"
 #include "d/d_meter2_info.h"
+#include "d/d_meter_HIO.h"
 
 #include <cstring>
 
 bool g_configBossRushVanillaGear = false;
+
+void sync_life_meter_instant(u16 life, u16 maxLife) {
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    if (meter == nullptr) return;
+    meter->mMaxLife = maxLife;
+    meter->setNowLifeGauge(life);
+    dComIfGp_setItemNowLife(static_cast<u8>(life));
+
+    if (dMeter2Draw_c* draw = meter->getMeterDrawPtr()) {
+        u16 displayLife = static_cast<u16>(maxLife / 5 * 4);
+        if (life < displayLife) displayLife = life;
+        draw->drawLife(meter->mMaxLife, displayLife, g_drawHIO.mLifeGaugePosX,
+                       g_drawHIO.mLifeGaugePosY);
+    }
+}
 
 namespace {
 
@@ -84,6 +102,7 @@ void apply_boss_rush_equipment_restriction(const BossGalleryEntry& boss) {
     const u8 maxLife = static_cast<u8>(rule->hearts * 5);
     dComIfGs_setMaxLife(maxLife);
     dComIfGs_setLife(maxLife);
+    sync_life_meter_instant(maxLife, maxLife);
 
     const u32 have = rule->items;
     keep_or_strip(SLOT_0,  have, IT_BOOM);

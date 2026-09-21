@@ -3,6 +3,7 @@
 #include "sprint_human.hpp"
 #include "sprint_wolf.hpp"
 #include "sprint_swim.hpp"
+#include "../boss_bar/boss_bar.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -15,6 +16,7 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "Z2AudioLib/Z2SeMgr.h"
 #include "mods/svc/save.h"
+#include "mods/svc/config.h"
 
 #define private public
 #define protected public
@@ -28,6 +30,9 @@
 
 #include <cstdint>
 
+void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
+void qa_hud_scale_end();
+
 extern const SaveService* svc_save;
 extern ModContext* mod_ctx;
 
@@ -36,6 +41,9 @@ int  g_configStaminaMax     = 100;
 bool g_configStaminaScaleWithHearts = false;
 int  g_configStaminaPerHeart = 15;
 int  g_configStaminaRegen   = 100;
+
+float g_configStaminaBarX = 0.0f;
+float g_configStaminaBarY = 0.0f;
 
 bool g_configStaminaSrcAttacks  = true;
 bool g_configStaminaSrcJumpSpin  = true;
@@ -201,6 +209,56 @@ f32 cost_scaled(f32 base_cost, int pct) {
     if (p < 5.0f) p = 5.0f;
     return base_cost * p / 100.0f;
 }
+}
+
+/* Live preview of the meter while its position is edited in the Customization
+ * tab; counts down every update and is cancelled when the tab is left. */
+static constexpr int kStaminaBarPreviewFrames = 120;
+static int s_staminaBarPreviewFrames = 0;
+
+void stamina_bar_preview_request() { s_staminaBarPreviewFrames = kStaminaBarPreviewFrames; }
+void stamina_bar_preview_cancel() { s_staminaBarPreviewFrames = 0; }
+
+ConfigVarHandle g_staminaBarVars[2] = {};
+
+static void on_stamina_bar_pos_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+                                       const ConfigVarValue*, void* user_data) {
+    if (value == nullptr) return;
+    const f32 v = static_cast<f32>(value->int_value);
+    if (user_data != nullptr) {
+        g_configStaminaBarX = v;
+    } else {
+        g_configStaminaBarY = v;
+    }
+    stamina_bar_preview_request();
+    boss_bar_preview_cancel();
+}
+
+ModResult init_stamina_bar_config(const ConfigService* cfg, ModContext* ctx) {
+    if (cfg == nullptr) return MOD_OK;
+
+    const struct { const char* name; bool isX; } vars[] = {
+        { "staminaBarX", true },
+        { "staminaBarY", false },
+    };
+    for (int i = 0; i < 2; i++) {
+        ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
+        d.name = vars[i].name;
+        d.type = CONFIG_VAR_INT;
+        d.default_int = 0;
+        if (cfg->register_var(ctx, &d, &g_staminaBarVars[i]) == MOD_OK) {
+            int64_t val = 0;
+            cfg->get_int(ctx, g_staminaBarVars[i], &val);
+            if (vars[i].isX) {
+                g_configStaminaBarX = static_cast<f32>(val);
+            } else {
+                g_configStaminaBarY = static_cast<f32>(val);
+            }
+            cfg->subscribe(ctx, g_staminaBarVars[i], on_stamina_bar_pos_changed,
+                           reinterpret_cast<void*>(static_cast<intptr_t>(vars[i].isX)), nullptr);
+        }
+    }
+    return MOD_OK;
 }
 
 static void tired_check_post(ModContext*, void* args, void* retval, void*) {
@@ -395,6 +453,7 @@ static bool is_hidden_skill_proc_state(daAlink_c* link) {
 }
 
 void update_stamina(const LogService*, ModContext*) {
+    if (s_staminaBarPreviewFrames > 0) s_staminaBarPreviewFrames--;
     s_blockedThisFrame = false;
     s_swungThisFrame = false;
     update_sprint_human();
@@ -479,13 +538,7 @@ static JUtility::TColor lerp(JUtility::TColor a, JUtility::TColor b, f32 t) {
         static_cast<u8>(a.a + (b.a - a.a) * t));
 }
 
-static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
-    if (!g_configStaminaEnabled || s_alpha < 0.01f || !args) return;
-    if (!in_gameplay_for_draw()) return;
-
-    dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
-    if (!draw || !draw->mpKanteraScreen) return;
-
+static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     CPaneMgr* meter  = draw->mpMagicMeter;
     CPaneMgr* base   = draw->mpMagicBase;
     CPaneMgr* frameL = draw->mpMagicFrameL;
@@ -493,10 +546,6 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     CPaneMgr* parent = draw->mpMagicParent;
     if (!meter || !base || !frameL || !frameR || !parent) return;
 
-    f32 a = s_alpha;
-    if (a > 1.0f) a = 1.0f;
-
-    const f32 fill01 = s_display / stamina_max();
     const f32 span = frameR->getInitPosX() - frameL->getInitPosX();
 
     JUtility::TColor hi(170, 255, 150, 255);
@@ -511,9 +560,6 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     frameR->move(span + frameL->getInitPosX(), frameL->getInitPosY());
     base->resize(base->getInitSizeX(), base->getInitSizeY());
 
-    const f32 stackTarget = (draw->getMeterGaugeAlphaRate(1) > 0.02f) ? 16.0f : 0.0f;
-    s_stackShift += (stackTarget - s_stackShift) * 0.15f;
-
     parent->setAlphaRate(a);
     meter->setAlphaRate(a * g_drawHIO.mLanternMeterAlpha);
     frameL->setAlphaRate(a * g_drawHIO.mLanternMeterFrameAlpha);
@@ -521,13 +567,53 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
 
     const f32 origTX = parent->getTranslateX();
     const f32 origTY = parent->getTranslateY();
-    parent->translate(origTX, origTY + s_stackShift);
+    parent->translate(origTX + g_configStaminaBarX, origTY + s_stackShift + g_configStaminaBarY);
 
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
     if (graf) graf->setup2D();
+    // Blend the scale anchor between the layout init position (0.0 = the old
+    // full drift) and the bar's actually drawn position (1.0 = pinned).
+    // Measured after each draw, because the init position sits far from the
+    // visible bar and the bar X/Y config offsets are usually zero.
+    constexpr f32 kStaminaScaleAnchorBlendX = 0.25f;
+    constexpr f32 kStaminaScaleAnchorBlendY = 0.55f;
+    static f32 s_drawnX = 0.0f, s_drawnY = 0.0f;
+    static bool s_drawnMeasured = false;
+    if (!s_drawnMeasured) {
+        s_drawnX = frameL->getInitPosX();
+        s_drawnY = frameL->getInitPosY();
+        s_drawnMeasured = true;
+    }
+    qa_hud_scale_begin(frameL->getInitPosX() + kStaminaScaleAnchorBlendX * (s_drawnX - frameL->getInitPosX()),
+                       frameL->getInitPosY() + kStaminaScaleAnchorBlendY * (s_drawnY - frameL->getInitPosY()));
     draw->mpKanteraScreen->draw(0.0f, 0.0f, graf);
+    qa_hud_scale_end();
+
+    const JGeometry::TBox2<f32>& drawn = frameL->getPanePtr()->getGlbBounds();
+    s_drawnX = drawn.i.x;
+    s_drawnY = drawn.i.y;
 
     parent->translate(origTX, origTY);
+}
+
+static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
+    dMeter2Draw_c* draw = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
+    if (!draw || !draw->mpKanteraScreen) return;
+
+    if (s_staminaBarPreviewFrames > 0) {
+        draw_stamina_meter(draw, 1.0f, 1.0f);
+        return;
+    }
+
+    if (!g_configStaminaEnabled || s_alpha < 0.01f) return;
+    if (!in_gameplay_for_draw()) return;
+
+    const f32 stackTarget = (draw->getMeterGaugeAlphaRate(1) > 0.02f) ? 16.0f : 0.0f;
+    s_stackShift += (stackTarget - s_stackShift) * 0.15f;
+
+    f32 a = s_alpha;
+    if (a > 1.0f) a = 1.0f;
+    draw_stamina_meter(draw, a, s_display / stamina_max());
 }
 
 template <class Entry>

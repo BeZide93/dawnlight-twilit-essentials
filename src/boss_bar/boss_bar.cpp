@@ -1,5 +1,6 @@
 #include "boss_bar.hpp"
 #include "boss_internals.hpp"
+#include "../stamina/stamina.hpp"
 
 #include <unordered_set>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "mods/service.hpp"
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
+#include "mods/svc/config.h"
 
 #define private public
 #define protected public
@@ -42,6 +44,59 @@
 #include "../boss_rush/boss_rush.hpp"
 
 bool g_configBossBarEnabled = false;
+
+float g_configBossBarX = 0.0f;
+float g_configBossBarY = 0.0f;
+
+/* Live preview of the bar while its position is edited in the Customization
+ * tab; counts down every update and is cancelled when the tab is left. */
+static constexpr int kBossBarPreviewFrames = 120;
+static int s_bossBarPreviewFrames = 0;
+
+void boss_bar_preview_request() { s_bossBarPreviewFrames = kBossBarPreviewFrames; }
+void boss_bar_preview_cancel() { s_bossBarPreviewFrames = 0; }
+
+ConfigVarHandle g_bossBarVars[2] = {};
+
+static void on_boss_bar_pos_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+                                    const ConfigVarValue*, void* user_data) {
+    if (value == nullptr) return;
+    const f32 v = static_cast<f32>(value->int_value);
+    if (user_data != nullptr) {
+        g_configBossBarX = v;
+    } else {
+        g_configBossBarY = v;
+    }
+    boss_bar_preview_request();
+    stamina_bar_preview_cancel();
+}
+
+ModResult init_boss_bar_config(const ConfigService* cfg, ModContext* ctx) {
+    if (cfg == nullptr) return MOD_OK;
+
+    const struct { const char* name; bool isX; } vars[] = {
+        { "bossBarX", true },
+        { "bossBarY", false },
+    };
+    for (int i = 0; i < 2; i++) {
+        ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
+        d.name = vars[i].name;
+        d.type = CONFIG_VAR_INT;
+        d.default_int = 0;
+        if (cfg->register_var(ctx, &d, &g_bossBarVars[i]) == MOD_OK) {
+            int64_t val = 0;
+            cfg->get_int(ctx, g_bossBarVars[i], &val);
+            if (vars[i].isX) {
+                g_configBossBarX = static_cast<f32>(val);
+            } else {
+                g_configBossBarY = static_cast<f32>(val);
+            }
+            cfg->subscribe(ctx, g_bossBarVars[i], on_boss_bar_pos_changed,
+                           reinterpret_cast<void*>(static_cast<intptr_t>(vars[i].isX)), nullptr);
+        }
+    }
+    return MOD_OK;
+}
 
 constexpr int USE_STATIC_COLOR = 1;
 
@@ -927,6 +982,7 @@ void boss_bar_force_reset() {
 }
 
 void update_boss_bar(const LogService*, ModContext*) {
+    if (s_bossBarPreviewFrames > 0) s_bossBarPreviewFrames--;
     if (!g_configBossBarEnabled && !boss_rush_is_fighting_here()) {
         reset_state();
         s_defeated.clear();
@@ -1457,9 +1513,7 @@ static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a) {
     base->resize(svBW, svBH);
 }
 
-static void draw_boss_bar() {
-    if (!s_boss.valid) return;
-    f32 a = s_boss.alpha;
+static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     if (a < 0.01f) return;
     if (a > 1.0f) a = 1.0f;
 
@@ -1477,15 +1531,13 @@ static void draw_boss_bar() {
     if (barW > 440.0f) barW = 440.0f;
     if (barW < 280.0f) barW = 280.0f;
     const f32 barH = 10.0f;
-    const f32 barX = centreX - barW * 0.5f;
-    const f32 barY = topY + 41.0f;
+    const f32 barX = centreX - barW * 0.5f + g_configBossBarX;
+    const f32 barY = topY + 41.0f + g_configBossBarY;
 
     auto A = [a](u8 base) -> u8 { return static_cast<u8>(static_cast<f32>(base) * a); };
 
-    f32 live = s_boss.shownRatio;
     if (live < 0.0f) live = 0.0f;
     if (live > 1.0f) live = 1.0f;
-    f32 chip = s_boss.displayRatio;
     if (chip < live) chip = live;
     if (chip > 1.0f) chip = 1.0f;
 
@@ -1543,13 +1595,13 @@ static void draw_boss_bar() {
                    JUtility::TColor(0, 0, 0, A(70)), JUtility::TColor(0, 0, 0, A(30)));
     }
 
-    const char* label = s_boss.label;
-    if (!label) label = s_boss.miniboss ? "Miniboss" : "Boss";
+    const char* nm0 = label;
+    if (!nm0) nm0 = "Boss";
     char nmBuf[48];
     {
         size_t i = 0;
-        for (; label[i] != '\0' && i < sizeof(nmBuf) - 1; i++) {
-            char c = label[i];
+        for (; nm0[i] != '\0' && i < sizeof(nmBuf) - 1; i++) {
+            char c = nm0[i];
             nmBuf[i] = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
         }
         nmBuf[i] = '\0';
@@ -1569,7 +1621,7 @@ static void draw_boss_bar() {
         char one[2] = { nm[i], '\0' };
         tw += get_text_width_ingame(one, is_big(i) ? fw : fwS);
     }
-    f32 tx = centreX - tw * 0.5f;
+    f32 tx = barX + barW * 0.5f - tw * 0.5f;
 
     for (size_t i = 0; nm[i] != '\0';) {
         bool big = is_big(i);
@@ -1588,9 +1640,25 @@ static void draw_boss_bar() {
     draw_bar_endcaps(barX, barW, barY, barH, a);
 }
 
+static void draw_boss_bar() {
+    if (!s_boss.valid) return;
+    const char* label = s_boss.label ? s_boss.label : (s_boss.miniboss ? "Miniboss" : "Boss");
+    draw_boss_bar_core(s_boss.alpha, label, s_boss.shownRatio, s_boss.displayRatio);
+}
+
+static void draw_boss_bar_preview() {
+    draw_boss_bar_core(1.0f, "Boss", 1.0f, 1.0f);
+}
+
 static void on_meter2_draw_post(ModContext*, void* args, void*, void*) {
-    if (!g_configBossBarEnabled) return;
     s_meter2 = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
+
+    if (s_bossBarPreviewFrames > 0) {
+        draw_boss_bar_preview();
+        return;
+    }
+
+    if (!g_configBossBarEnabled) return;
     if (!s_boss.valid) return;
 
     if (dComIfGp_isPauseFlag()) return;

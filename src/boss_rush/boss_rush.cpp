@@ -386,11 +386,7 @@ static int s_chamberCamArmFrames = 0;
 
 static bool s_portalArrivalAnimPending = false;
 
-static const cXyz kHealZonePos{-2.35f, -350.0f, -2446.50f};
-static int s_healTimer = 0;
-constexpr f32 kHealZoneRadius = 220.0f;
-constexpr int kHealIntervalTicks = 10;
-constexpr u16 kHealPerTick = 8;
+constexpr u16 kChamberFullLife = 20 * 5;
 
 struct SavedPlayerLocation {
     char stage[8] = {0};
@@ -3267,31 +3263,18 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
 
     if (link == nullptr || (!s_bossRushModeActive && !s_exitingBossRush) || !is_in_boss_rush_chamber()) {
         if (any_ring_flames_lit()) clear_ring_flames();
-        s_healTimer = 0;
         return;
     }
 
     update_ring_flames();
 
-    const f32 dx = link->current.pos.x - kHealZonePos.x;
-    const f32 dz = link->current.pos.z - kHealZonePos.z;
-    if (dx * dx + dz * dz > kHealZoneRadius * kHealZoneRadius) {
-        s_healTimer = 0;
-        return;
-    }
-
-    if (++s_healTimer < kHealIntervalTicks) {
-        return;
-    }
-    s_healTimer = 0;
-
-    const u16 maxLife = dComIfGs_getMaxLife();
-    const u16 life = dComIfGs_getLife();
-    if (life < maxLife) {
-        const u16 newLife = static_cast<u16>(life + kHealPerTick) > maxLife
-                                ? maxLife
-                                : static_cast<u16>(life + kHealPerTick);
-        dComIfGs_setLife(newLife);
+    if (s_bossRushModeActive && !s_exitingBossRush && !s_pendingInitialInventory &&
+        s_pendingFightIndex == -1) {
+        if (dComIfGs_getMaxLife() != kChamberFullLife || dComIfGs_getLife() != kChamberFullLife) {
+            dComIfGs_setMaxLife(static_cast<u8>(kChamberFullLife));
+            dComIfGs_setLife(kChamberFullLife);
+            sync_life_meter_instant(kChamberFullLife, kChamberFullLife);
+        }
     }
 }
 
@@ -4182,6 +4165,7 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
 
     if (s_fightStartLife > 0) {
         dComIfGs_setLife(s_fightStartLife);
+        sync_life_meter_instant(s_fightStartLife, dComIfGs_getMaxLife());
     }
 
     boss_rush_timer_reset_run();
@@ -4211,6 +4195,7 @@ static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_
     apply_boss_rush_loadout();
     reset_boss_rush_save_flags();
     dComIfGs_setLife(dComIfGs_getMaxLife());
+    sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
     boss_rush_timer_begin_chain_run();
 
     commit_boss_rush_fight_warp(s_rushRunOrder[0], daAlink_getAlinkActorClass(),
@@ -4500,6 +4485,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
                 if (s_rushRunActive) {
                     dComIfGs_setLife(dComIfGs_getMaxLife());
+                    sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
                 }
 
                 if (g_configBossRushSeparateGanon && std::strcmp(boss.displayName, "Ganondorf") == 0) {
@@ -5004,6 +4990,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
             }
             if (dComIfGs_getLife() == 0) {
                 dComIfGs_setLife(dComIfGs_getMaxLife());
+                sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
             }
         } else if (const char* curStage = dComIfGp_getStartStageName()) {
             const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
