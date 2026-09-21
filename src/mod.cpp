@@ -1182,8 +1182,10 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     svc_ui->pane_add_section(mod_ctx, left, "Cutscenes");
     ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
         "<p>Skips skippable cutscenes automatically.</p>");
+#if 0
     ui_add_toggle(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
         "<p>Plays unskippable cutscenes at 4x speed.</p>");
+#endif
 
     svc_ui->pane_add_section(mod_ctx, left, "Scene Transitions");
     ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
@@ -1800,6 +1802,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varGeneralSkipCutscenes, on_general_skip_cutscenes_changed, nullptr, nullptr);
         }
 
+#if 0
         ConfigVarDesc descGeneralFfCut = CONFIG_VAR_DESC_INIT;
         descGeneralFfCut.name = "generalFastForwardCutscenes";
         descGeneralFfCut.type = CONFIG_VAR_BOOL;
@@ -1808,6 +1811,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_bool(mod_ctx, s_varGeneralFastForwardCutscenes, &g_configGeneralFastForwardCutscenes);
             svc_config->subscribe(mod_ctx, s_varGeneralFastForwardCutscenes, on_general_fast_forward_cutscenes_changed, nullptr, nullptr);
         }
+#endif
 
         ConfigVarDesc descGeneralDominionSword = CONFIG_VAR_DESC_INIT;
         descGeneralDominionSword.name = "generalDominionRodSword";

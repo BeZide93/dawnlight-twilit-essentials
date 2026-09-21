@@ -14,6 +14,7 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_name.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -85,11 +86,25 @@ void stop_fast_forward() {
     s_active = false;
 }
 
+/* Diag: why the boss-rush hold path is currently swallowing the boost (0 = not holding). */
+int s_holdReasonDiag = 0;
+const char* hold_reason_name(int reason) {
+    switch (reason) {
+    case 1: return "fighting+defeated";
+    case 2: return "fighting+holdActive";
+    case 3: return "returning-to-chamber";
+    case 4: return "chamber-settle";
+    case 5: return "fight-start-hold";
+    default: return "none";
+    }
+}
+
 bool is_boss_rush_defeat_hold() {
     if (!is_boss_rush_active()) {
         s_holdSettleFrames = 0;
         s_holdActive = false;
         s_holdMinFrames = 0;
+        s_holdReasonDiag = 0;
         return false;
     }
 
@@ -100,6 +115,7 @@ bool is_boss_rush_defeat_hold() {
         if (boss_bar_boss_defeated_now()) {
             s_holdActive = true;
             s_holdMinFrames = kDefeatMinHoldFrames;
+            s_holdReasonDiag = 1;
             return true;
         }
 
@@ -108,23 +124,28 @@ bool is_boss_rush_defeat_hold() {
         if (s_holdMinFrames <= 0 && boss_bar_current_fight_state(&label, engaged) && engaged) {
             s_holdActive = false;
         }
+        if (s_holdActive) s_holdReasonDiag = 2;
         return s_holdActive;
     }
 
     if (boss_rush_is_returning_to_chamber()) {
         s_holdSettleFrames = 0;
+        s_holdReasonDiag = 3;
         return true;
     }
 
     if (is_in_boss_rush_chamber() && !boss_rush_settle_window_active()) {
+        s_holdReasonDiag = s_holdActive ? 4 : 0;
         if (++s_holdSettleFrames > 30 && s_holdMinFrames <= 0) {
             s_holdSettleFrames = 0;
             s_holdActive = false;
+            s_holdReasonDiag = 0;
         }
         return s_holdActive;
     }
 
     s_holdSettleFrames = 0;
+    if (!s_holdActive) s_holdReasonDiag = 0;
     return s_holdActive;
 }
 
@@ -229,18 +250,115 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
     return MOD_OK;
 }
 
+namespace {
+
+/* Diagnostics: log gate/boost state transitions so cutscene behavior can be followed in the
+ * game log. Only fires when the event manager state actually changes, never per frame. */
+u32 s_diagKey = 0;
+
+void diag_log(const LogService* log_svc, const char* fmt, ...) {
+    if (log_svc == nullptr || log_svc->debug == nullptr) return;
+    char msg[320];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+    log_svc->debug(mod_ctx, msg);
+}
+
+void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
+    u32 key = genuine ? 0x80000000u : 0u;
+    char why[224] = "";
+    if (evt != nullptr) {
+        key |= 1u * evt->mEventStatus;
+        key |= u32(evt->getMode()) << 4;
+        key |= (u32(u16(evt->mEventId)) & 0xFFF) << 8;
+        key |= (evt->mSkipFunc != nullptr ? 1u : 0u) << 21;
+
+        const char* stageName = dComIfGp_getStartStageName();
+        if (stageName != nullptr &&
+            (std::strcmp(stageName, "F_SP102") == 0 || std::strcmp(stageName, "title") == 0)) {
+            key |= 1u << 22;
+            std::snprintf(why, sizeof(why), "stage=%s excluded", stageName);
+        } else if (dComIfGp_getPlayer(0) == nullptr) {
+            key |= 2u << 22;
+            std::snprintf(why, sizeof(why), "no player");
+        } else if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) {
+            key |= 3u << 22;
+            std::snprintf(why, sizeof(why), "paused");
+        } else if (evt->mEventStatus != 1) {
+            key |= 4u << 22;
+            std::snprintf(why, sizeof(why), "status=%d", (int)evt->mEventStatus);
+        } else {
+            const u8 mode = evt->getMode();
+            if (mode != dEvt_mode_DEMO_e && mode != dEvt_mode_COMPULSORY_e) {
+                key |= 5u << 22;
+                std::snprintf(why, sizeof(why), "mode=%d", (int)mode);
+            } else if (evt->mEventId < 0) {
+                key |= 6u << 22;
+                std::snprintf(why, sizeof(why), "eventId<0");
+            } else if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) {
+                key |= 7u << 22;
+                std::snprintf(why, sizeof(why), "talk/shop");
+            } else if (is_door_event(const_cast<dEvt_control_c*>(evt))) {
+                key |= 8u << 22;
+                std::snprintf(why, sizeof(why), "door event");
+            } else {
+                const int idx = static_cast<int>(evt->mOrderIdx);
+                const u16 type = (idx >= 0 && idx < 8)
+                    ? evt->mOrder[idx].mEventType
+                    : static_cast<u16>(dEvt_type_OTHER_e);
+                key |= (u32(type & 0xF) << 22) | (9u << 26);
+                std::snprintf(why, sizeof(why), "orderType=%d", (int)type);
+            }
+            dEvDtEvent_c* data =
+                g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+            if (data != nullptr && data->getName() != nullptr) {
+                diag_log(log_svc, "ff-cutscene: evt=%d name='%s' status=%d mode=%d "
+                                    "skipFunc=%d genuine=%d %s",
+                         (int)evt->mEventId, data->getName(), (int)evt->mEventStatus,
+                         (int)evt->getMode(), evt->mSkipFunc != nullptr ? 1 : 0,
+                         genuine ? 1 : 0, why);
+            }
+        }
+    }
+    if (key != s_diagKey) {
+        s_diagKey = key;
+        diag_log(log_svc, "ff-cutscene: gate %s (%s)", genuine ? "OPEN" : "closed", why);
+    }
+}
+
+}  // namespace
+
 void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx) {
     if (!s_setTimescale) return;
 
     update_boss_rush_fight_start_hold();
 
-    if (is_boss_rush_defeat_hold() || is_boss_rush_fight_start_hold()) {
+    const bool defeatHold = is_boss_rush_defeat_hold();
+    const bool startHold = is_boss_rush_fight_start_hold();
+    {
+        const int reason = defeatHold ? s_holdReasonDiag : (startHold ? 5 : 0);
+        static int s_lastHoldLogged = 0;
+        if (reason != s_lastHoldLogged) {
+            diag_log(log_svc, "ff-cutscene: hold %s -> %s",
+                     hold_reason_name(s_lastHoldLogged), hold_reason_name(reason));
+            s_lastHoldLogged = reason;
+        }
+    }
+    if (defeatHold || startHold) {
+        if (s_active) diag_log(log_svc, "ff-cutscene: boost stopped (boss rush hold)");
         stop_fast_forward();
         s_confirmFrames = 0;
         return;
     }
 
-    if (!is_genuine_cutscene(dComIfGp_getEvent())) {
+    dEvt_control_c* evt = dComIfGp_getEvent();
+    const bool genuine = is_genuine_cutscene(evt);
+    diag_gate(log_svc, evt, genuine);
+
+    if (!genuine) {
+        if (s_active) diag_log(log_svc, "ff-cutscene: boost stopped (gate closed)");
         stop_fast_forward();
         s_confirmFrames = 0;
         return;
@@ -249,8 +367,6 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
     if (s_confirmFrames < kLeadFrames) {
         ++s_confirmFrames;
     }
-
-    const dEvt_control_c* evt = dComIfGp_getEvent();
 
     const bool skipWillHandle = evt->mSkipFunc != nullptr &&
                                 (g_configGeneralSkipCutscenes || is_boss_rush_active());
@@ -267,11 +383,15 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
                                  : 1.0f;
             own_set_timescale(kFastForwardScale);
             s_active = true;
+            diag_log(log_svc, "ff-cutscene: boost ENGAGED, scale 1 -> %g (skipWillHandle=%d)",
+                     kFastForwardScale, skipWillHandle ? 1 : 0);
         } else if (current != kFastForwardScale) {
             s_restoreScale = (current > 0.0f && current != kFastForwardScale)
                                  ? current
                                  : 1.0f;
             own_set_timescale(kFastForwardScale);
+            diag_log(log_svc, "ff-cutscene: boost scale stomped to %g, reasserting",
+                     current);
         }
     } else if (s_active) {
         stop_fast_forward();
