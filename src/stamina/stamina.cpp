@@ -29,6 +29,8 @@
 
 bool g_configStaminaEnabled = false;
 int  g_configStaminaMax     = 100;
+bool g_configStaminaScaleWithHearts = false;
+int  g_configStaminaPerHeart = 15;
 int  g_configStaminaRegen   = 100;
 
 bool g_configStaminaSrcAttacks  = true;
@@ -105,9 +107,25 @@ static int  s_suppressSwingCharge = 0;
 static int  s_jumpChargeCd = 0;
 static f32  s_extraDrain  = 0.0f;
 
+static constexpr f32 kStaminaScaleMinHearts = 3.0f;
+static constexpr f32 kStaminaScaleMaxHearts = 20.0f;
+static constexpr f32 kStaminaScaleBaseValue = 100.0f;
+
+static f32 stamina_scaled_max_for_hearts() {
+    f32 hearts = static_cast<f32>(dComIfGs_getMaxLife()) / 4.0f;
+    if (hearts < kStaminaScaleMinHearts) hearts = kStaminaScaleMinHearts;
+    if (hearts > kStaminaScaleMaxHearts) hearts = kStaminaScaleMaxHearts;
+    return kStaminaScaleBaseValue + (hearts - kStaminaScaleMinHearts) * static_cast<f32>(g_configStaminaPerHeart);
+}
+
 static f32 stamina_max() {
-    f32 m = static_cast<f32>(g_configStaminaMax);
+    f32 m = g_configStaminaScaleWithHearts ? stamina_scaled_max_for_hearts()
+                                            : static_cast<f32>(g_configStaminaMax);
     return m < 10.0f ? 10.0f : m;
+}
+
+int stamina_effective_max() {
+    return static_cast<int>(stamina_max());
 }
 
 static bool in_gameplay() {

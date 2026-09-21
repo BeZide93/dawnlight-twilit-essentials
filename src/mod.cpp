@@ -350,6 +350,8 @@ static ConfigVarHandle s_varFlurryRushWindow = 0;
 static ConfigVarHandle s_varFlurryRushHits = 0;
 static ConfigVarHandle s_varStamina = 0;
 static ConfigVarHandle s_varStaminaMax = 0;
+static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
+static ConfigVarHandle s_varStaminaPerHeart = 0;
 static ConfigVarHandle s_varStaminaRegen = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
@@ -629,6 +631,30 @@ static void on_stamina_max_changed(ModContext*, ConfigVarHandle, const ConfigVar
     }
 }
 
+static void on_stamina_scale_with_hearts_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaScaleWithHearts = value->bool_value;
+    }
+}
+
+static void on_stamina_per_heart_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaPerHeart = static_cast<int>(value->int_value);
+    }
+}
+
+static void get_stamina_max_value(ModContext*, void*, UiControlValue* out_value) {
+    if (out_value != nullptr) {
+        out_value->int_value = stamina_effective_max();
+    }
+}
+
+static void set_stamina_max_value(ModContext* ctx, void*, const UiControlValue* value) {
+    if (value != nullptr && svc_config) {
+        svc_config->set_int(ctx, s_varStaminaMax, value->int_value);
+    }
+}
+
 static void on_stamina_regen_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configStaminaRegen = static_cast<int>(value->int_value);
@@ -876,6 +902,14 @@ static bool is_collection_ordon_hero_sub_disabled(ModContext*, void*) {
 
 static bool is_stamina_sub_disabled(ModContext*, void*) {
     return !g_configStaminaEnabled;
+}
+
+static bool is_stamina_max_disabled(ModContext*, void*) {
+    return !g_configStaminaEnabled || g_configStaminaScaleWithHearts;
+}
+
+static bool is_stamina_per_heart_disabled(ModContext*, void*) {
+    return !g_configStaminaEnabled || !g_configStaminaScaleWithHearts;
 }
 
 static bool is_sprint_speed_disabled(ModContext*, void*) {
@@ -1182,16 +1216,36 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.is_disabled = is_stamina_sub_disabled;
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_toggle(left, "Scale max stamina with max hearts", s_varStaminaScaleWithHearts,
+        "<p>Automatically sets max stamina based on your max hearts: 100 at 3 hearts, plus "
+        "the amount below for every heart past that. Overrides Max Stamina below.</p>",
+        is_stamina_sub_disabled);
+    if (s_varStaminaPerHeart != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_NUMBER;
+        c.label = "Stamina per extra heart";
+        c.help_rml = "<p>How much max stamina is added per heart past the starting 3, when "
+            "scaling with max hearts is on (default: 15).</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varStaminaPerHeart;
+        c.is_disabled = is_stamina_per_heart_disabled;
+        c.min = 1;
+        c.max = 50;
+        c.step = 1;
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
     if (s_varStaminaMax != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Max stamina";
-        c.help_rml = "<p>Maximum stamina capacity (default: 100).</p>";
-        c.binding = UI_BINDING_CONFIG_VAR;
-        c.config_var = s_varStaminaMax;
-        c.is_disabled = is_stamina_sub_disabled;
+        c.help_rml = "<p>Maximum stamina capacity (default: 100). Shows the current live "
+            "value while scaling with max hearts is on.</p>";
+        c.binding = UI_BINDING_CALLBACKS;
+        c.get = get_stamina_max_value;
+        c.set = set_stamina_max_value;
+        c.is_disabled = is_stamina_max_disabled;
         c.min = 40;
-        c.max = 300;
+        c.max = 450;
         c.step = 10;
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
@@ -1209,6 +1263,7 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
     ui_add_toggle(left, "Sprint (hold roll button)", s_varStaminaSprint,
         "<p>Hold the roll button while running to sprint.</p>");
     if (s_varStaminaSprintSpeed != 0) {
@@ -2052,6 +2107,26 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varStaminaMax, &v);
             g_configStaminaMax = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varStaminaMax, on_stamina_max_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaScaleWithHearts = CONFIG_VAR_DESC_INIT;
+        descStaminaScaleWithHearts.name = "staminaScaleWithHearts";
+        descStaminaScaleWithHearts.type = CONFIG_VAR_BOOL;
+        descStaminaScaleWithHearts.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descStaminaScaleWithHearts, &s_varStaminaScaleWithHearts) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaScaleWithHearts, &g_configStaminaScaleWithHearts);
+            svc_config->subscribe(mod_ctx, s_varStaminaScaleWithHearts, on_stamina_scale_with_hearts_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaPerHeart = CONFIG_VAR_DESC_INIT;
+        descStaminaPerHeart.name = "staminaPerHeart";
+        descStaminaPerHeart.type = CONFIG_VAR_INT;
+        descStaminaPerHeart.default_int = 15;
+        if (svc_config->register_var(mod_ctx, &descStaminaPerHeart, &s_varStaminaPerHeart) == MOD_OK) {
+            int64_t v = 15;
+            svc_config->get_int(mod_ctx, s_varStaminaPerHeart, &v);
+            g_configStaminaPerHeart = static_cast<int>(v);
+            svc_config->subscribe(mod_ctx, s_varStaminaPerHeart, on_stamina_per_heart_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStaminaRegen = CONFIG_VAR_DESC_INIT;

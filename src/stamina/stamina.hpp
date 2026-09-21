@@ -7,7 +7,11 @@
 
 extern bool g_configStaminaEnabled;
 extern int  g_configStaminaMax;
+extern bool g_configStaminaScaleWithHearts;
+extern int  g_configStaminaPerHeart;
 extern int  g_configStaminaRegen;
+
+int stamina_effective_max();
 
 extern bool g_configStaminaSrcAttacks;
 extern bool g_configStaminaSrcJumpSpin;
