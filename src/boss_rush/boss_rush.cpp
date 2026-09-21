@@ -372,6 +372,7 @@ static bool s_swordDrawnLatched = false;
 static bool s_pendingGearSaveApply = false;
 static int s_pendingGearSaveKind = 0;  // 1 = fight restriction, 2 = chamber equips
 static const BossGalleryEntry* s_pendingGearBoss = nullptr;
+static bool s_retryWarpActive = false;
 
 static bool s_sawSwordDrawnAtCommit = false;
 
@@ -1085,6 +1086,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     s_needsChamberSpawn = true;
     s_chamberSpawnFrames = 0;
     s_chamberCamArmFrames = 0;
+    s_retryWarpActive = false;
     s_activeFightIndex = -1;
     s_pendingFightIndex = -1;
     s_pendingFightFromArena = false;
@@ -4053,7 +4055,9 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
     }
     s_sawSwordDrawnAtCommit = (link != nullptr && link->checkSwordDraw());
 
-    Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    if (!s_retryWarpActive) {
+        Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
 
     if (!s_pendingFightFromArena) {
         reset_boss_rush_save_flags();
@@ -4144,6 +4148,7 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
     if (idx < 0) {
         return;
     }
+    s_retryWarpActive = true;
     s_horsebackRetryLanding =
         (std::strcmp(g_bossGalleryTable[idx].displayName, "Horseback Ganon") == 0);
     s_horsebackGanonKoTimer = -1;
@@ -4558,7 +4563,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
             s_fightStartLife = dComIfGs_getLife();
 
-            Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            s_retryWarpActive = false;
         }
     }
 
