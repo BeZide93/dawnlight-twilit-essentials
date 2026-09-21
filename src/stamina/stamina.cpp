@@ -14,6 +14,7 @@
 #include "d/actor/d_a_player.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "Z2AudioLib/Z2SeMgr.h"
+#include "mods/svc/save.h"
 
 #define private public
 #define protected public
@@ -26,6 +27,9 @@
 #include "JSystem/JUtility/TColor.h"
 
 #include <cstdint>
+
+extern const SaveService* svc_save;
+extern ModContext* mod_ctx;
 
 bool g_configStaminaEnabled = false;
 int  g_configStaminaMax     = 100;
@@ -131,6 +135,14 @@ int stamina_effective_max() {
 static bool in_gameplay() {
     if (dMeter2Info_getWindowStatus() != 0) return false;
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
+    if (dComIfGp_event_runCheck()) return false;
+    if (dMeter2Info_isShopTalkFlag() || dMsgObject_isTalkNowCheck()) return false;
+    return true;
+}
+
+static bool in_gameplay_for_draw() {
+    if (dMeter2Info_getWindowStatus() != 0) return false;
+    if (dComIfGp_isPauseFlag()) return false;
     if (dComIfGp_event_runCheck()) return false;
     if (dMeter2Info_isShopTalkFlag() || dMsgObject_isTalkNowCheck()) return false;
     return true;
@@ -469,7 +481,7 @@ static JUtility::TColor lerp(JUtility::TColor a, JUtility::TColor b, f32 t) {
 
 static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     if (!g_configStaminaEnabled || s_alpha < 0.01f || !args) return;
-    if (!in_gameplay()) return;
+    if (!in_gameplay_for_draw()) return;
 
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
     if (!draw || !draw->mpKanteraScreen) return;
@@ -526,10 +538,20 @@ static void hook_cost(const HookService* h, int cat, int cost_id) {
     mods::hook::add_pre<Entry>(h, action_cost_pre, &opt);
 }
 
+static void on_stamina_save_activated(ModContext*, uint32_t, void*) {
+    s_stamina = s_display = stamina_max();
+}
+
 ModResult init_stamina(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_OK;
 
     s_stamina = s_display = stamina_max();
+
+    if (svc_save != nullptr && mod_ctx != nullptr) {
+        static SaveObserverHandle s_staminaSaveObserver = 0;
+        svc_save->observe_saves(mod_ctx, on_stamina_save_activated, on_stamina_save_activated,
+                                nullptr, nullptr, &s_staminaSaveObserver);
+    }
 
     init_sprint_human(hook_svc);
     init_sprint_wolf(hook_svc);
