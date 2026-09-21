@@ -23,6 +23,9 @@
 #include <chrono>
 #include <cmath>
 
+void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
+void qa_hud_scale_end();
+
 namespace {
 
 constexpr f32 kTimerPosX    = 198.0f;
@@ -415,6 +418,23 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
     J2DGrafContext* graf_ctx = dComIfGp_getCurrentGrafPort();
     if (graf_ctx == nullptr) return;
     graf_ctx->setup2D();
+
+    f32 scaleAnchorX = kTimerPosX;
+    f32 scaleAnchorY = kTimerPosY;
+    {
+        J2DPane* first = s_digits[DIGIT_MIN_TENS][0];
+        J2DPane* last  = s_digits[DIGIT_CS_ONES][0];
+        if (first != nullptr && last != nullptr && s_timePane != nullptr) {
+            Mtx m;
+            const Vec t1 = s_timePane->getGlobalVtx(first, &m, 0, false, 0);
+            const Vec b1 = s_timePane->getGlobalVtx(last, &m, 3, false, 0);
+            const f32 rowH = b1.y - t1.y;
+            scaleAnchorX = (t1.x + b1.x) * 0.5f;
+            scaleAnchorY = (t1.y + b1.y) * 0.5f + rowH * 0.4f + 3.0f;
+        }
+    }
+
+    qa_hud_scale_begin(scaleAnchorX, scaleAnchorY);
     s_screen->draw(0.0f, 0.0f, graf_ctx);
 
     if (hasBest && s_timeShown && s_transY >= kRunSlideDistY &&
@@ -482,6 +502,8 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
             change_digit(DIGIT_CS_ONES, (cs % 100) % 10);
         }
     }
+
+    qa_hud_scale_end();
 
     if (s_getinActive && s_getinScreen != nullptr && s_getinParent != nullptr &&
         s_getinRoot != nullptr) {
