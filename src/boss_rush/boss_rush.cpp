@@ -3405,8 +3405,11 @@ static HookAction on_proc_co_dead_pre(ModContext*, void* args, void* retval, voi
     if (link == nullptr || link->mMsgClassID != 0 || retval == nullptr) {
         return HOOK_CONTINUE;
     }
-    if (!is_boss_rush_active() || !boss_rush_is_fight_engaged()) {
+    if (!is_boss_rush_active()) {
         s_bossRushDeathHandledTriggered = false;
+        return HOOK_CONTINUE;
+    }
+    if (!s_bossRushDeathHandledTriggered && !boss_rush_is_fight_engaged()) {
         return HOOK_CONTINUE;
     }
     if (!s_bossRushDeathHandledTriggered) {

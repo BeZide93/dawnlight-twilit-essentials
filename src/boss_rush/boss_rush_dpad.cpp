@@ -37,7 +37,7 @@ static void dpad_read_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const u16 retryBit = controls_binding_bit(CTRL_BIND_BOSSRUSH_RETRY);
+    const u32 retryBit = controls_binding_bit(CTRL_BIND_BOSSRUSH_RETRY);
     const bool pressed = (pad.mPressedButtonFlags & retryBit) != 0;
     pad.mPressedButtonFlags &= ~retryBit;
     pad.mButtonFlags &= ~retryBit;
