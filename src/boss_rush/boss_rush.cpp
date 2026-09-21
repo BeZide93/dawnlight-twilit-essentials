@@ -369,6 +369,10 @@ static int s_arenaFreezeUntil = kBossUnfreezeFrame;
 
 static bool s_swordDrawnLatched = false;
 
+static bool s_pendingGearSaveApply = false;
+static int s_pendingGearSaveKind = 0;  // 1 = fight restriction, 2 = chamber equips
+static const BossGalleryEntry* s_pendingGearBoss = nullptr;
+
 static bool s_sawSwordDrawnAtCommit = false;
 
 static int s_morpheelPosPinFrames = 0;
@@ -1095,16 +1099,11 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     reset_boss_rush_save_flags();
 
     g_dComIfG_gameInfo.info.getDan().offSwitch(1);
-    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
     g_dComIfG_gameInfo.info.getRestart().mLastMode &= ~0xFF000000;
-    clear_all_select_items();
-    dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
-    dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
-    dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
-    dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
-    dComIfGp_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
-    dComIfGs_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
-    dComIfGp_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
+
+    s_pendingGearSaveApply = true;
+    s_pendingGearSaveKind = 2;
+    s_pendingGearBoss = nullptr;
     {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
@@ -4027,9 +4026,9 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
     }
 
     if (g_configBossRushVanillaGear) {
-        apply_boss_rush_loadout(false);
-        reset_boss_rush_save_flags();
-        apply_boss_rush_equipment_restriction(boss);
+        s_pendingGearSaveApply = true;
+        s_pendingGearSaveKind = 1;
+        s_pendingGearBoss = &boss;
     }
 
     if (link != nullptr) {
@@ -4208,7 +4207,7 @@ static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_
         return;
     }
 
-    apply_boss_rush_loadout();
+    apply_boss_rush_loadout(false);
     reset_boss_rush_save_flags();
     dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
     sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()), dComIfGs_getMaxLife());
@@ -4285,7 +4284,41 @@ void boss_rush_debug_kill_current_boss() {
     advance_boss_rush_run(s_logSvc, s_modCtx, "Debug kill boss");
 }
 
+static void apply_pending_gear_save_if_covered() {
+    if (!s_pendingGearSaveApply) {
+        return;
+    }
+
+    JUTFader* fader = mDoGph_gInf_c::getFader();
+    const s32 status = (fader != nullptr) ? fader->getStatus() : -1;
+    if (status != JUTFader::None) {
+        return;
+    }
+
+    if (s_pendingGearSaveKind == 1 && s_pendingGearBoss != nullptr) {
+        apply_boss_rush_loadout(false);
+        reset_boss_rush_save_flags();
+        apply_boss_rush_equipment_restriction(*s_pendingGearBoss);
+    } else if (s_pendingGearSaveKind == 2) {
+        clear_all_select_items();
+        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+        dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
+        dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+        dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+        dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+        dComIfGp_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+        dComIfGs_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
+        dComIfGp_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
+    }
+
+    s_pendingGearSaveApply = false;
+    s_pendingGearSaveKind = 0;
+    s_pendingGearBoss = nullptr;
+}
+
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
+    apply_pending_gear_save_if_covered();
+
     if (s_bossRushModeActive) {
         force_boss_rush_fast_transitions();
     }
@@ -4360,7 +4393,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (s_pendingInitialInventory) {
         JUTFader* fader = mDoGph_gInf_c::getFader();
         const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
-        const bool covered = (faderStatus == JUTFader::None || faderStatus == JUTFader::FadeOut);
         const bool enteredChamber = is_in_chamber_room();
 
         static int s_pendingInitialInventoryFrames = 0;
@@ -4368,8 +4400,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_pendingInitialInventoryFrames = 0;
         }
 
-        if (covered || (enteredChamber && ++s_pendingInitialInventoryFrames > 60)) {
-            apply_boss_rush_loadout();
+        if (faderStatus == JUTFader::None || (enteredChamber && ++s_pendingInitialInventoryFrames > 60)) {
+            apply_boss_rush_loadout(false);
             s_pendingInitialInventoryFrames = 0;
             s_pendingInitialInventory = false;
         }
