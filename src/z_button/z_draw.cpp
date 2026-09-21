@@ -258,10 +258,11 @@ void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW
         white.set(180, 180, 180, 255);
     }
 
-    f32 digitW = 12.0f;
-    f32 digitH = 12.0f;
+    const f32 hudScale = qa_user_hud_scale();
+    f32 digitW = 12.0f * hudScale;
+    f32 digitH = 12.0f * hudScale;
     f32 startX = baseX + (iconW * 0.25f);
-    f32 startY = baseY + (iconH * 0.60f);
+    f32 startY = baseY + (iconH * 0.60f) + (12.0f - digitH) * 3.5f;
 
     u8 a = (u8)(alphaRate * 255.0f);
 

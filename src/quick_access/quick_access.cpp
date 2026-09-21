@@ -740,8 +740,9 @@ static void qa_draw_ammo_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 i
         white.set(180, 180, 180, 255);
     }
 
-    const f32 digitW = 12.0f;
-    const f32 digitH = 12.0f;
+    const f32 hudScale = qa_user_hud_scale();
+    const f32 digitW = 12.0f * hudScale;
+    const f32 digitH = 12.0f * hudScale;
     const f32 startX = baseX + (iconW * 0.25f);
     const f32 startY = baseY + (iconH * 0.60f);
 
