@@ -331,6 +331,7 @@ static void rush_debug_logf(const char* fmt, ...) {
 }
 
 static int s_activeFightIndex = -1;
+static u16 s_fightStartLife = 0;
 
 static int s_pendingFightIndex = -1;
 
@@ -1075,7 +1076,9 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     boss_rush_timer_reset_run();
 
     mDoGph_gInf_c::fadeOut(0.0f);
-    Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    if (reason == nullptr || std::strcmp(reason, "Died") != 0) {
+        Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
 
     s_returningToChamber = true;
     s_returnSawFadeOut = true;
@@ -3411,7 +3414,7 @@ void boss_rush_request_retry() {
     }
 }
 
-static bool s_bossRushDeathRetryTriggered = false;
+static bool s_bossRushDeathHandledTriggered = false;
 
 static HookAction on_proc_co_dead_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
@@ -3419,15 +3422,15 @@ static HookAction on_proc_co_dead_pre(ModContext*, void* args, void* retval, voi
         return HOOK_CONTINUE;
     }
     if (!is_boss_rush_active() || !boss_rush_is_fight_engaged()) {
-        s_bossRushDeathRetryTriggered = false;
+        s_bossRushDeathHandledTriggered = false;
         return HOOK_CONTINUE;
     }
-    if (!s_bossRushDeathRetryTriggered) {
+    if (!s_bossRushDeathHandledTriggered) {
         if (is_boss_rush_mod_warp_in_flight()) {
             return HOOK_CONTINUE;
         }
-        s_bossRushDeathRetryTriggered = true;
-        boss_rush_request_retry();
+        s_bossRushDeathHandledTriggered = true;
+        return_to_boss_rush_chamber(s_logSvc, s_modCtx, "Died");
     }
     *static_cast<int*>(retval) = 1;
     return HOOK_SKIP_ORIGINAL;
@@ -4177,9 +4180,8 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
         }
     }
 
-    constexpr u16 kDeathRetryLife = 12;
-    if (dComIfGs_getLife() < kDeathRetryLife) {
-        dComIfGs_setLife(kDeathRetryLife);
+    if (s_fightStartLife > 0) {
+        dComIfGs_setLife(s_fightStartLife);
     }
 
     boss_rush_timer_reset_run();
@@ -4445,7 +4447,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
             s_arenaSettle = arena_settle_frames_for(g_bossGalleryTable[s_activeFightIndex]);
             s_arenaFreezeUntil = s_arenaSettle;
-            s_bossRushDeathRetryTriggered = false;
+            s_bossRushDeathHandledTriggered = false;
             s_needsChamberSpawn = false;
             s_chamberCamArmFrames = 0;
             s_chamberSpawnFrames = 0;
@@ -4508,6 +4510,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     apply_boss_rush_equipment_restriction(boss);
                 }
             }
+
+            s_fightStartLife = dComIfGs_getLife();
 
             Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
