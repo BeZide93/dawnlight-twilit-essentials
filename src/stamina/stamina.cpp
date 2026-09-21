@@ -529,6 +529,8 @@ static void hook_cost(const HookService* h, int cat, int cost_id) {
 ModResult init_stamina(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_OK;
 
+    s_stamina = s_display = stamina_max();
+
     init_sprint_human(hook_svc);
     init_sprint_wolf(hook_svc);
     init_sprint_swim(hook_svc);
