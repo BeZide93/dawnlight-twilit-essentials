@@ -47,3 +47,4 @@ size_t boss_rush_get_active_gallery_count();
 size_t boss_rush_get_active_gallery_table_index(size_t circleSlot);
 
 void boss_rush_debug_log(const char* fmt, ...);
+int boss_rush_gauntlet_phase();

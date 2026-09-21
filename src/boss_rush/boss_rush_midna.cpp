@@ -95,6 +95,7 @@ static MidnaFlowTopology s_bossRushMidnaTopology;
 static uint32_t s_bossRushMidnaTopologyVersion = 0;
 static MidnaTransformOption s_bossRushMidnaTransformOption = MidnaTransformOption::Unknown;
 static bool s_bossRushMidnaHorseback = false;
+static int s_bossRushMidnaGauntletPhase = 0;
 
 constexpr uint16_t kMidnaHorseTalkTriggerNode = 0;
 static const void* s_bossRushMidnaHorseResource = nullptr;
@@ -805,8 +806,8 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
 
     const char* targetName = boss_rush_current_target_name();
     const char* curStage = dComIfGp_getStartStageName();
-    bool isBeastGanonPhase = false;
-    if (targetName != nullptr && std::strcmp(targetName, "Beast Ganon") == 0) {
+    bool isBeastGanonPhase = boss_rush_gauntlet_phase() == 3;
+    if (!isBeastGanonPhase && targetName != nullptr && std::strcmp(targetName, "Beast Ganon") == 0) {
         isBeastGanonPhase = true;
     } else if (curStage != nullptr && std::strcmp(curStage, "D_MN09A") == 0) {
         if (dComIfG_play_c::getLayerNo(0) == 1 || fopAcM_SearchByName(fpcNm_B_MGN_e) != nullptr) {
@@ -814,7 +815,8 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
         }
     }
     const bool isDeathSword = targetName != nullptr && std::strcmp(targetName, "Death Sword") == 0;
-    const bool transformAllowed = isDeathSword || isBeastGanonPhase;
+    const bool isPuppetZelda = targetName != nullptr && std::strcmp(targetName, "Puppet Zelda") == 0;
+    const bool transformAllowed = isDeathSword || isBeastGanonPhase || isPuppetZelda;
 
     if (mode == BossRushMidnaMode::Fight && (wantSimpleBmgMenu || !transformAllowed)) {
         if (wantSimpleBmgMenu && s_bossRushMidnaHorseNextNode != mods::flow::kEnd) {
@@ -1082,12 +1084,15 @@ void refresh_boss_rush_midna_flow() {
 
     const MidnaTransformOption transformOption = (wantMode != BossRushMidnaMode::None) ?
         current_midna_transform_option() : MidnaTransformOption::Unknown;
+    const int gauntletPhase = (wantMode == BossRushMidnaMode::Fight) ?
+        boss_rush_gauntlet_phase() : 0;
     const bool horseback = wantMode == BossRushMidnaMode::Fight && is_boss_rush_midna_simple_bmg();
 
     if (wantMode == s_bossRushMidnaMode &&
         s_bossRushMidnaFlowGraph.handle() != 0 &&
         s_bossRushMidnaTopologyVersion == s_bossRushMidnaTopology.version &&
         s_bossRushMidnaTransformOption == transformOption &&
+        s_bossRushMidnaGauntletPhase == gauntletPhase &&
         s_bossRushMidnaHorseback == horseback) {
         return;
     }
@@ -1114,13 +1119,14 @@ void refresh_boss_rush_midna_flow() {
         s_bossRushMidnaTopologyVersion = s_bossRushMidnaTopology.version;
         s_bossRushMidnaTransformOption = transformOption;
         s_bossRushMidnaHorseback = horseback;
+        s_bossRushMidnaGauntletPhase = gauntletPhase;
         boss_rush_debug_log("[midna] graph built mode=%d horse=%d horseNode=%u ver=%u "
-                            "prompts=%u root3001=%u",
+                            "prompts=%u root3001=%u gphase=%d",
                             (int)wantMode, (int)horseback,
                             (unsigned)s_bossRushMidnaHorseNextNode,
                             (unsigned)s_bossRushMidnaTopology.version,
                             (unsigned)s_bossRushMidnaTopology.promptCount,
-                            (unsigned)s_midnaRoot3001);
+                            (unsigned)s_midnaRoot3001, gauntletPhase);
     } else {
         boss_rush_debug_log("[midna] graph build FAILED mode=%d", (int)wantMode);
     }
