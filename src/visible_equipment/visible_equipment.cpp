@@ -1106,12 +1106,13 @@ static void renderBow(daAlink_c *alink, bool shouldShowEquipment,
 
   if (bowMtx != nullptr) {
     mDoMtx_stack_c::copy(bowMtx);
+    const f32 bowY = daPy_py_c::checkSwordGet() ? 6.0f : 2.0f;
     if (g_configVisibleEquipMirrorBow) {
-      mDoMtx_stack_c::transM(22.0f, 2.0f, -4.0f);
+      mDoMtx_stack_c::transM(22.0f, bowY, -4.0f);
       mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(-56.0f),
                               degToS16(0.0f));
     } else {
-      mDoMtx_stack_c::transM(25.0f, 2.0f, -14.0f);
+      mDoMtx_stack_c::transM(25.0f, bowY, -14.0f);
       mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(56.0f),
                               degToS16(0.0f));
     }
