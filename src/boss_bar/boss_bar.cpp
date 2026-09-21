@@ -2,6 +2,9 @@
 #include "boss_internals.hpp"
 #include "../stamina/stamina.hpp"
 
+void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
+void qa_hud_scale_end();
+
 #include <unordered_set>
 #include <vector>
 #include <cstdint>
@@ -1534,6 +1537,13 @@ static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     const f32 barX = centreX - barW * 0.5f + g_configBossBarX;
     const f32 barY = topY + 41.0f + g_configBossBarY;
 
+    // Blend the scale anchor between the screen top-centre (0.0 = drifts with
+    // the HUD scale) and the bar's own top-centre (1.0 = scales in place).
+    constexpr f32 kBossBarScaleAnchorBlendX = 1.0f;
+    constexpr f32 kBossBarScaleAnchorBlendY = 1.0f;
+    qa_hud_scale_begin(centreX + kBossBarScaleAnchorBlendX * ((barX + barW * 0.5f) - centreX),
+                       topY + kBossBarScaleAnchorBlendY * (barY - topY));
+
     auto A = [a](u8 base) -> u8 { return static_cast<u8>(static_cast<f32>(base) * a); };
 
     if (live < 0.0f) live = 0.0f;
@@ -1638,6 +1648,7 @@ static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     }
 
     draw_bar_endcaps(barX, barW, barY, barH, a);
+    qa_hud_scale_end();
 }
 
 static void draw_boss_bar() {
