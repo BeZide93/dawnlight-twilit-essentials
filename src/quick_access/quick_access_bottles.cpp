@@ -29,7 +29,21 @@
 #include <dolphin/gx.h>
 
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
+
+extern const LogService* svc_log;
+extern ModContext* mod_ctx;
+
+static void qb_log(const char* fmt, ...) {
+    if (svc_log == nullptr || mod_ctx == nullptr) return;
+    char msg[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    svc_log->info(mod_ctx, msg);
+}
 
 bool g_configBottlesQuickAccessEnabled = false;
 
@@ -294,21 +308,20 @@ static void bottles_finish_pending() {
                           : static_cast<u8>(dItemNo_EMPTY_BOTTLE_e);
     dComIfGs_setBottleItemIn(s_pendingItem, result);
 
-    if (dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN) != s_preSelectIndex) {
-        dComIfGs_setSelectItemIndex(SELECT_ITEM_DOWN, s_preSelectIndex);
+    if (dComIfGs_getSelectItemIndex(SELECT_ITEM_B) != s_preSelectIndex) {
+        dComIfGs_setSelectItemIndex(SELECT_ITEM_B, s_preSelectIndex);
     }
-    if (dComIfGp_getSelectItem(SELECT_ITEM_DOWN) != s_preSelectPlay) {
-        g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_DOWN, s_preSelectPlay);
+    if (dComIfGp_getSelectItem(SELECT_ITEM_B) != s_preSelectPlay) {
+        g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, s_preSelectPlay);
     }
 
-    if (dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN) == SLOT_11 + s_pendingSlot) {
-        dComIfGs_setSelectItemIndex(SELECT_ITEM_DOWN, 0xFF);
-        g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_DOWN, dItemNo_NONE_e);
-        if (g_zInventorySlot == SLOT_11 + s_pendingSlot) {
-            g_zInventorySlot = 0xFF;
-            g_zMixSlot = 0xFF;
-        }
+    if (dComIfGs_getSelectItemIndex(SELECT_ITEM_B) == SLOT_11 + s_pendingSlot) {
+        dComIfGs_setSelectItemIndex(SELECT_ITEM_B, 0xFF);
+        g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, dItemNo_NONE_e);
     }
+
+    qb_log("[qb] finish_pending: slot=%d item=0x%02X result=0x%02X", (int)s_pendingSlot,
+           (int)s_pendingItem, (int)result);
 
     s_pendingSlot = 0xFF;
 }
@@ -332,34 +345,44 @@ static void bottles_use_bottle(int slotIdx) {
     }
 
     const u16 procBefore = link->mProcID;
-    const u8 playBefore = dComIfGp_getSelectItem(SELECT_ITEM_DOWN);
-    s_preSelectIndex = dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN);
+    const u8 equipBefore = link->mEquipItem;
+    const u8 playBefore = dComIfGp_getSelectItem(SELECT_ITEM_B);
+    s_preSelectIndex = dComIfGs_getSelectItemIndex(SELECT_ITEM_B);
     s_preSelectPlay = playBefore;
 
-    g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_DOWN, item);
+    qb_log("[qb] use_bottle: slot=%d item=0x%02X isOil=%d zEngine=%d "
+           "before: procID=%d equip=0x%02X selectItemId=%d zIdx=%d resolved2=0x%02X",
+           slotIdx, (int)item, (int)isOil, (int)g_configCustomZButtonEnabled,
+           (int)procBefore, (int)equipBefore, (int)link->mSelectItemId,
+           (int)g_zInventorySlot, (int)resolved_select_item(2));
 
-    int proc = link->checkNewItemChange(SELECT_ITEM_DOWN);
+    g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, item);
+
+    int proc = link->checkNewItemChange(SELECT_ITEM_B);
     if (isOil && proc == QB_ITEM_PROC_COMMON_CHANGE_ITEM) {
         proc = QB_ITEM_PROC_KANDELAAR_POUR;
     }
 
+    qb_log("[qb] use_bottle: checkNewItemChange proc=%d", proc);
+
     if (proc == 0) {
+        qb_log("[qb] use_bottle: proc==0, bailing (error sound)");
         bottles_play_error_se();
         return;
     }
 
-    link->changeItemTriggerKeepProc(SELECT_ITEM_DOWN, proc);
-    g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_DOWN, playBefore);
+    link->changeItemTriggerKeepProc(SELECT_ITEM_B, proc);
 
-    if (link->mProcID != procBefore) {
-        s_pendingSlot = static_cast<u8>(slotIdx);
-        s_pendingItem = item;
-        s_pendingProc = link->mProcID;
-        s_pendingFrames = 0;
-        bottles_play_ok_se();
-    } else {
-        bottles_play_error_se();
-    }
+    qb_log("[qb] use_bottle: after trigger: procID=%d (was %d) equip=0x%02X (was 0x%02X) "
+           "selectItemId=%d zIdx=%d resolved2=0x%02X",
+           (int)link->mProcID, (int)procBefore, (int)link->mEquipItem, (int)equipBefore,
+           (int)link->mSelectItemId, (int)g_zInventorySlot, (int)resolved_select_item(2));
+
+    s_pendingSlot = static_cast<u8>(slotIdx);
+    s_pendingItem = item;
+    s_pendingProc = link->mProcID;
+    s_pendingFrames = 0;
+    bottles_play_ok_se();
 }
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadBottlesHook);
@@ -507,8 +530,12 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
     }
     if (s_holdFramesL > 0) {
         s_holdFramesL = 0;
-        if (s_assignedSlot < 4 && bottle_owned(s_assignedSlot)) {
+        daAlink_c* tapLink = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+        if (s_assignedSlot < 4 && bottle_owned(s_assignedSlot) && tapLink != nullptr &&
+            tapLink->mEquipItem == bottle_item(s_assignedSlot)) {
+            bottles_use_bottle(s_assignedSlot);
         } else {
+            bottles_play_error_se();
         }
     }
 }
