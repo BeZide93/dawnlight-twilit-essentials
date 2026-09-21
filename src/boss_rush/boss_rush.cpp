@@ -4108,11 +4108,6 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                std::strcmp(boss.displayName, "Diababa") == 0) {
         cDmr_SkipInfo = 60;
     }
-    if (std::strcmp(boss.displayName, "Death Sword") == 0) {
-        dComIfGs_setTransformStatus(TF_STATUS_WOLF);
-    } else {
-        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
-    }
 
     if (std::strcmp(boss.displayName, "Dangoro") == 0) {
         dComIfGs_onZoneSwitch(5, 51);
@@ -4307,6 +4302,11 @@ static void apply_pending_gear_save_if_covered() {
             dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
             assign_select_item(SELECT_ITEM_X, SLOT_3);
             assign_select_item(SELECT_ITEM_Y, SLOT_10);
+        }
+        if (std::strcmp(s_pendingGearBoss->displayName, "Death Sword") == 0) {
+            dComIfGs_setTransformStatus(TF_STATUS_WOLF);
+        } else {
+            dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
         }
     } else if (s_pendingGearSaveKind == 2) {
         clear_all_select_items();
