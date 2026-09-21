@@ -1,6 +1,7 @@
 #include "quick_access.hpp"
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
+#include "quick_access_itemwheel.hpp"
 #include "../z_button/z_button.hpp"
 #include "../z_button/z_mobile.hpp"
 #include "../controls/controls.hpp"
@@ -943,6 +944,11 @@ HookAction on_qa_boots_equip_init_pre(ModContext*, void* args, void* retval, voi
     if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
         if (s_qaBootsEquipAllowed) {
             s_qaBootsEquipAllowed = false;
+            return HOOK_CONTINUE;
+        }
+        if (!g_configQuickAccessHideWheelItems) {
+            s_qaBootsDesired = !alink->checkEquipHeavyBoots();
+            s_qaBootsGraceFrames = 45;
             return HOOK_CONTINUE;
         }
         if (retval != nullptr) {
