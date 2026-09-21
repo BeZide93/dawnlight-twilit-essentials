@@ -364,6 +364,7 @@ static ConfigVarHandle s_varStaminaSrcPushPull = 0;
 static ConfigVarHandle s_varStaminaSrcWolfDash = 0;
 static ConfigVarHandle s_varStaminaSrcHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaSprint = 0;
+static ConfigVarHandle s_varStaminaSprintStartRoll = 0;
 static ConfigVarHandle s_varStaminaSrcSprint = 0;
 static ConfigVarHandle s_varStaminaSprintSpeed = 0;
 static ConfigVarHandle s_varStaminaWolfSprint = 0;
@@ -399,6 +400,7 @@ static ConfigVarHandle s_varBossRushTimer = 0;
 static ConfigVarHandle s_varBossRushShowBestTimer = 0;
 static ConfigVarHandle s_varBossRushBestTimes = 0;
 static ConfigVarHandle s_varBossRushChainBest = 0;
+static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
 static ConfigVarHandle s_varBossRushPortal = 0;
 
 static bool s_generalInitialized = false;
@@ -693,6 +695,10 @@ static void on_stamina_src_hidden_skills_changed(ModContext*, ConfigVarHandle, c
 
 static void on_stamina_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSprint = value->bool_value;
+}
+
+static void on_stamina_sprint_start_roll_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSprintStartRoll = value->bool_value;
 }
 
 static void on_stamina_src_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1298,6 +1304,9 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_toggle(left, "Sprint start roll", s_varStaminaSprintStartRoll,
+        "<p>Roll once when a human sprint starts. Redundant if the sprint button is the roll "
+        "button (A), since the roll already happens then.</p>", is_sprint_speed_disabled);
     ui_add_toggle(left, "Wolf sprint (hold roll button)", s_varStaminaWolfSprint,
         "<p>Hold the roll button as Wolf Link to continuously sprint.</p>");
     if (s_varStaminaWolfSprintSpeed != 0) {
@@ -1621,7 +1630,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     }
 
     ui_add_toggle(left, "Separate Ganon fights", s_varBossRushSeparateGanon,
-        "<p>Fights all 4 Ganon phases in sequence as a single gauntlet instead of separate statues.</p>");
+        "<p>Fights all 4 Ganon phases in sequence instead of separate statues.</p>");
 
     ui_add_toggle(left, "Map portal", s_varBossRushPortal,
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
@@ -2193,6 +2202,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varStaminaSprint, on_stamina_sprint_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descStaminaSprintStartRoll = CONFIG_VAR_DESC_INIT;
+        descStaminaSprintStartRoll.name = "staminaSprintStartRoll";
+        descStaminaSprintStartRoll.type = CONFIG_VAR_BOOL;
+        descStaminaSprintStartRoll.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descStaminaSprintStartRoll, &s_varStaminaSprintStartRoll) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSprintStartRoll, &g_configStaminaSprintStartRoll);
+            svc_config->subscribe(mod_ctx, s_varStaminaSprintStartRoll, on_stamina_sprint_start_roll_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descStaminaWolfSprint = CONFIG_VAR_DESC_INIT;
         descStaminaWolfSprint.name = "staminaWolfSprint";
         descStaminaWolfSprint.type = CONFIG_VAR_BOOL;
@@ -2425,6 +2443,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         descBossRushChainBest.default_string = "";
         svc_config->register_var(mod_ctx, &descBossRushChainBest, &s_varBossRushChainBest);
         boss_rush_timer_init_chain_best(svc_config, mod_ctx, s_varBossRushChainBest);
+
+        ConfigVarDesc descBossRushAllPhasesBest = CONFIG_VAR_DESC_INIT;
+        descBossRushAllPhasesBest.name = "bossRushAllPhasesBest";
+        descBossRushAllPhasesBest.type = CONFIG_VAR_STRING;
+        descBossRushAllPhasesBest.default_string = "";
+        svc_config->register_var(mod_ctx, &descBossRushAllPhasesBest, &s_varBossRushAllPhasesBest);
+        boss_rush_timer_init_all_phases_best(svc_config, mod_ctx, s_varBossRushAllPhasesBest);
 
         ConfigVarDesc descBossRushPortal = CONFIG_VAR_DESC_INIT;
         descBossRushPortal.name = "bossRushPortal";

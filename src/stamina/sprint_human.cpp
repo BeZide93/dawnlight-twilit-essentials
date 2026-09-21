@@ -15,14 +15,27 @@ bool g_configStaminaSrcSprint  = true;
 static constexpr int kSprintHoldFrames = 4;
 static constexpr f32 kSprintDrainRate  = 0.90f;
 
+static constexpr int kRollRepeatGuardFrames = 10;
+
 static constexpr f32 kHouseAnimSpeedMul = 0.80f;
 
 float g_configStaminaSprintSpeed = 1.1f;
+bool g_configStaminaSprintStartRoll = false;
 
 static bool s_sprintLatched = false;
 static bool s_sprintBoost   = false;
 static bool s_sprintEngage  = false;
 static int  s_holdFrames    = 0;
+
+static bool s_sprintRollPending  = false;
+static int  s_frameCounter       = 0;
+static int  s_lastFrontRollFrame = -100;
+
+static bool in_front_roll(const daAlink_c* link) {
+    const u16 proc = static_cast<u16>(link->mProcID);
+    return proc == daAlink_c::PROC_FRONT_ROLL || proc == daAlink_c::PROC_FRONT_ROLL_CRASH ||
+           proc == daAlink_c::PROC_FRONT_ROLL_SUCCESS;
+}
 
 DEFINE_HOOK(&daAlink_c::setDoubleAnime, SprintHumanRunAnm);
 
@@ -86,7 +99,10 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
     }
     if (drains) stamina_impl::report_drain(stamina_impl::cost_scaled(kSprintDrainRate, g_configStaminaCostSprint));
     s_sprintBoost = true;
-    if (!wasLatched) s_sprintEngage = true;
+    if (!wasLatched) {
+        s_sprintEngage = true;
+        if (g_configStaminaSprintStartRoll) s_sprintRollPending = true;
+    }
     return HOOK_CONTINUE;
 }
 
@@ -115,6 +131,25 @@ static void sprint_run_post(ModContext*, void* args, void*, void*) {
 }
 
 void update_sprint_human() {
+    ++s_frameCounter;
+
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (link != nullptr && in_front_roll(link)) {
+        s_lastFrontRollFrame = s_frameCounter;
+    }
+
+    if (s_sprintRollPending) {
+        s_sprintRollPending = false;
+        if (g_configStaminaSprintStartRoll && stamina_impl::in_gameplay() && s_sprintLatched &&
+            s_frameCounter - s_lastFrontRollFrame > kRollRepeatGuardFrames) {
+            link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+            if (link != nullptr && !link->checkWolf() &&
+                link->mProcID == daAlink_c::PROC_MOVE) {
+                link->procFrontRollInit();
+            }
+        }
+    }
+
     if (!g_configStaminaSprint || !stamina_impl::in_gameplay()) {
         s_holdFrames = 0;
         return;
@@ -184,5 +219,6 @@ ModResult init_sprint_human(const HookService* hook_svc) {
 
 void shutdown_sprint_human() {
     s_sprintLatched = s_sprintBoost = s_sprintEngage = false;
+    s_sprintRollPending = false;
     s_holdFrames = 0;
 }
