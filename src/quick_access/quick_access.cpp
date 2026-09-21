@@ -372,25 +372,6 @@ void qa_draw_top_sheen(f32 x, f32 y, f32 w, f32 h, JUtility::TColor top) {
     GXEnd();
 }
 
-static bool isTitleOrMainMenu() {
-    daPy_py_c* player = daPy_getLinkPlayerActorClass();
-    if (player == nullptr) {
-        return true;
-    }
-    const char* stageName = dComIfGp_getStartStageName();
-    if (stageName != nullptr) {
-        if (std::strcmp(stageName, "F_SP102") == 0 || std::strcmp(stageName, "title") == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool isWolfPlayer() {
-    daAlink_c* player = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    return (player != nullptr && player->checkWolf());
-}
-
 bool qa_is_rod_item(u8 itemNo) {
     switch (itemNo) {
     case dItemNo_FISHING_ROD_1_e:
