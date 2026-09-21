@@ -4177,6 +4177,11 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
         }
     }
 
+    constexpr u16 kDeathRetryLife = 12;
+    if (dComIfGs_getLife() < kDeathRetryLife) {
+        dComIfGs_setLife(kDeathRetryLife);
+    }
+
     boss_rush_timer_reset_run();
     boss_bar_force_reset();
 
