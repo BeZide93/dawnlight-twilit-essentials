@@ -184,12 +184,4 @@ void apply_boss_rush_equipment_restriction(const BossGalleryEntry& boss) {
         dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
         dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
     }
-
-    daAlink_c* link = daAlink_getAlinkActorClass();
-    if (link != nullptr) {
-        link->setSelectEquipItem(FALSE);
-        if (forceKokiri) {
-            link->setClothesChange(0);
-        }
-    }
 }

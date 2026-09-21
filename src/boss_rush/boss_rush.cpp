@@ -3091,10 +3091,8 @@ static void update_zant_instant_fight() {
     }
 }
 
-static bool fight_starts_with_sword_drawn() {
-    const int t = boss_rush_target_index();
-    if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount) return false;
-    const char* n = g_bossGalleryTable[t].displayName;
+static bool boss_starts_with_sword_drawn(const BossGalleryEntry& boss) {
+    const char* n = boss.displayName;
     if (std::strcmp(n, "Ook") == 0) return true;
     if (std::strcmp(n, "Dangoro") == 0) return true;
     if (std::strcmp(n, "Deku Toad") == 0) return true;
@@ -3102,6 +3100,12 @@ static bool fight_starts_with_sword_drawn() {
     if (std::strcmp(n, "Darknut") == 0) return true;
     if (std::strcmp(n, "Ganondorf") == 0) return dComIfGp_getHorseActor() == nullptr;
     return false;
+}
+
+static bool fight_starts_with_sword_drawn() {
+    const int t = boss_rush_target_index();
+    if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount) return false;
+    return boss_starts_with_sword_drawn(g_bossGalleryTable[t]);
 }
 
 static void* settle_freeze_judge(void* actor, void*) {
@@ -4011,14 +4015,21 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
     s_chamberSpawnFrames = 0;
     s_swordDrawnLatched = false;
 
+    mDoGph_gInf_c::fadeOut(0.0f);
+
     if (s_pendingFightFromArena) {
-        mDoGph_gInf_c::fadeOut(0.0f);
         unload_boss_rush_models();
         clear_ring_flames();
         s_ignitedStatue = -1;
         if (link != nullptr) {
             link->cancelOriginalDemo();
         }
+    }
+
+    if (g_configBossRushVanillaGear) {
+        apply_boss_rush_loadout(false);
+        reset_boss_rush_save_flags();
+        apply_boss_rush_equipment_restriction(boss);
     }
 
     if (link != nullptr) {
@@ -4349,11 +4360,17 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (s_pendingInitialInventory) {
         JUTFader* fader = mDoGph_gInf_c::getFader();
         const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
-        const bool fullyFaded = (faderStatus == JUTFader::None);
+        const bool covered = (faderStatus == JUTFader::None || faderStatus == JUTFader::FadeOut);
         const bool enteredChamber = is_in_chamber_room();
 
-        if (fullyFaded || (enteredChamber && faderStatus != JUTFader::FadeOut)) {
+        static int s_pendingInitialInventoryFrames = 0;
+        if (!enteredChamber) {
+            s_pendingInitialInventoryFrames = 0;
+        }
+
+        if (covered || (enteredChamber && ++s_pendingInitialInventoryFrames > 60)) {
             apply_boss_rush_loadout();
+            s_pendingInitialInventoryFrames = 0;
             s_pendingInitialInventory = false;
         }
     }
@@ -4447,7 +4464,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];
 
                 if (g_configBossRushVanillaGear) {
-                    apply_boss_rush_loadout(false);
                     reset_boss_rush_save_flags();
                     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
                     clear_boss_dungeon_clear_flags(boss.stage);
@@ -4496,10 +4512,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
                 if (g_configBossRushSeparateGanon && std::strcmp(boss.displayName, "Ganondorf") == 0) {
                     mDoGph_gInf_c::fadeOut(0.0f);
-                }
-
-                if (g_configBossRushVanillaGear) {
-                    apply_boss_rush_equipment_restriction(boss);
                 }
             }
 
