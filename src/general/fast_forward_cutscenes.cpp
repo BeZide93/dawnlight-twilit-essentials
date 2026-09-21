@@ -335,6 +335,8 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
 
     update_boss_rush_fight_start_hold();
 
+    return;
+
     const bool defeatHold = is_boss_rush_defeat_hold();
     const bool startHold = is_boss_rush_fight_start_hold();
     {

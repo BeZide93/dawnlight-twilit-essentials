@@ -15,7 +15,7 @@ bool is_boss_rush_active();
 ModResult init_general(const HookService* hook_svc, ModError* error) {
     if (!hook_svc) return MOD_ERROR;
     init_skip_cutscenes(hook_svc, error);
-#if 0
+#if 1
     /* Disabled for Dusklight 2.0: timescale-based fast forward no longer behaves correctly
      * (game clock runs the simulation independently of the aurora timescale the mod sets).
      * Re-enable together with the UI toggle in mod.cpp. */

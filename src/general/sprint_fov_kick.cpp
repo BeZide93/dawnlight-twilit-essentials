@@ -59,7 +59,7 @@ void update_sprint_fov_kick() {
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     bool sprinting = false;
-    if (link != nullptr && link->mpHIO != nullptr) {
+    if (link != nullptr && link->mpHIO != nullptr && !link->checkHorseRide()) {
         const u16 proc = link->mProcID;
         const bool inSprintProc = proc == daAlink_c::PROC_MOVE ||
                                   proc == daAlink_c::PROC_WOLF_DASH ||
