@@ -46,6 +46,11 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
     }
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
 
+    if (link != nullptr && link->checkHorseRide()) {
+        s_sprintLatched = false;
+        return HOOK_CONTINUE;
+    }
+
     if (g_configStaminaEnabled && stamina_impl::is_empty()) {
         s_sprintLatched = false;
         return HOOK_CONTINUE;
@@ -165,6 +170,13 @@ DEFINE_HOOK(&mDoCPd_c::read, SprintHumanPadRead);
 
 static void sprint_pad_read_post(ModContext*, void*, void*, void*) {
     if (!g_configStaminaSprint) return;
+
+    {
+        daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+        if (link != nullptr && link->checkHorseRide()) {
+            return;
+        }
+    }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
     const bool sprintHold = controls_binding_held(CTRL_BIND_SPRINT) &&
