@@ -20,6 +20,7 @@ bool g_configGeneralHumanWarpAnimation = false;
 
 DEFINE_HOOK(&daAlink_c::checkWarpStart, GeneralHumanWarpStartHook);
 DEFINE_HOOK(&daAlink_c::skipPortalObjWarp, GeneralHumanWarpArrivalHook);
+DEFINE_HOOK(&daAlink_c::checkDamageAction, GeneralHumanWarpDamageActionHook);
 DEFINE_HOOK(&mDoCPd_c::read, GeneralHumanWarpPadReadHook);
 DEFINE_HOOK(&dCamera_c::Run, GeneralHumanWarpCameraRunHook);
 
@@ -34,7 +35,42 @@ static bool s_cineArrival = false;
 static int s_wolfArrivalFxFrames = 0;
 static bool s_wolfArrivalMidnaPoked = false;
 
-static constexpr int kArrivalGiveUpFrames = 600;
+static int s_humanWarpDepartureFrames = 0;
+
+static bool s_humanWarpHitsDisabled = false;
+
+static constexpr int kCineGiveUpFrames = 600;
+
+// True while Link must be untouchable: from the moment the warp is decided on
+// the map, through departure, transition, and until the arrival cine is done.
+static bool human_warp_protection_active() {
+    if (s_cineDeparture || s_cineArrival || s_humanWarpArrivalPending) return true;
+    if (!g_configGeneralHumanWarpAnimation) return false;
+    if (g_meter2_info.getWarpStatus() != WARP_STATUS_DECIDED_e) return false;
+
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    return link != nullptr && !link->checkWolf();
+}
+
+// Disable applies every frame (idempotent, also catches freshly spawned player
+// actors mid-transition). Enable only restores once, and only if we disabled
+// before — so the game's own collider states are never fought per-frame.
+static void human_warp_set_hit_enabled(bool i_enabled) {
+    if (i_enabled && !s_humanWarpHitsDisabled) return;
+
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link != nullptr) {
+        for (int i = 0; i < 3; i++) {
+            if (i_enabled) {
+                link->mTgCyls[i].OnTgSetBit();
+            } else {
+                link->mTgCyls[i].OffTgSetBit();
+            }
+        }
+    }
+
+    s_humanWarpHitsDisabled = !i_enabled;
+}
 
 static void on_pad_read_post(ModContext*, void*, void*, void*) {
     if (!s_cineDeparture && !s_cineArrival) return;
@@ -130,6 +166,24 @@ static bool human_warp_scene_load_stable() {
     return true;
 }
 
+static HookAction on_human_warp_damage_action_pre(ModContext*, void* args, void* retval, void*) {
+    if (!human_warp_protection_active()) return HOOK_CONTINUE;
+
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) return HOOK_CONTINUE;
+
+    // Drop pending hit results so nothing downstream still treats them as real.
+    for (int i = 0; i < 3; i++) {
+        link->mTgCyls[i].ResetTgHit();
+    }
+    link->mCcStts.ClrTg();
+
+    if (retval != nullptr) {
+        *static_cast<BOOL*>(retval) = 0;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
 static HookAction on_check_warp_start_pre(ModContext*, void*, void*, void*) {
     if (!g_configGeneralHumanWarpAnimation) return HOOK_CONTINUE;
 
@@ -148,6 +202,8 @@ static HookAction on_check_warp_start_pre(ModContext*, void*, void*, void*) {
         s_humanWarpInFlight = true;
 
         s_cineDeparture = true;
+        s_humanWarpDepartureFrames = 0;
+        human_warp_set_hit_enabled(false);
         return HOOK_SKIP_ORIGINAL;
     }
 
@@ -180,8 +236,25 @@ static void human_warp_wolf_arrival_emitters(daAlink_c* link) {
 }
 
 void update_human_warp(const LogService*, ModContext*) {
+    bool disable_hits = human_warp_protection_active();
+
+    if (disable_hits || s_humanWarpHitsDisabled) {
+        human_warp_set_hit_enabled(!disable_hits);
+    }
+
+    if (s_cineDeparture) {
+        if (++s_humanWarpDepartureFrames > kCineGiveUpFrames) {
+            s_humanWarpInFlight = false;
+            s_cineDeparture = false;
+            dCam_getBody()->SetTrimTypeForce(0);
+            dComIfGp_2dShowOn();
+            human_warp_set_hit_enabled(true);
+            return;
+        }
+    }
+
     if (s_cineArrival) {
-        if (++s_humanWarpArrivalFrames > kArrivalGiveUpFrames) {
+        if (++s_humanWarpArrivalFrames > kCineGiveUpFrames) {
             s_cineArrival = false;
             s_wolfArrivalFxFrames = 0;
             if (s_wolfArrivalMidnaPoked) {
@@ -196,6 +269,7 @@ void update_human_warp(const LogService*, ModContext*) {
             }
             dCam_getBody()->SetTrimTypeForce(0);
             dComIfGp_2dShowOn();
+            human_warp_set_hit_enabled(true);
             return;
         }
 
@@ -226,6 +300,7 @@ void update_human_warp(const LogService*, ModContext*) {
         s_cineArrival = false;
         dCam_getBody()->SetTrimTypeForce(0);
         dComIfGp_2dShowOn();
+        human_warp_set_hit_enabled(true);
         return;
     }
 
@@ -238,12 +313,14 @@ void update_human_warp(const LogService*, ModContext*) {
 
     if (link->mProcID == daAlink_c::PROC_WARP) {
         link->offPlayerNoDraw();
+        human_warp_set_hit_enabled(true);
         s_humanWarpArrivalPending = false;
         return;
     }
 
-    if (++s_humanWarpArrivalFrames > kArrivalGiveUpFrames) {
+    if (++s_humanWarpArrivalFrames > kCineGiveUpFrames) {
         link->offPlayerNoDraw();
+        human_warp_set_hit_enabled(true);
         s_humanWarpArrivalPending = false;
         return;
     }
@@ -278,6 +355,8 @@ ModResult init_human_warp(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_ERROR;
     mods::hook::add_pre<GeneralHumanWarpStartHook>(hook_svc, on_check_warp_start_pre);
     mods::hook::add_pre<GeneralHumanWarpArrivalHook>(hook_svc, on_skip_portal_obj_warp_pre);
+    mods::hook::add_pre<GeneralHumanWarpDamageActionHook>(hook_svc,
+                                                          on_human_warp_damage_action_pre);
     mods::hook::add_post<GeneralHumanWarpPadReadHook>(hook_svc, on_pad_read_post);
     mods::hook::add_post<GeneralHumanWarpCameraRunHook>(hook_svc, on_camera_run_post);
     return MOD_OK;
@@ -286,12 +365,15 @@ ModResult init_human_warp(const HookService* hook_svc, ModError*) {
 void human_warp_cinematic_departure() {
     s_cineDeparture = true;
     s_cineArrival = false;
+    s_humanWarpDepartureFrames = 0;
+    human_warp_set_hit_enabled(false);
 }
 
 void human_warp_cinematic_arrival() {
     s_cineDeparture = false;
     s_cineArrival = true;
     s_humanWarpArrivalFrames = 0;
+    human_warp_set_hit_enabled(false);
 }
 
 void human_warp_cinematic_end() {
@@ -299,6 +381,7 @@ void human_warp_cinematic_end() {
     s_cineArrival = false;
     dCam_getBody()->SetTrimTypeForce(0);
     dComIfGp_2dShowOn();
+    human_warp_set_hit_enabled(true);
 }
 
 void human_warp_arm_arrival_replay() {
@@ -312,4 +395,6 @@ void shutdown_human_warp() {
     s_humanWarpArrivalFrames = 0;
     s_cineDeparture = false;
     s_cineArrival = false;
+    s_humanWarpDepartureFrames = 0;
+    human_warp_set_hit_enabled(true);
 }
