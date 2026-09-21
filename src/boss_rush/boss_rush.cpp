@@ -164,6 +164,7 @@ static const cXyz kFyrusFightSpawnPos{-1.0f, 0.0f, 1473.0f};
 static const cXyz kDangoroFightSpawnPos{21.83f, 879.22f, 817.38f};
 
 static const cXyz kMorpheelFightSpawnPos{-1193.0f, -24000.0f, -770.0f};
+static const s16 kMorpheelFightAngle = static_cast<s16>(0x2A02);
 
 static const cXyz kDeathSwordFightSpawnPos{270.0f, 0.0f, 210.0f};
 
@@ -193,7 +194,7 @@ const BossGalleryEntry g_bossGalleryTable[] = {
     {"Deku Toad",    "Lakebed Temple",      "E_dt",   "dt.bmd",     nullptr,  "dt_wait01.bck",     "D_MN01B", 0, 51, 0, 0.55f,  0.0f,  260.0f, 150.0f},
     {"Morpheel",     "Lakebed Temple",      "B_oh",   "oi_head.bmd",nullptr,  "",                  "D_MN01A", 0, 50, 0, 0.275f, -165.0f, 240.0f, 60.0f,
      nullptr, nullptr, nullptr, nullptr, nullptr, g_morpheelParts, kMorpheelPartCount,
-     nullptr, nullptr, nullptr, nullptr, &kMorpheelFightSpawnPos, static_cast<s16>(0x2A02),
+     nullptr, nullptr, nullptr, nullptr, &kMorpheelFightSpawnPos, kMorpheelFightAngle,
      csXyz(static_cast<s16>(-0x4000), 0, 0)},
     {"Death Sword",  "Arbiter's Grounds",   "E_va",   "va.bmd",     nullptr,  "va_subs_wait.bck",  "D_MN10B", 0, 51, 0, 0.7f,  0.0f, 260.0f, 0.0f,
      nullptr, nullptr, nullptr, nullptr, nullptr, g_deathSwordParts, kDeathSwordPartCount,
@@ -370,6 +371,7 @@ static bool s_swordDrawnLatched = false;
 static bool s_sawSwordDrawnAtCommit = false;
 
 static int s_morpheelPosPinFrames = 0;
+static int s_morpheelCamArmFrames = 0;
 static int s_horsebackGanonKoTimer = -1;
 static bool s_horsebackGanonSawHorse = false;
 static bool s_horsebackRetryLanding = false;
@@ -542,7 +544,7 @@ bool boss_rush_is_fighting_here() {
     }
 
     if (is_in_chamber_room()) {
-        if (s_activeFightIndex >= 0) {
+        if (s_activeFightIndex >= 0 || s_pendingFightFromArena) {
             return true;
         }
         JUTFader* fader = mDoGph_gInf_c::getFader();
@@ -1005,9 +1007,15 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
         dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link) {
-            s_morpheelPosPinFrames = 40;
-            link->setClothesChange(0);
+            s_morpheelPosPinFrames = 0;
+            s_morpheelCamArmFrames = 90;
+            if (dComIfGs_getSelectEquipClothes() != dItemNo_WEAR_ZORA_e) {
+                link->setClothesChange(0);
+            }
             link->setSelectEquipItem(FALSE);
+            if (!link->checkEquipHeavyBoots()) {
+                link->setHeavyBoots(1);
+            }
         }
         assign_select_item(SELECT_ITEM_X, SLOT_3);
         assign_select_item(SELECT_ITEM_Y, SLOT_10);
@@ -1066,11 +1074,18 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
 
     boss_rush_timer_reset_run();
 
+    mDoGph_gInf_c::fadeOut(0.0f);
+    Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+
     s_returningToChamber = true;
-    s_returnSawFadeOut = false;
+    s_returnSawFadeOut = true;
     s_needsChamberSpawn = true;
     s_chamberSpawnFrames = 0;
-    s_chamberCamArmFrames = 30;
+    s_chamberCamArmFrames = 0;
+    s_activeFightIndex = -1;
+    s_pendingFightIndex = -1;
+    s_pendingFightFromArena = false;
+    s_pendingWarpSawEnableNextStage = false;
     boss_rush_texts_reset_fade();
     boss_rush_master_sword_reset_fade();
 
@@ -1082,10 +1097,22 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
 
     g_dComIfG_gameInfo.info.getDan().offSwitch(1);
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+    g_dComIfG_gameInfo.info.getRestart().mLastMode &= ~0xFF000000;
+    clear_all_select_items();
+    dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
+    dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+    dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+    dComIfGs_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+    dComIfGp_setSelectEquipSword(dItemNo_MASTER_SWORD_e);
+    dComIfGs_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
+    dComIfGp_setSelectEquipShield(dItemNo_HYLIA_SHIELD_e);
     {
         daAlink_c* link = daAlink_getAlinkActorClass();
-        if (link != nullptr && link->checkEquipHeavyBoots()) {
-            link->setHeavyBoots(0);
+        if (link != nullptr) {
+            link->cancelOriginalDemo();
+            if (link->checkEquipHeavyBoots()) {
+                link->setHeavyBoots(0);
+            }
         }
     }
     cDmr_SkipInfo = 0;
@@ -1243,12 +1270,7 @@ static void on_boss_rush_draw_post_impl(ModContext*, void*, void*, void*) {
     }
 
     if (!is_in_boss_rush_chamber()) {
-        if (s_pendingFightIndex == -1) {
-            return;
-        }
-        if (!is_in_chamber_room()) {
-            return;
-        }
+        return;
     }
 
 
@@ -1256,15 +1278,6 @@ static void on_boss_rush_draw_post_impl(ModContext*, void*, void*, void*) {
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (link == nullptr) {
         return;
-    }
-
-    if (s_needsChamberSpawn) {
-        link->current.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
-        link->old.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
-        link->shape_angle.set(0, cM_deg2s(180.0f), 0);
-        link->current.angle.set(0, cM_deg2s(180.0f), 0);
-        link->speedF = 0.0f;
-        link->speed.set(0.0f, 0.0f, 0.0f);
     }
 
     draw_boss_rush_models(kBossChamberFloorY);
@@ -1339,13 +1352,13 @@ static void update_ring_flames() {
     }
 }
 
-static int s_morpheelCamArmFrames = 0;
-
 static void update_morpheel_pos_pin() {
     const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "D_MN01A") != 0) {
-        s_morpheelPosPinFrames = 0;
-        s_morpheelCamArmFrames = 0;
+        if (!is_boss_rush_active() || s_returningToChamber || boss_rush_target_index() < 0) {
+            s_morpheelPosPinFrames = 0;
+            s_morpheelCamArmFrames = 0;
+        }
         return;
     }
     if (!is_boss_rush_active() || s_returningToChamber) {
@@ -1361,7 +1374,12 @@ static void update_morpheel_pos_pin() {
         return;
     }
 
-    static const s16 kMorpheelFightAngle = static_cast<s16>(0x2A02);
+    static u32 s_pinGen = ~0u;
+    if (instant_fight_rearm(s_pinGen)) {
+        s_morpheelPosPinFrames = 0;
+        s_morpheelCamArmFrames = 90;
+    }
+
     if (s_morpheelPosPinFrames > 0) {
         --s_morpheelPosPinFrames;
 
@@ -1369,16 +1387,22 @@ static void update_morpheel_pos_pin() {
         if (link != nullptr) {
             link->current.pos = kMorpheelFightSpawnPos;
             link->old.pos = kMorpheelFightSpawnPos;
-            link->current.angle.y = kMorpheelFightAngle;
-            link->shape_angle.y = kMorpheelFightAngle;
+            link->current.angle.set(0, kMorpheelFightAngle, 0);
+            link->shape_angle.set(0, kMorpheelFightAngle, 0);
             link->speed.set(0.0f, 0.0f, 0.0f);
             link->speedF = 0.0f;
         }
-        s_morpheelCamArmFrames = 90;
     }
 
     if (s_morpheelCamArmFrames <= 0) return;
     --s_morpheelCamArmFrames;
+
+    if (dDemo_c::m_object != nullptr && dDemo_c::m_object->mpCamera != nullptr) {
+        dDemo_c::m_object->mpCamera->mFlags = 0;
+    }
+    if (dDemo_c::getMode() != 0) {
+        dDemo_c::end();
+    }
 
     daAlink_c* link = daAlink_getAlinkActorClass();
     camera_process_class* cam = boss_rush_get_active_player_camera();
@@ -1390,7 +1414,10 @@ static void update_morpheel_pos_pin() {
     cXyz eye(p.x - fx * 450.0f, p.y + 170.0f, p.z - fz * 450.0f);
     cam->mCamera.Reset(center, eye);
     cam->mCamera.Start();
+    cam->mCamera.QuickStart();
     cam->mCamera.SetTrimSize(0);
+    cam->view.lookat.center.set(center.x, center.y, center.z);
+    cam->view.lookat.eye.set(eye.x, eye.y, eye.z);
     fopCamM_SetAngleY(cam, kMorpheelFightAngle);
 }
 
@@ -1528,17 +1555,40 @@ static void update_ganon_ground_duel() {
 }
 
 static void update_morpheel_iron_boots() {
-    const char* stage = dComIfGp_getStartStageName();
-
     static bool s_done = false;
+    static u32  s_gen = ~0u;
+
+    const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "D_MN01A") != 0) {
         s_done = false;
         return;
     }
-    if (s_done || !is_boss_rush_active()) return;
+
+    if (instant_fight_rearm(s_gen)) {
+        s_done = false;
+    }
+
+    if (s_done || !is_boss_rush_active() || s_returningToChamber) return;
+
+    const int t = boss_rush_target_index();
+    if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount ||
+        std::strcmp(g_bossGalleryTable[t].displayName, "Morpheel") != 0) {
+        return;
+    }
 
     daAlink_c* link = daAlink_getAlinkActorClass();
-    if (link == nullptr || link->checkEventRun() || link->checkEquipHeavyBoots()) return;
+    if (link == nullptr || link->checkEventRun()) return;
+
+    if (link->checkEquipHeavyBoots()) {
+        s_done = true;
+        return;
+    }
+
+    fopAc_ac_c* ob = fopAcM_SearchByName(fpcNm_B_OB_e);
+    if (ob != nullptr && bbi::morpheel_is_phase2(ob)) {
+        s_done = true;
+        return;
+    }
 
     const bool inWater = link->checkModeFlg(0x40000) ||
                          link->mWaterY > link->current.pos.y + 20.0f;
@@ -2185,7 +2235,10 @@ static void update_morpheel_instant_fight() {
 
     if (instant_fight_rearm(s_gen)) {
         s_done = false;
-        s_morpheelPosPinFrames = 40;
+        s_frames = 0;
+        s_actorId = 0;
+        s_morpheelPosPinFrames = 0;
+        s_morpheelCamArmFrames = 90;
     }
     if (s_done) return;
 
@@ -2201,7 +2254,7 @@ static void update_morpheel_instant_fight() {
     if (++s_frames < 120 && !bbi::morpheel_tentacles_ready(ob)) return;
 
     daAlink_c* link = daAlink_getAlinkActorClass();
-    if (link != nullptr && !link->checkEquipHeavyBoots()) {
+    if (link != nullptr && !link->checkEquipHeavyBoots() && !bbi::morpheel_is_phase2(ob)) {
         link->setHeavyBoots(1);
     }
 
@@ -2751,7 +2804,7 @@ static void update_darknut_instant_fight() {
         s_frames = 0;
         return;
     }
-    if (s_done || !is_boss_rush_active() || s_returningToChamber) return;
+    if (!is_boss_rush_active() || s_returningToChamber) return;
     if (!boss_rush_is_fighting_here()) return;
 
     const int t = boss_rush_target_index();
@@ -2766,12 +2819,20 @@ static void update_darknut_instant_fight() {
 
     const int a1 = tn->mActionMode1;
     if (a1 == daB_TN_c::ACT_ROOMDEMO || a1 == daB_TN_c::ACT_OPENING) {
-        tn->demo_skip(0);
+        dComIfGp_event_reset();
+        Z2GetAudioMgr()->bgmStreamStop(0x1e);
+        Z2GetAudioMgr()->subBgmStart(Z2BGM_TN_MBOSS);
+        tn->setActionMode(daB_TN_c::ACT_WAITH, daB_TN_c::ACTION2_0_e);
+        tn->mUpdateNeckAngle = true;
+        tn->mBlendStatus = 2;
+        tn->mBlend = 1.0f;
         fopAcM_OffStatus(tn, fopAcStts_UNK_0x4000_e);
         dComIfGs_onOneZoneSwitch(14, fopAcM_GetRoomNo(tn));
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) link->cancelOriginalDemo();
         if (++s_frames < 4) return;
+    } else if (s_done) {
+        return;
     }
     s_done = true;
 }
@@ -3070,31 +3131,90 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
         s_arenaSettle = 0;
         return HOOK_CONTINUE;
     }
+
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    if (fight_starts_with_sword_drawn() && !is_in_boss_rush_chamber() && !link->checkWolf()) {
+        JUTFader* fader = mDoGph_gInf_c::getFader();
+        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+        const bool isBlackScreen = (faderStatus == JUTFader::None || fopOvlpM_IsPeek());
+        if (isBlackScreen) {
+            if (link->mEquipItem == 0x103) {
+                s_swordDrawnLatched = true;
+            } else if (!s_swordDrawnLatched) {
+                link->swordEquip(TRUE);
+                link->setSwordModel();
+                s_swordDrawnLatched = true;
+            }
+        }
+    }
+
+    const int targetIdx = boss_rush_target_index();
+    const bool isMorpheelTarget = (targetIdx >= 0 && static_cast<size_t>(targetIdx) < g_bossGalleryCount &&
+                                  std::strcmp(g_bossGalleryTable[targetIdx].displayName, "Morpheel") == 0);
+    if (isMorpheelTarget && !is_in_boss_rush_chamber() && !link->checkWolf()) {
+        JUTFader* fader = mDoGph_gInf_c::getFader();
+        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+        const bool isBlackScreen = (faderStatus == JUTFader::None || fopOvlpM_IsPeek());
+        if (isBlackScreen) {
+            fopAc_ac_c* ob = fopAcM_SearchByName(fpcNm_B_OB_e);
+            const bool phase2 = (ob != nullptr && bbi::morpheel_is_phase2(ob));
+            if (!phase2) {
+                if (dComIfGs_getSelectEquipClothes() != dItemNo_WEAR_ZORA_e) {
+                    dMeter2Info_setCloth(dItemNo_WEAR_ZORA_e, false);
+                    dComIfGs_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+                    dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+                    link->setClothesChange(0);
+                    link->setSelectEquipItem(FALSE);
+                }
+                if (!link->checkEquipHeavyBoots()) {
+                    link->setHeavyBoots(1);
+                }
+            }
+
+            link->current.pos = kMorpheelFightSpawnPos;
+            link->old.pos = kMorpheelFightSpawnPos;
+            link->current.angle.set(0, kMorpheelFightAngle, 0);
+            link->shape_angle.set(0, kMorpheelFightAngle, 0);
+            link->speed.set(0.0f, 0.0f, 0.0f);
+            link->speedF = 0.0f;
+
+            if (dDemo_c::m_object != nullptr && dDemo_c::m_object->mpCamera != nullptr) {
+                dDemo_c::m_object->mpCamera->mFlags = 0;
+            }
+            if (dDemo_c::getMode() != 0) {
+                dDemo_c::end();
+            }
+
+            camera_process_class* cam = boss_rush_get_active_player_camera();
+            if (cam != nullptr) {
+                const f32 fx = cM_ssin(kMorpheelFightAngle), fz = cM_scos(kMorpheelFightAngle);
+                cXyz center(kMorpheelFightSpawnPos.x + fx * 200.0f, kMorpheelFightSpawnPos.y + 100.0f, kMorpheelFightSpawnPos.z + fz * 200.0f);
+                cXyz eye(kMorpheelFightSpawnPos.x - fx * 450.0f, kMorpheelFightSpawnPos.y + 170.0f, kMorpheelFightSpawnPos.z - fz * 450.0f);
+                cam->mCamera.Reset(center, eye);
+                cam->mCamera.Start();
+                cam->mCamera.QuickStart();
+                cam->mCamera.SetTrimSize(0);
+                cam->view.lookat.center.set(center.x, center.y, center.z);
+                cam->view.lookat.eye.set(eye.x, eye.y, eye.z);
+                fopCamM_SetAngleY(cam, kMorpheelFightAngle);
+            }
+            s_morpheelPosPinFrames = 0;
+            s_morpheelCamArmFrames = 90;
+        }
+    }
+
     if (s_arenaSettle > 0) {
         s_arenaSettle--;
 
         const int t = boss_rush_target_index();
         const bool isMorpheel = (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount &&
                                  std::strcmp(g_bossGalleryTable[t].displayName, "Morpheel") == 0);
-        daAlink_c* link = daAlink_getAlinkActorClass();
-        if (!isMorpheel && link != nullptr && link->checkEquipHeavyBoots()) {
+        if (!isMorpheel && link->checkEquipHeavyBoots()) {
             link->setHeavyBoots(0);
-        }
-
-        if (fight_starts_with_sword_drawn()) {
-            daAlink_c* link = daAlink_getAlinkActorClass();
-            if (link != nullptr && !link->checkWolf()) {
-                if (!s_swordDrawnLatched) {
-                    if (!s_sawSwordDrawnAtCommit) {
-                        link->swordEquip(TRUE);
-                    }
-                    link->setSwordModel();
-                    s_swordDrawnLatched = true;
-                } else if (link->mEquipItem != 0x103) {
-                    link->mEquipItem = 0x103;
-                    link->setSwordModel();
-                }
-            }
         }
 
         if (s_arenaSettle > s_arenaFreezeUntil) {
@@ -3102,14 +3222,6 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
         } else if (s_arenaSettle == s_arenaFreezeUntil) {
             fopAcIt_Judge(settle_unfreeze_judge, nullptr);
         }
-
-        interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-        pad.mMainStickPosX = 0.0f;
-        pad.mMainStickPosY = 0.0f;
-        pad.mMainStickValue = 0.0f;
-        pad.mMainStickAngle = 0;
-        pad.mButtonFlags = 0;
-        pad.mPressedButtonFlags = 0;
     }
     return HOOK_CONTINUE;
 }
@@ -3150,7 +3262,7 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     boss_rush_timer_update();
 
 
-    if (link == nullptr || (!s_bossRushModeActive && !s_exitingBossRush) || !is_in_chamber_room()) {
+    if (link == nullptr || (!s_bossRushModeActive && !s_exitingBossRush) || !is_in_boss_rush_chamber()) {
         if (any_ring_flames_lit()) clear_ring_flames();
         s_healTimer = 0;
         return;
@@ -3194,8 +3306,7 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
         return;
     }
 
-    const bool inChamberForText = is_in_boss_rush_chamber() ||
-        (s_pendingFightIndex != -1 && is_in_chamber_room());
+    const bool inChamberForText = is_in_boss_rush_chamber();
     if (!kBossGalleryTextsEnabled || !inChamberForText || s_returningToChamber) {
         return;
     }
@@ -3404,8 +3515,15 @@ bool boss_rush_is_fight_engaged() {
 }
 
 bool is_in_boss_rush_chamber() {
-    if (s_activeFightIndex != -1 || s_returningToChamber) {
+    if (s_activeFightIndex != -1 || s_returningToChamber || s_pendingFightFromArena) {
         return false;
+    }
+    if (s_pendingFightIndex != -1) {
+        JUTFader* fader = mDoGph_gInf_c::getFader();
+        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+        if (faderStatus == JUTFader::None || fopOvlpM_IsPeek()) {
+            return false;
+        }
     }
     // The chamber room (D_MN06B room 51) is reachable in vanilla progression
     // (Temple of Time darknut hall), so only treat it as the boss rush chamber
@@ -3506,7 +3624,7 @@ static void prepare_boss_rush_state() {
     s_exitingBossRush = false;
     s_needsChamberSpawn = true;
     s_chamberSpawnFrames = 0;
-    s_chamberCamArmFrames = 30;
+    s_chamberCamArmFrames = 0;
     s_pendingInitialInventory = true;
     reset_boss_rush_save_flags();
 }
@@ -3890,12 +4008,28 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                                         const LogService* log_svc, ModContext* mod_ctx) {
     const BossGalleryEntry& boss = g_bossGalleryTable[i];
 
-    s_pendingFightFromArena = !is_in_chamber_room();
+    s_pendingFightFromArena = !is_in_chamber_room() || s_activeFightIndex >= 0 || boss_rush_is_fighting_here();
     s_pendingWarpSawEnableNextStage = false;
+    s_warpWatchdogFrames = 0;
     s_activeFightIndex = -1;
     rush_debug_logf("[rush] commit '%s' stage=%s room=%d arenaFrom=%d",
                     boss.displayName, boss.stage, (int)boss.room,
                     (int)s_pendingFightFromArena);
+
+    s_needsChamberSpawn = false;
+    s_chamberCamArmFrames = 0;
+    s_chamberSpawnFrames = 0;
+    s_swordDrawnLatched = false;
+
+    if (s_pendingFightFromArena) {
+        mDoGph_gInf_c::fadeOut(0.0f);
+        unload_boss_rush_models();
+        clear_ring_flames();
+        s_ignitedStatue = -1;
+        if (link != nullptr) {
+            link->cancelOriginalDemo();
+        }
+    }
 
     if (link != nullptr) {
         link->speed.set(0.0f, 0.0f, 0.0f);
@@ -3908,13 +4042,21 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                 dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
                 dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
             }
+        } else {
+            dMeter2Info_setCloth(dItemNo_WEAR_ZORA_e, false);
+            dComIfGs_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+            dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+            assign_select_item(SELECT_ITEM_X, SLOT_3);
+            assign_select_item(SELECT_ITEM_Y, SLOT_10);
         }
     }
     s_sawSwordDrawnAtCommit = (link != nullptr && link->checkSwordDraw());
 
     Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
 
-    reset_boss_rush_save_flags();
+    if (!s_pendingFightFromArena) {
+        reset_boss_rush_save_flags();
+    }
     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
 
     const bool isGanonGauntlet = !g_configBossRushSeparateGanon &&
@@ -3965,8 +4107,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                std::strcmp(boss.displayName, "Diababa") == 0) {
         cDmr_SkipInfo = 60;
     }
-    if (std::strcmp(boss.displayName, "Death Sword") == 0 ||
-        std::strcmp(boss.displayName, "Beast Ganon") == 0) {
+    if (std::strcmp(boss.displayName, "Death Sword") == 0) {
         dComIfGs_setTransformStatus(TF_STATUS_WOLF);
     } else {
         dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
@@ -3982,12 +4123,23 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
     s_horsebackGanonKoTimer = -1;
     s_horsebackGanonSawHorse = false;
 
+    u32 lastMode = g_dComIfG_gameInfo.info.getRestart().mLastMode & ~0xFF000000;
+    if (std::strcmp(boss.displayName, "Ook") == 0 ||
+        std::strcmp(boss.displayName, "Dangoro") == 0 ||
+        std::strcmp(boss.displayName, "Deku Toad") == 0 ||
+        std::strcmp(boss.displayName, "Darkhammer") == 0 ||
+        std::strcmp(boss.displayName, "Darknut") == 0 ||
+        std::strcmp(boss.displayName, "Ganondorf") == 0) {
+        lastMode |= 0x28000000;
+    }
+    g_dComIfG_gameInfo.info.getRestart().mLastMode = lastMode;
+
     if (boss.fightSpawnPos != nullptr) {
         dComIfGs_setRestartRoom(*boss.fightSpawnPos, boss.fightSpawnAngle, boss.room);
         dComIfGs_setRestartRoomParam((boss.room & 0x3F) | (0xFF << 24));
-        dComIfGp_setNextStage(boss.stage, -1, boss.room, boss.layer, 0.0f, 0, 1, 0, boss.fightSpawnAngle, 0, 0);
+        dComIfGp_setNextStage(boss.stage, -1, boss.room, boss.layer, 0.0f, lastMode, 1, 0, boss.fightSpawnAngle, 0, 0);
     } else {
-        dComIfGp_setNextStage(boss.stage, boss.point, boss.room, boss.layer, 0.0f, 0, 1, 0, boss.fightSpawnAngle, 0, 0);
+        dComIfGp_setNextStage(boss.stage, boss.point, boss.room, boss.layer, 0.0f, lastMode, 1, 0, boss.fightSpawnAngle, 0, 0);
     }
 }
 
@@ -4029,7 +4181,7 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
     boss_bar_force_reset();
 
     commit_boss_rush_fight_warp(static_cast<size_t>(idx), daAlink_getAlinkActorClass(),
-                               log_svc, mod_ctx);
+                                log_svc, mod_ctx);
 }
 
 static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_ctx) {
@@ -4237,22 +4389,42 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_pendingWarpSawEnableNextStage = true;
         }
 
+        JUTFader* fader = mDoGph_gInf_c::getFader();
+        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+        if (faderStatus == JUTFader::None || fopOvlpM_IsPeek()) {
+            unload_boss_rush_models();
+        }
+
         const bool isGanonGauntlet = !g_configBossRushSeparateGanon &&
                                      (std::strcmp(g_bossGalleryTable[s_pendingFightIndex].displayName, "Ganondorf") == 0);
         const char* expStage = isGanonGauntlet ? "D_MN09A" : g_bossGalleryTable[s_pendingFightIndex].stage;
         const char* curStage = dComIfGp_getStartStageName();
         const bool atTargetStage = (curStage != nullptr && std::strcmp(curStage, expStage) == 0);
 
+        const bool pendingTargetIsChamber =
+            std::strcmp(g_bossGalleryTable[s_pendingFightIndex].stage, kBossRushChamberStage) == 0 &&
+            g_bossGalleryTable[s_pendingFightIndex].room == kBossRushChamberRoom;
+
+        const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
+        const bool roomMatchesLanding = pendingTargetIsChamber
+            ? is_in_chamber_room()
+            : (!is_in_chamber_room() && curRoom >= 0 &&
+               boss_rush_room_matches_target(g_bossGalleryTable[s_pendingFightIndex], curRoom));
+
+        const bool transitionFinished = !fopOvlpM_IsPeek() &&
+                                        (faderStatus == JUTFader::Wait || faderStatus == JUTFader::FadeIn);
+
         const bool landingInFight = s_pendingWarpSawEnableNextStage &&
                                     !dComIfGp_isEnableNextStage() &&
-                                    !is_in_chamber_room() &&
-                                    atTargetStage;
+                                    roomMatchesLanding &&
+                                    atTargetStage &&
+                                    transitionFinished;
 
         if (landingInFight) {
             rush_debug_logf("[rush] landed '%s' stage=%s room=%d arena=%d",
                             g_bossGalleryTable[s_pendingFightIndex].displayName,
                             g_bossGalleryTable[s_pendingFightIndex].stage,
-                            (int)dComIfGp_roomControl_getStayNo(),
+                            (int)curRoom,
                             (int)s_pendingFightFromArena);
             s_warpWatchdogFrames = 0;
             s_pendingFightFromArena = false;
@@ -4260,10 +4432,18 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_activeFightIndex = s_pendingFightIndex;
             s_pendingFightIndex = -1;
             ++s_fightWarpGen;
+
+            if (pendingTargetIsChamber) {
+                rush_debug_logf("[rush] landed chamber boss '%s'",
+                                g_bossGalleryTable[s_activeFightIndex].displayName);
+            }
+
             s_arenaSettle = arena_settle_frames_for(g_bossGalleryTable[s_activeFightIndex]);
             s_arenaFreezeUntil = s_arenaSettle;
             s_bossRushDeathRetryTriggered = false;
-            s_swordDrawnLatched = false;
+            s_needsChamberSpawn = false;
+            s_chamberCamArmFrames = 0;
+            s_chamberSpawnFrames = 0;
             unload_boss_rush_models();
 
             if (s_activeFightIndex >= 0 && s_activeFightIndex < static_cast<int>(g_bossGalleryCount)) {
@@ -4305,8 +4485,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     apply_boss_suggested_items(boss);
                 }
 
-                if (std::strcmp(boss.displayName, "Death Sword") == 0 ||
-                    std::strcmp(boss.displayName, "Beast Ganon") == 0) {
+                if (std::strcmp(boss.displayName, "Death Sword") == 0) {
                     dComIfGs_setTransformStatus(TF_STATUS_WOLF);
                 } else {
                     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
@@ -4337,14 +4516,14 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_returnSawFadeOut = true;
         }
 
-        if (s_returnSawFadeOut && is_in_chamber_room() &&
-            (faderStatus == JUTFader::None || faderStatus == JUTFader::FadeIn || faderStatus == JUTFader::Wait) &&
+        if (s_returnSawFadeOut && is_in_chamber_room() && !fopOvlpM_IsPeek() &&
             !dComIfGp_isEnableNextStage()) {
             s_returningToChamber = false;
             s_returnSawFadeOut = false;
             s_activeFightIndex = -1;
             s_pendingFightIndex = -1;
             s_pendingFightFromArena = false;
+            s_pendingWarpSawEnableNextStage = false;
             reset_boss_rush_save_flags();
             dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
             if (g_configBossRushSuggestedItems) {
@@ -4352,11 +4531,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
                 dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
                 dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
-                daAlink_c* link = daAlink_getAlinkActorClass();
-                if (link) {
-                    link->setClothesChange(0);
-                    link->setSelectEquipItem(FALSE);
-                }
             }
         }
     }
@@ -4423,11 +4597,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
 
         static int s_blackScreenWatchdog = 0;
-        if (faderStatus == JUTFader::None || fopOvlpM_IsPeek()) {
-            if (++s_blackScreenWatchdog >= 30) {
-                if (fopOvlpM_IsPeek()) {
-                    fopOvlpM_Cancel();
-                }
+        if (faderStatus == JUTFader::None && !fopOvlpM_IsPeek() && !dComIfGp_event_runCheck()) {
+            if (++s_blackScreenWatchdog >= 180) {
                 if (fader != nullptr) {
                     fader->setStatus(JUTFader::Wait, 0);
                 }
@@ -4448,7 +4619,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (!s_wasInChamber && nowInChamber) {
         s_needsChamberSpawn = true;
         s_chamberSpawnFrames = 0;
-        s_chamberCamArmFrames = 30;
+        s_chamberCamArmFrames = 0;
         s_chamberCleanupFrames = kChamberCleanupWindow;
         s_ignitedStatue = -1;
         boss_rush_texts_reset_fade();
@@ -4492,7 +4663,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
-    if (s_needsChamberSpawn && is_in_chamber_room()) {
+    if (s_needsChamberSpawn && is_in_boss_rush_chamber()) {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
             link->current.pos.set(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
@@ -4505,9 +4676,10 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             camera_process_class* cam = boss_rush_get_active_player_camera();
             if (cam != nullptr) {
                 static const s16 kChamberAngle = cM_deg2s(180.0f);
+                const cXyz& p = link->current.pos;
                 const f32 fx = cM_ssin(kChamberAngle), fz = cM_scos(kChamberAngle);
-                cXyz center(fx * 200.0f, kBossChamberFloorY + 100.0f, fz * 200.0f);
-                cXyz eye(-fx * 420.0f, kBossChamberFloorY + 140.0f, -fz * 420.0f);
+                cXyz center(p.x + fx * 200.0f, p.y + 100.0f, p.z + fz * 200.0f);
+                cXyz eye(p.x - fx * 420.0f, p.y + 140.0f, p.z - fz * 420.0f);
                 cam->mCamera.Reset(center, eye);
                 cam->mCamera.Start();
                 cam->mCamera.SetTrimSize(0);
@@ -4527,7 +4699,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
-    if (is_in_chamber_room()) {
+    if (is_in_boss_rush_chamber()) {
         daAlink_c* link = daAlink_getAlinkActorClass();
         camera_process_class* cam = boss_rush_get_active_player_camera();
         if (s_chamberCamArmFrames > 0 && link != nullptr && cam != nullptr) {
@@ -4546,7 +4718,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         s_chamberCamArmFrames = 0;
     }
 
-    if (s_portalArrivalAnimPending && is_in_chamber_room() && boss_rush_scene_load_stable() &&
+    if (s_portalArrivalAnimPending && is_in_boss_rush_chamber() && boss_rush_scene_load_stable() &&
         !s_pendingInitialInventory) {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
@@ -4796,7 +4968,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
             force_boss_rush_fast_transitions();
             s_needsChamberSpawn = true;
             s_chamberSpawnFrames = 0;
-            s_chamberCamArmFrames = 30;
+            s_chamberCamArmFrames = 0;
             cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
             dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
             dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
@@ -4896,6 +5068,8 @@ void shutdown_boss_rush() {
     s_pendingFightFromArena = false;
     s_dungeonClearWarpPending = false;
     s_dungeonClearWarpFrames  = 0;
+    s_morpheelPosPinFrames = 0;
+    s_morpheelCamArmFrames = 0;
     clear_ring_flames();
     unload_boss_rush_models();
     shutdown_boss_rush_midna();

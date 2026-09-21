@@ -772,30 +772,46 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
 
     const bool wantSimpleBmgMenu = mode == BossRushMidnaMode::Fight &&
         (is_boss_rush_link_in_water() || is_boss_rush_link_on_horse());
-    if (wantSimpleBmgMenu && s_midnaRoot3001 != mods::flow::kEnd) {
-        if (boss_rush_build_two_choice_prompt(graph, s_midnaRoot3001,
-                s_bossRushMidnaBackOnlyMsg.id(), leaveEvent))
-        {
-            return graph.commit();
-        }
-    }
 
     const char* targetName = boss_rush_current_target_name();
     const char* curStage = dComIfGp_getStartStageName();
-    const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
-    const bool isInBeastGanonRoom = curStage != nullptr &&
-        std::strcmp(curStage, "D_MN09A") == 0 && curRoom == 51;
-    const bool transformAllowed = targetName != nullptr &&
-        (std::strcmp(targetName, "Death Sword") == 0 ||
-         std::strcmp(targetName, "Beast Ganon") == 0 ||
-         isInBeastGanonRoom);
-    if (mode == BossRushMidnaMode::Fight && !wantSimpleBmgMenu && !transformAllowed &&
-        s_midnaRoot3001 != mods::flow::kEnd) {
-        if (boss_rush_build_two_choice_prompt(graph, s_midnaRoot3001,
-                s_bossRushMidnaBackOnlyMsg.id(), leaveEvent))
+    bool isBeastGanonPhase = false;
+    if (targetName != nullptr && std::strcmp(targetName, "Beast Ganon") == 0) {
+        isBeastGanonPhase = true;
+    } else if (curStage != nullptr && std::strcmp(curStage, "D_MN09A") == 0) {
+        if (dComIfG_play_c::getLayerNo(0) == 1 || fopAcM_SearchByName(fpcNm_B_MGN_e) != nullptr) {
+            isBeastGanonPhase = true;
+        }
+    }
+    const bool isDeathSword = targetName != nullptr && std::strcmp(targetName, "Death Sword") == 0;
+    const bool transformAllowed = isDeathSword || isBeastGanonPhase;
+
+    if (mode == BossRushMidnaMode::Fight && (wantSimpleBmgMenu || !transformAllowed)) {
+        if (s_midnaRoot3001 != mods::flow::kEnd) {
+            boss_rush_build_two_choice_prompt(graph, s_midnaRoot3001,
+                    s_bossRushMidnaBackOnlyMsg.id(), leaveEvent);
+        }
+        if (s_bossRushMidnaTopology.promptCount != 0) {
+            for (size_t i = 0; i < s_bossRushMidnaTopology.promptCount; ++i) {
+                if (!boss_rush_build_two_choice_prompt(graph, s_bossRushMidnaTopology.prompts[i].promptNode,
+                        s_bossRushMidnaBackOnlyMsg.id(), leaveEvent))
+                {
+                    return graph.commit();
+                }
+            }
+            return graph.commit();
+        }
+        if (s_midnaRoot3001 != mods::flow::kEnd) {
+            return graph.commit();
+        }
+        if (!boss_rush_build_two_choice_prompt(
+                graph, kMidnaPromptHumanNode, s_bossRushMidnaBackOnlyMsg.id(), leaveEvent) ||
+            !boss_rush_build_two_choice_prompt(
+                graph, kMidnaPromptWolfNode, s_bossRushMidnaBackOnlyMsg.id(), leaveEvent))
         {
             return graph.commit();
         }
+        return graph.commit();
     }
 
     const MessageId currentFormMsgId = (current_midna_transform_option() == MidnaTransformOption::Human) ?

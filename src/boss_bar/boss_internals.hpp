@@ -402,6 +402,11 @@ inline bool morpheel_tentacles_ready(fopAc_ac_c* a) {
     return true;
 }
 
+inline bool morpheel_is_phase2(fopAc_ac_c* a) {
+    const b_ob_class* o = reinterpret_cast<const b_ob_class*>(a);
+    return (o->mAction >= 100) || (o->mFishBattleMode != 0);
+}
+
 inline bool diababa_head_risen(fopAc_ac_c* bq) {
     return reinterpret_cast<const b_bq_class*>(bq)->mDisableDraw == 0;
 }
