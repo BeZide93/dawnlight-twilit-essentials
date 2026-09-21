@@ -3270,10 +3270,11 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
 
     if (s_bossRushModeActive && !s_exitingBossRush && !s_pendingInitialInventory &&
         s_pendingFightIndex == -1) {
-        if (dComIfGs_getMaxLife() != kChamberFullLife || dComIfGs_getLife() != kChamberFullLife) {
+        const u16 chamberFull = full_life_for_max(kChamberFullLife);
+        if (dComIfGs_getMaxLife() != kChamberFullLife || dComIfGs_getLife() != chamberFull) {
             dComIfGs_setMaxLife(static_cast<u8>(kChamberFullLife));
-            dComIfGs_setLife(kChamberFullLife);
-            sync_life_meter_instant(kChamberFullLife, kChamberFullLife);
+            dComIfGs_setLife(chamberFull);
+            sync_life_meter_instant(chamberFull, kChamberFullLife);
         }
     }
 }
@@ -4194,8 +4195,8 @@ static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_
 
     apply_boss_rush_loadout();
     reset_boss_rush_save_flags();
-    dComIfGs_setLife(dComIfGs_getMaxLife());
-    sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
+    dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
+    sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()), dComIfGs_getMaxLife());
     boss_rush_timer_begin_chain_run();
 
     commit_boss_rush_fight_warp(s_rushRunOrder[0], daAlink_getAlinkActorClass(),
@@ -4484,8 +4485,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 }
 
                 if (s_rushRunActive) {
-                    dComIfGs_setLife(dComIfGs_getMaxLife());
-                    sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
+                    dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
+                    sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()),
+                                            dComIfGs_getMaxLife());
                 }
 
                 if (g_configBossRushSeparateGanon && std::strcmp(boss.displayName, "Ganondorf") == 0) {
@@ -4989,8 +4991,9 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
                 }
             }
             if (dComIfGs_getLife() == 0) {
-                dComIfGs_setLife(dComIfGs_getMaxLife());
-                sync_life_meter_instant(dComIfGs_getMaxLife(), dComIfGs_getMaxLife());
+                dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
+                sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()),
+                                        dComIfGs_getMaxLife());
             }
         } else if (const char* curStage = dComIfGp_getStartStageName()) {
             const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());

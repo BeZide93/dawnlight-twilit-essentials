@@ -328,6 +328,10 @@ void damage_vignette_request_preview() {
     s_previewRequest.store(true, std::memory_order_release);
 }
 
+void damage_vignette_notify_life_set(u16 life) {
+    s_lastLife = life;
+}
+
 void shutdown_damage_vignette() {
     if (s_stageHook != 0 && s_gfx != nullptr) {
         s_gfx->unregister_stage_hook(s_ctx, s_stageHook);

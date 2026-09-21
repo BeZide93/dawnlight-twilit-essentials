@@ -1157,7 +1157,6 @@ static void ui_add_select(UiElementHandle pane, const char* label, ConfigVarHand
     svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
 }
 
-/* Integer number control without a clamp range. */
 static void ui_add_number(UiElementHandle pane, const char* label, ConfigVarHandle var,
                           const char* help_rml) {
     if (!svc_ui || var == 0) return;
@@ -1686,8 +1685,6 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     return MOD_OK;
 }
 
-/* While the Customization tab is visible it keeps this at 0 every frame; the
- * moment it stops (tab switch or window close) the bar previews are hidden. */
 static unsigned int s_customizationTabIdleFrames = 0;
 
 static ModResult customization_tab_update(ModContext*, void*, ModError*) {
@@ -2521,8 +2518,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
-    /* The Customization tab refreshes its idle counter every frame while it is
-     * the visible tab; once it stops, hide any bar previews it requested. */
     if (++s_customizationTabIdleFrames > 2) {
         stamina_bar_preview_cancel();
         boss_bar_preview_cancel();

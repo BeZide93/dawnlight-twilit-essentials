@@ -51,8 +51,6 @@ bool g_configBossBarEnabled = false;
 float g_configBossBarX = 0.0f;
 float g_configBossBarY = 0.0f;
 
-/* Live preview of the bar while its position is edited in the Customization
- * tab; counts down every update and is cancelled when the tab is left. */
 static constexpr int kBossBarPreviewFrames = 120;
 static int s_bossBarPreviewFrames = 0;
 
@@ -1537,8 +1535,6 @@ static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     const f32 barX = centreX - barW * 0.5f + g_configBossBarX;
     const f32 barY = topY + 41.0f + g_configBossBarY;
 
-    // Blend the scale anchor between the screen top-centre (0.0 = drifts with
-    // the HUD scale) and the bar's own top-centre (1.0 = scales in place).
     constexpr f32 kBossBarScaleAnchorBlendX = 1.0f;
     constexpr f32 kBossBarScaleAnchorBlendY = 1.0f;
     qa_hud_scale_begin(centreX + kBossBarScaleAnchorBlendX * ((barX + barW * 0.5f) - centreX),

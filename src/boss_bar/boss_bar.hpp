@@ -9,7 +9,6 @@ struct ConfigService;
 
 extern bool g_configBossBarEnabled;
 
-/* Screen-space offset of the boss bar from its default position. */
 extern float g_configBossBarX;
 extern float g_configBossBarY;
 
@@ -17,13 +16,9 @@ ModResult init_boss_bar(const HookService* hook_svc, ModError* error);
 void update_boss_bar(const LogService* log_svc, ModContext* mod_ctx);
 void shutdown_boss_bar();
 
-/* Shows the boss bar as a static preview at its configured position (used by
- * the Customization tab); hidden again via cancel. */
 void boss_bar_preview_request();
 void boss_bar_preview_cancel();
 
-/* Config vars bossBarX/bossBarY ([0] = X, [1] = Y), registered by
- * init_boss_bar_config. */
 extern ConfigVarHandle g_bossBarVars[2];
 ModResult init_boss_bar_config(const ConfigService* cfg, ModContext* ctx);
 

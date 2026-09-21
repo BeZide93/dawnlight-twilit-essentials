@@ -211,8 +211,6 @@ f32 cost_scaled(f32 base_cost, int pct) {
 }
 }
 
-/* Live preview of the meter while its position is edited in the Customization
- * tab; counts down every update and is cancelled when the tab is left. */
 static constexpr int kStaminaBarPreviewFrames = 120;
 static int s_staminaBarPreviewFrames = 0;
 
@@ -571,10 +569,6 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
 
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
     if (graf) graf->setup2D();
-    // Blend the scale anchor between the layout init position (0.0 = the old
-    // full drift) and the bar's actually drawn position (1.0 = pinned).
-    // Measured after each draw, because the init position sits far from the
-    // visible bar and the bar X/Y config offsets are usually zero.
     constexpr f32 kStaminaScaleAnchorBlendX = 0.25f;
     constexpr f32 kStaminaScaleAnchorBlendY = 0.55f;
     static f32 s_drawnX = 0.0f, s_drawnY = 0.0f;

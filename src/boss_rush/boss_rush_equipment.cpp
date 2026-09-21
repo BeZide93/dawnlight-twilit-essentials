@@ -10,11 +10,14 @@
 #include "d/d_meter2_info.h"
 #include "d/d_meter_HIO.h"
 
+#include "../general/damage_vignette.hpp"
+
 #include <cstring>
 
 bool g_configBossRushVanillaGear = false;
 
 void sync_life_meter_instant(u16 life, u16 maxLife) {
+    damage_vignette_notify_life_set(life);
     dMeter2_c* meter = g_meter2_info.getMeterClass();
     if (meter == nullptr) return;
     meter->mMaxLife = maxLife;
@@ -27,6 +30,10 @@ void sync_life_meter_instant(u16 life, u16 maxLife) {
         draw->drawLife(meter->mMaxLife, displayLife, g_drawHIO.mLifeGaugePosX,
                        g_drawHIO.mLifeGaugePosY);
     }
+}
+
+u16 full_life_for_max(u16 maxLife) {
+    return static_cast<u16>(maxLife / 5 * 4);
 }
 
 namespace {
@@ -101,8 +108,8 @@ void apply_boss_rush_equipment_restriction(const BossGalleryEntry& boss) {
 
     const u8 maxLife = static_cast<u8>(rule->hearts * 5);
     dComIfGs_setMaxLife(maxLife);
-    dComIfGs_setLife(maxLife);
-    sync_life_meter_instant(maxLife, maxLife);
+    dComIfGs_setLife(full_life_for_max(maxLife));
+    sync_life_meter_instant(full_life_for_max(maxLife), maxLife);
 
     const u32 have = rule->items;
     keep_or_strip(SLOT_0,  have, IT_BOOM);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "mods/api.h"
 #include "mods/service.hpp"
 #include "mods/svc/gfx.h"
@@ -15,3 +17,4 @@ void update_damage_vignette(const LogService* log_svc, ModContext* mod_ctx);
 void shutdown_damage_vignette();
 
 void damage_vignette_request_preview();
+void damage_vignette_notify_life_set(std::uint16_t life);
