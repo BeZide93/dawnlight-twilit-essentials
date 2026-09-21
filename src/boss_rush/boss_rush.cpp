@@ -66,6 +66,7 @@ extern const SaveService* svc_save;
 #include "SSystem/SComponent/c_math.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
+#include "m_Do/m_Do_audio.h"
 #include "dusk/config_var.hpp"
 #include "../general/faster_transitions.hpp"
 
@@ -1077,6 +1078,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     boss_rush_timer_reset_run();
 
     mDoGph_gInf_c::fadeOut(0.0f);
+    Z2GetAudioMgr()->subBgmStop();
     if (reason == nullptr || std::strcmp(reason, "Died") != 0) {
         Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     }
@@ -4299,6 +4301,7 @@ static void apply_pending_gear_save_if_covered() {
         if (g_configBossRushVanillaGear) {
             apply_boss_rush_loadout(false);
             reset_boss_rush_save_flags();
+            clear_boss_dungeon_clear_flags(s_pendingGearBoss->stage);
             apply_boss_rush_equipment_restriction(*s_pendingGearBoss);
         }
         if (std::strcmp(s_pendingGearBoss->displayName, "Morpheel") == 0) {
@@ -4511,6 +4514,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
                 if (g_configBossRushVanillaGear) {
                     reset_boss_rush_save_flags();
+                    clear_boss_dungeon_clear_flags(boss.stage);
                     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
                     clear_boss_dungeon_clear_flags(boss.stage);
                     if (std::strcmp(boss.stage, "D_MN09B") == 0) {
@@ -4585,6 +4589,14 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_pendingWarpSawEnableNextStage = false;
             reset_boss_rush_save_flags();
             dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+            {
+                char spot[8];
+                std::strncpy(spot, kBossRushChamberStage, sizeof(spot) - 1);
+                spot[sizeof(spot) - 1] = '\0';
+                mDoAud_setSceneName(spot, kBossRushChamberRoom, kBossRushChamberLayer);
+                Z2GetAudioMgr()->bgmStart(Z2BGM_DUNGEON_LV6, 0, 0);
+                Z2GetAudioMgr()->unMuteSceneBgm(0);
+            }
             if (g_configBossRushSuggestedItems) {
                 clear_all_select_items();
                 dMeter2Info_setCloth(dItemNo_WEAR_KOKIRI_e, false);
