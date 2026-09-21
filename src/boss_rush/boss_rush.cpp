@@ -2763,11 +2763,13 @@ static void update_horsebackganon_instant_fight() {
         s_horsebackRetryLanding = false;
     }
 
+    if (dMsgObject_isTalkNowCheck()) {
+        dMsgObject_onKillMessageFlag();
+    }
+
     if (s_entrySkipFrames > 0) {
         --s_entrySkipFrames;
-        if (dMsgObject_isTalkNowCheck()) {
-            dMsgObject_onKillMessageFlag();
-        } else if (dComIfGp_event_runCheck()) {
+        if (dComIfGp_event_runCheck()) {
             dComIfGp_event_reset();
             daAlink_c* link = daAlink_getAlinkActorClass();
             if (link != nullptr) {
@@ -3417,7 +3419,7 @@ static bool s_bossRushDeathHandledTriggered = false;
 
 static HookAction on_proc_co_dead_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
-    if (link == nullptr || link->mMsgClassID != 0 || retval == nullptr) {
+    if (link == nullptr || retval == nullptr) {
         return HOOK_CONTINUE;
     }
     if (!is_boss_rush_active()) {
@@ -4472,7 +4474,10 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         const bool roomMatchesLanding = pendingTargetIsChamber
             ? is_in_chamber_room()
             : (!is_in_chamber_room() && curRoom >= 0 &&
-               boss_rush_room_matches_target(g_bossGalleryTable[s_pendingFightIndex], curRoom));
+               (isGanonGauntlet
+                    ? (curRoom == 50 || curRoom == 51)
+                    : boss_rush_room_matches_target(g_bossGalleryTable[s_pendingFightIndex],
+                                                    curRoom)));
 
         const bool transitionFinished = !fopOvlpM_IsPeek() &&
                                         (faderStatus == JUTFader::Wait || faderStatus == JUTFader::FadeIn);
