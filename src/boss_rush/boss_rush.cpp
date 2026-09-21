@@ -3139,18 +3139,26 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
         return HOOK_CONTINUE;
     }
 
-    if (fight_starts_with_sword_drawn() && !is_in_boss_rush_chamber() && !link->checkWolf()) {
-        JUTFader* fader = mDoGph_gInf_c::getFader();
-        const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
-        const bool isBlackScreen = (faderStatus == JUTFader::None || fopOvlpM_IsPeek());
-        if (isBlackScreen) {
-            if (link->mEquipItem == 0x103) {
-                s_swordDrawnLatched = true;
-            } else if (!s_swordDrawnLatched) {
-                link->swordEquip(TRUE);
-                link->setSwordModel();
-                s_swordDrawnLatched = true;
-            }
+    const bool inArena = !is_in_boss_rush_chamber();
+    JUTFader* fader = mDoGph_gInf_c::getFader();
+    const s32 faderStatus = (fader != nullptr) ? fader->getStatus() : -1;
+    const bool isBlackScreen = (faderStatus == JUTFader::None || fopOvlpM_IsPeek());
+
+    if (inArena && fight_starts_with_sword_drawn() && !link->checkWolf() && isBlackScreen) {
+        if (link->mEquipItem == 0x103) {
+            s_swordDrawnLatched = true;
+        } else if (!s_swordDrawnLatched) {
+            link->swordEquip(TRUE);
+            link->setSwordModel();
+            s_swordDrawnLatched = true;
+        }
+    }
+
+    if (inArena && isBlackScreen && !link->checkEquipHeavyBoots()) {
+        const int t = boss_rush_target_index();
+        if (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount &&
+            std::strcmp(g_bossGalleryTable[t].displayName, "Morpheel") == 0) {
+            link->setHeavyBoots(1);
         }
     }
 
@@ -4025,11 +4033,9 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         }
     }
 
-    if (g_configBossRushVanillaGear) {
-        s_pendingGearSaveApply = true;
-        s_pendingGearSaveKind = 1;
-        s_pendingGearBoss = &boss;
-    }
+    s_pendingGearSaveApply = true;
+    s_pendingGearSaveKind = 1;
+    s_pendingGearBoss = &boss;
 
     if (link != nullptr) {
         link->speed.set(0.0f, 0.0f, 0.0f);
@@ -4043,12 +4049,6 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
                 dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
                 dComIfGp_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
             }
-        } else {
-            dMeter2Info_setCloth(dItemNo_WEAR_ZORA_e, false);
-            dComIfGs_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
-            dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
-            assign_select_item(SELECT_ITEM_X, SLOT_3);
-            assign_select_item(SELECT_ITEM_Y, SLOT_10);
         }
     }
     s_sawSwordDrawnAtCommit = (link != nullptr && link->checkSwordDraw());
@@ -4296,9 +4296,18 @@ static void apply_pending_gear_save_if_covered() {
     }
 
     if (s_pendingGearSaveKind == 1 && s_pendingGearBoss != nullptr) {
-        apply_boss_rush_loadout(false);
-        reset_boss_rush_save_flags();
-        apply_boss_rush_equipment_restriction(*s_pendingGearBoss);
+        if (g_configBossRushVanillaGear) {
+            apply_boss_rush_loadout(false);
+            reset_boss_rush_save_flags();
+            apply_boss_rush_equipment_restriction(*s_pendingGearBoss);
+        }
+        if (std::strcmp(s_pendingGearBoss->displayName, "Morpheel") == 0) {
+            dMeter2Info_setCloth(dItemNo_WEAR_ZORA_e, false);
+            dComIfGs_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+            dComIfGp_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
+            assign_select_item(SELECT_ITEM_X, SLOT_3);
+            assign_select_item(SELECT_ITEM_Y, SLOT_10);
+        }
     } else if (s_pendingGearSaveKind == 2) {
         clear_all_select_items();
         dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
