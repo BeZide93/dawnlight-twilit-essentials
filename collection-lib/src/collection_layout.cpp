@@ -784,8 +784,6 @@ void apply_collect_shifts(dMenu_Collect2D_c* collect2D) {
     collect2D->field_0x22d[5][0] = 1;
     collect2D->field_0x22d[6][0] = 1;
 
-    // Ordon Shield (3,1): selectable only with starter-equip on. Off + "keep
-    // ordon shield" leaves it greyed and unselectable; off + no keep removes it.
     collect2D->field_0x22d[3][1] = (cl_column_occupied(1, 1) || cl_column_occupied(3, 1)) ? 1 : 0;
     collect2D->field_0x22d[4][1] = midCell;
     collect2D->field_0x22d[5][1] = 1;

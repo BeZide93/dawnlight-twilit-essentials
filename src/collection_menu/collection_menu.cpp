@@ -91,6 +91,8 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
                                ModError* error) {
     sync_collection_ordon_hero_page();
 
+    collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
+
     collectionlib_set_register_callback([]() {
         if (g_configCollectionStarterEquip) {
             add_vanilla_sword_slot({

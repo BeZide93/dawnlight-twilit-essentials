@@ -128,6 +128,8 @@ u8 cl_vanilla_slot_item(int index);
 void collectionlib_run_slot_registration();
 
 // --- internal (used by the layout code) ---
+void collectionlib_set_unequip_policy(bool (*fn)());
+void collectionlib_set_keep_ordon_shield_policy(bool (*fn)());
 bool cl_unequip_enabled();
 bool cl_keep_ordon_shield_enabled();
 // Re-apply the consumer's recorded slot moves onto the freshly built screen.
@@ -443,11 +445,8 @@ inline bool is_collect_item_unlocked(u8 x, u8 y) {
         u8 eqShield = custom_equip_active(CE_SHIELD) ? dItemNo_NONE_e : dComIfGs_getSelectEquipShield();
         if (x == 3) {
             if (!ordon_shield_slot_present()) return false;
-            bool hasEverHadOrdonShield = dComIfGs_isCollectShield(0) ||
-                                         dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) ||
-                                         (eqShield == dItemNo_WOOD_SHIELD_e);
             if (cl_keep_ordon_shield_enabled()) {
-                return hasEverHadOrdonShield;
+                return true;
             }
             return dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) ||
                    (eqShield == dItemNo_WOOD_SHIELD_e);

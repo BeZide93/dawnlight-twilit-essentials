@@ -2215,7 +2215,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descKeepShield = CONFIG_VAR_DESC_INIT;
         descKeepShield.name = "collectionKeepOrdonShield";
         descKeepShield.type = CONFIG_VAR_BOOL;
-        descKeepShield.default_bool = true;
+        descKeepShield.default_bool = false;
         if (svc_config->register_var(mod_ctx, &descKeepShield, &s_varCollectionKeepOrdonShield) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varCollectionKeepOrdonShield, &g_configCollectionKeepOrdonShield);
             svc_config->subscribe(mod_ctx, s_varCollectionKeepOrdonShield, on_collection_keep_ordon_shield_changed, nullptr, nullptr);
