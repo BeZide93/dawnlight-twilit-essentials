@@ -457,8 +457,38 @@ static bool discover_midna_flow_topology() {
         return false;
     }
 
+    static const void* s_lastSeenBmg = nullptr;
+    if (bmg != s_lastSeenBmg) {
+        boss_rush_debug_log("[midna] bmg=%p simple=%d prompts=%u root3001=%u horse=%p/%u",
+                            bmg, (int)is_boss_rush_midna_simple_bmg(),
+                            (unsigned)s_bossRushMidnaTopology.promptCount,
+                            (unsigned)s_midnaRoot3001, s_bossRushMidnaHorseResource,
+                            (unsigned)s_bossRushMidnaHorseNextNode);
+        s_lastSeenBmg = bmg;
+    }
+
     if (is_boss_rush_midna_simple_bmg() && s_bossRushMidnaTopology.promptCount != 0 &&
         s_midnaRoot3001 != mods::flow::kEnd) {
+        MidnaBmgView view;
+        if (parse_midna_bmg_view(bmg, view)) {
+            uint16_t node = bmg_flow_init_node(bmg, 0xbb9);
+            if (node == mods::flow::kEnd) {
+                const uint8_t* triggerNode = bmg_node(view, kMidnaHorseTalkTriggerNode);
+                if (triggerNode != nullptr && triggerNode[0] == 1) {
+                    node = read_be16(triggerNode + 4);
+                }
+            }
+            if (node != mods::flow::kEnd &&
+                (s_bossRushMidnaHorseResource != bmg || s_bossRushMidnaHorseNextNode != node)) {
+                s_bossRushMidnaHorseResource = bmg;
+                s_bossRushMidnaHorseNextNode = node;
+                s_bossRushMidnaTopology.version++;
+                boss_rush_debug_log("[midna] horse flow node=%u recorded (bmg=%p)",
+                                    (unsigned)node, bmg);
+            }
+        } else {
+            boss_rush_debug_log("[midna] simple bmg=%p parse FAILED", bmg);
+        }
         return false;
     }
 
@@ -787,6 +817,14 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
     const bool transformAllowed = isDeathSword || isBeastGanonPhase;
 
     if (mode == BossRushMidnaMode::Fight && (wantSimpleBmgMenu || !transformAllowed)) {
+        if (wantSimpleBmgMenu && s_bossRushMidnaHorseNextNode != mods::flow::kEnd) {
+            const bool ok = boss_rush_build_two_choice_prompt(
+                graph, s_bossRushMidnaHorseNextNode,
+                s_bossRushMidnaBackOnlyMsg.id(), leaveEvent);
+            boss_rush_debug_log("[midna] horse graph node=%u built=%d",
+                                (unsigned)s_bossRushMidnaHorseNextNode, (int)ok);
+            return graph.commit();
+        }
         if (s_midnaRoot3001 != mods::flow::kEnd) {
             boss_rush_build_two_choice_prompt(graph, s_midnaRoot3001,
                     s_bossRushMidnaBackOnlyMsg.id(), leaveEvent);
@@ -1034,6 +1072,14 @@ void refresh_boss_rush_midna_flow() {
         }
     }
 
+    static BossRushMidnaMode s_lastWantMode = BossRushMidnaMode::None;
+    if (wantMode != s_lastWantMode) {
+        boss_rush_debug_log("[midna] wantMode %d -> %d (fightingHere=%d chamber=%d)",
+                            (int)s_lastWantMode, (int)wantMode,
+                            (int)boss_rush_is_fighting_here(), (int)is_in_boss_rush_chamber());
+        s_lastWantMode = wantMode;
+    }
+
     const MidnaTransformOption transformOption = (wantMode != BossRushMidnaMode::None) ?
         current_midna_transform_option() : MidnaTransformOption::Unknown;
     const bool horseback = wantMode == BossRushMidnaMode::Fight && is_boss_rush_midna_simple_bmg();
@@ -1068,5 +1114,14 @@ void refresh_boss_rush_midna_flow() {
         s_bossRushMidnaTopologyVersion = s_bossRushMidnaTopology.version;
         s_bossRushMidnaTransformOption = transformOption;
         s_bossRushMidnaHorseback = horseback;
+        boss_rush_debug_log("[midna] graph built mode=%d horse=%d horseNode=%u ver=%u "
+                            "prompts=%u root3001=%u",
+                            (int)wantMode, (int)horseback,
+                            (unsigned)s_bossRushMidnaHorseNextNode,
+                            (unsigned)s_bossRushMidnaTopology.version,
+                            (unsigned)s_bossRushMidnaTopology.promptCount,
+                            (unsigned)s_midnaRoot3001);
+    } else {
+        boss_rush_debug_log("[midna] graph build FAILED mode=%d", (int)wantMode);
     }
 }

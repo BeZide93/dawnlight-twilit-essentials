@@ -32,3 +32,10 @@ bool boss_rush_timer_chain_best_cs(unsigned int* outCs);
 void boss_rush_timer_commit_chain_total();
 void boss_rush_timer_init_chain_best(const ConfigService* config_svc, ModContext* mod_ctx,
                                      ConfigVarHandle var);
+
+void boss_rush_timer_begin_all_phases();
+void boss_rush_timer_end_all_phases();
+bool boss_rush_timer_all_phases_active();
+void boss_rush_timer_init_all_phases_best(const ConfigService* config_svc, ModContext* mod_ctx,
+                                        ConfigVarHandle var);
+bool boss_rush_timer_all_phases_best_cs(unsigned int* outCs);

@@ -63,10 +63,14 @@
 #include "d/d_kankyo.h"
 #include "d/d_camera.h"
 #include "d/d_s_play.h"
+#include "d/d_meter2_draw.h"
 #include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_ext.h"
 #include "dusk/config_var.hpp"
+#include "JSystem/J2DGraph/J2DOrthoGraph.h"
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/JUtility/TColor.h"
 #include "JSystem/JUtility/JUTFont.h"
 
 #include <cstdint>
@@ -81,6 +85,66 @@ DEFINE_HOOK(&daTitle_c::fastLogoDispInit, TitleFastLogoDispInitHook);
 DEFINE_HOOK(&daTitle_c::fastLogoDisp, TitleFastLogoDispExecuteHook);
 DEFINE_HOOK(&mDoCPd_c::read, FreeCamPadReadHook);
 DEFINE_HOOK(&dCamera_c::executeDebugFlyCam, FreeCamFlyCamHook);
+DEFINE_HOOK(&dMeter2Draw_c::draw, DebugCoordsMeterDrawHook);
+
+static void draw_debug_label(const char* text, f32 x, f32 y, f32 charW, f32 charH,
+                             JUtility::TColor top, JUtility::TColor bottom) {
+    JUTFont* font = mDoExt_getSubFont();
+    if (!font) font = mDoExt_getMesgFont();
+    if (!font) return;
+
+    font->setGX();
+
+    const f32 c = 1.6f;
+    const f32 d = 1.1f;
+    const f32 kOff[8][2] = {
+        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
+        { d, d}, {d, -d}, {-d, d}, {-d, -d},
+    };
+    font->setCharColor(JUtility::TColor(0, 0, 0, 255));
+    for (const auto& o : kOff) {
+        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
+    }
+
+    font->setGradColor(top, bottom);
+    font->drawString_scale(x, y, charW, charH, text, true);
+}
+
+static void draw_debug_coords_overlay() {
+    const f32 boxX = 16.0f;
+    const f32 boxY = 130.0f;
+    const f32 boxW = 210.0f;
+    const f32 boxH = 42.0f;
+    J2DFillBox(boxX, boxY, boxW, boxH, JUtility::TColor(12, 16, 24, 190));
+    J2DFillBox(boxX, boxY, 3.0f, boxH, JUtility::TColor(240, 195, 75, 250));
+
+    const f32 textX = boxX + 8.0f;
+    const f32 charW = 11.0f;
+    const f32 charH = 14.0f;
+    const f32 lineH = 18.0f;
+    f32 curY = boxY + 6.0f;
+
+    char buf[64];
+
+    const char* stage = dComIfGp_getStartStageName();
+    const int room = dComIfGp_roomControl_getStayNo();
+    std::snprintf(buf, sizeof(buf), "Stg: %s (R%d)", stage ? stage : "-", room);
+    draw_debug_label(buf, textX, curY, charW, charH,
+                     JUtility::TColor(180, 220, 255, 255), JUtility::TColor(130, 170, 220, 255));
+    curY += lineH;
+
+    const int layer = dComIfG_play_c::getLayerNo(0);
+    std::snprintf(buf, sizeof(buf), "Lyr: %d", layer);
+    draw_debug_label(buf, textX, curY, charW, charH,
+                     JUtility::TColor(180, 255, 190, 255), JUtility::TColor(130, 220, 150, 255));
+
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port) port->setup2D();
+}
+
+static void on_debug_coords_draw_post(ModContext*, void*, void*, void*) {
+    draw_debug_coords_overlay();
+}
 
 static bool s_titleModActive = true;
 
@@ -2485,6 +2549,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (svc_hook) {
         mods::hook::add_post<TitleFastLogoDispInitHook>(svc_hook, on_title_fast_logo_disp_init_post);
         mods::hook::add_pre<TitleFastLogoDispExecuteHook>(svc_hook, on_title_fast_logo_disp_pre);
+        mods::hook::add_post<DebugCoordsMeterDrawHook>(svc_hook, on_debug_coords_draw_post);
     }
 
     s_generalInitialized = init_general(svc_hook, error) == MOD_OK;

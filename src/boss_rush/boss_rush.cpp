@@ -1053,6 +1053,16 @@ static void apply_boss_rush_loadout(bool i_refreshLink = true) {
 
 }
 
+void boss_rush_debug_log(const char* fmt, ...) {
+    if (s_logSvc == nullptr || s_modCtx == nullptr) return;
+    va_list ap;
+    char msg[256];
+    va_start(ap, fmt);
+    std::vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    s_logSvc->info(s_modCtx, msg);
+}
+
 static int s_recordReturnFrames = -1;
 static const char* s_recordReturnReason = nullptr;
 
@@ -1076,6 +1086,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
 
 
     boss_rush_timer_reset_run();
+    boss_rush_timer_end_all_phases();
 
     mDoGph_gInf_c::fadeOut(0.0f);
     Z2GetAudioMgr()->subBgmStop();
@@ -1156,6 +1167,7 @@ static int s_spuriousReloadBlockLogTimer = 0;
 
 static bool boss_rush_should_block_spurious_reload() {
     if (!s_bossRushModeActive) return false;
+    if (boss_rush_timer_all_phases_active()) return false;
     if (s_pendingFightIndex != -1 || s_returningToChamber || s_exitingBossRush ||
         s_dungeonClearWarpPending) {
         return false;
@@ -2763,13 +2775,11 @@ static void update_horsebackganon_instant_fight() {
         s_horsebackRetryLanding = false;
     }
 
-    if (dMsgObject_isTalkNowCheck()) {
-        dMsgObject_onKillMessageFlag();
-    }
-
     if (s_entrySkipFrames > 0) {
         --s_entrySkipFrames;
-        if (dComIfGp_event_runCheck()) {
+        if (dMsgObject_isTalkNowCheck()) {
+            dMsgObject_onKillMessageFlag();
+        } else if (dComIfGp_event_runCheck()) {
             dComIfGp_event_reset();
             daAlink_c* link = daAlink_getAlinkActorClass();
             if (link != nullptr) {
@@ -3103,7 +3113,8 @@ static bool boss_starts_with_sword_drawn(const BossGalleryEntry& boss) {
     if (std::strcmp(n, "Deku Toad") == 0) return true;
     if (std::strcmp(n, "Darkhammer") == 0) return true;
     if (std::strcmp(n, "Darknut") == 0) return true;
-    if (std::strcmp(n, "Ganondorf") == 0) return dComIfGp_getHorseActor() == nullptr;
+    if (std::strcmp(n, "Puppet Zelda") == 0) return true;
+    if (std::strcmp(n, "Ganondorf") == 0) return true;
     return false;
 }
 
@@ -3165,6 +3176,37 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
         if (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount &&
             std::strcmp(g_bossGalleryTable[t].displayName, "Morpheel") == 0) {
             link->setHeavyBoots(1);
+        }
+    }
+
+    static bool s_zeldaPhaseSwordLatched = false;
+    static int s_zeldaPhaseFrames = -1;
+    {
+        fopAc_ac_c* hzelda = fopAcM_SearchByName(fpcNm_E_HZELDA_e);
+        if (hzelda == nullptr) {
+            s_zeldaPhaseSwordLatched = false;
+            s_zeldaPhaseFrames = -1;
+        } else if (inArena && !s_zeldaPhaseSwordLatched && !link->checkWolf()) {
+            const int t = boss_rush_target_index();
+            const bool zeldaFight =
+                (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount &&
+                 (!g_configBossRushSeparateGanon
+                      ? std::strcmp(g_bossGalleryTable[t].displayName, "Ganondorf") == 0
+                      : std::strcmp(g_bossGalleryTable[t].displayName, "Puppet Zelda") == 0));
+            if (zeldaFight) {
+                if (s_zeldaPhaseFrames < 0) {
+                    s_zeldaPhaseFrames = 0;
+                }
+                const bool quiet = !link->checkEventRun() && !dComIfGp_event_runCheck();
+                if (quiet && s_zeldaPhaseFrames <= 600 && link->mEquipItem != 0x103) {
+                    link->swordEquip(TRUE);
+                    link->setSwordModel();
+                }
+                if (quiet && link->mEquipItem == 0x103) {
+                    s_zeldaPhaseSwordLatched = true;
+                }
+                ++s_zeldaPhaseFrames;
+            }
         }
     }
 
@@ -3297,16 +3339,14 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
 }
 
 static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) {
-    if (daAlink_getAlinkActorClass() != nullptr) {
-        draw_boss_rush_fight_timer();
-    }
-
-    if (is_ui_or_menu_active()) {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr) {
         return;
     }
 
-    daAlink_c* link = daAlink_getAlinkActorClass();
-    if (link == nullptr) {
+    draw_boss_rush_fight_timer();
+
+    if (is_ui_or_menu_active()) {
         return;
     }
 
@@ -3316,7 +3356,6 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
     }
 
     draw_boss_rush_texts(kBossChamberFloorY);
-    //draw_boss_rush_debug_coords(link);
 }
 
 static bool link_near_gallery_statue() {
@@ -4133,6 +4172,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         std::strcmp(boss.displayName, "Deku Toad") == 0 ||
         std::strcmp(boss.displayName, "Darkhammer") == 0 ||
         std::strcmp(boss.displayName, "Darknut") == 0 ||
+        std::strcmp(boss.displayName, "Puppet Zelda") == 0 ||
         std::strcmp(boss.displayName, "Ganondorf") == 0) {
         lastMode |= 0x28000000;
     }
@@ -4513,6 +4553,10 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_chamberCamArmFrames = 0;
             s_chamberSpawnFrames = 0;
             unload_boss_rush_models();
+
+            if (isGanonGauntlet) {
+                boss_rush_timer_begin_all_phases();
+            }
 
             if (s_activeFightIndex >= 0 && s_activeFightIndex < static_cast<int>(g_bossGalleryCount)) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];

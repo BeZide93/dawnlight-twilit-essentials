@@ -993,53 +993,17 @@ static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
   return true;
 }
 
-constexpr f32 kWipeYQuiverLantern = 4.6f - 0.48f * 5.1f;
-constexpr f32 kWipeYBow           = 4.6f - 0.65f * 5.1f;
-
-static f32 chase_scale(f32 value, f32 target, f32 rate) {
-  value += (target - value) * rate;
-  const f32 diff = value - target;
-  if (diff > -0.01f && diff < 0.01f) {
-    value = target;
-  }
-  return value;
-}
-
-static void gear_warp_step(GearWarpState &gear, f32 wipeY, f32 gearY,
-                           bool arriving, bool inWarp) {
-  if (!inWarp) {
-    gear.visible = true;
-    gear.scale = chase_scale(gear.scale, 1.0f, 0.3f);
-    return;
-  }
-
-  if (arriving) {
-    gear.visible = wipeY > gearY;
-    gear.scale = chase_scale(gear.scale, gear.visible ? 1.0f : 0.0f, 0.22f);
-  } else {
-    gear.visible = wipeY > gearY + 0.35f;
-    gear.scale = chase_scale(gear.scale, gear.visible ? 1.0f : 0.0f, 0.3f);
-  }
+static void gear_warp_step(GearWarpState &gear, bool wantShow) {
+  gear.scale = wantShow ? 1.0f : 0.0f;
+  gear.visible = wantShow;
 }
 
 static void sync_gear_to_warp(daAlink_c *alink, bool &bow, bool &quiver,
                               bool &lantern) {
-  static f32 s_prevWipeY = 4.6f;
-  const bool inWarp = alink != nullptr && alink->mProcID == daAlink_c::PROC_WARP;
-
-  f32 wipeY = 4.6f;
-  bool arriving = true;
-  if (inWarp) {
-    wipeY = alink->field_0x347c;
-    arriving = wipeY >= s_prevWipeY;
-    s_prevWipeY = wipeY;
-  } else {
-    s_prevWipeY = 4.6f;
-  }
-
-  gear_warp_step(s_bowWarp, wipeY, kWipeYBow, arriving, inWarp);
-  gear_warp_step(s_quiverWarp, wipeY, kWipeYQuiverLantern, arriving, inWarp);
-  gear_warp_step(s_lanternWarp, wipeY, kWipeYQuiverLantern, arriving, inWarp);
+  (void)alink;
+  gear_warp_step(s_bowWarp, bow);
+  gear_warp_step(s_quiverWarp, quiver);
+  gear_warp_step(s_lanternWarp, lantern);
 
   if (bow && !s_bowWarp.visible) bow = false;
   if (quiver && !s_quiverWarp.visible) quiver = false;
@@ -1209,9 +1173,9 @@ static void invalidateEquipmentModels() {
     s_gearShaderCapable[slot] = false;
     s_gearModelWarpOn[slot] = false;
   }
-  s_bowWarp = {true, 1.0f};
-  s_quiverWarp = {true, 1.0f};
-  s_lanternWarp = {true, 1.0f};
+  s_bowWarp = {true, 0.0f};
+  s_quiverWarp = {true, 0.0f};
+  s_lanternWarp = {true, 0.0f};
 }
 
 static bool syncEquipmentModelCache(daAlink_c *alink) {
@@ -1310,25 +1274,18 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
     return;
   }
 
-  if (alink->checkPlayerNoDraw()) {
-    return;
-  }
+  // Conditions that used to hard-hide the gear now just drive the fade; the
+  // gear keeps rendering (shrinking) until its scale reaches zero.
+  const bool cacheOk = syncEquipmentModelCache(alink);
+  const bool playerDrawn =
+      !alink->checkPlayerNoDraw() && !isInWarpVisual(alink);
+  const bool sceneStable = isSceneLoadStable();
 
-  if (isInWarpVisual(alink)) {
-    return;
-  }
-
-  if (!syncEquipmentModelCache(alink)) {
-    return;
-  }
-
-  if (!isSceneLoadStable()) {
-    return;
-  }
-
-  bool shouldShowBow = g_configVisibleEquipShowBow && checkShouldShowBow();
+  bool shouldShowBow = cacheOk && playerDrawn && sceneStable &&
+                       g_configVisibleEquipShowBow && checkShouldShowBow();
   bool shouldShowQuiver = shouldShowBow;
-  bool shouldShowLantern = g_configVisibleEquipShowLantern && checkShouldShowLantern();
+  bool shouldShowLantern = cacheOk && playerDrawn && sceneStable &&
+                           g_configVisibleEquipShowLantern && checkShouldShowLantern();
 
   if (shouldShowBow) {
     if (s_customBowModel == nullptr) {
@@ -1396,7 +1353,11 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
   }
 
   bool isBowInHand = alink->checkBowAndSlingItem(alink->mEquipItem) ||
-                   (alink->mEquipItem == dItemNo_BOW_e);
+                     (alink->mEquipItem == dItemNo_BOW_e);
+
+  if (!cacheOk || !playerDrawn) {
+    return;
+  }
 
   const dKy_tevstr_c &tev = alink->tevStr;
   GXColor fogCol;

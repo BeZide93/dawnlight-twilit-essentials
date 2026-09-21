@@ -44,12 +44,25 @@ bool s_haveLastTick = false;
 bool s_chainRun = false;
 unsigned long long s_chainCheckpointMs = 0;
 
+bool s_allPhasesRun = false;
+
 const ConfigService* s_chainCfg = nullptr;
 ModContext*          s_chainCtx = nullptr;
 ConfigVarHandle      s_chainVar = 0;
 u32                  s_chainBestCs = 0;
 
+const ConfigService* s_allPhasesCfg = nullptr;
+ModContext*          s_allPhasesCtx = nullptr;
+ConfigVarHandle      s_allPhasesVar = 0;
+u32                  s_allPhasesBestCs = 0;
+
 inline u32 cs_now() { return static_cast<u32>(s_elapsedMs / 10ull); }
+
+bool all_phases_final_phase() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr && std::strcmp(stage, "D_MN09B") == 0 &&
+           g_dComIfG_gameInfo.info.getDan().isSwitch(1);
+}
 
 void load_from_string(const char* s) {
     for (u32& b : s_best) b = 0;
@@ -98,6 +111,20 @@ void finalize() {
     const unsigned long long fightMs = s_chainRun ? (s_elapsedMs - s_chainCheckpointMs)
                                                   : s_elapsedMs;
     s_finalCs = static_cast<u32>(fightMs / 10ull);
+
+    if (s_allPhasesRun) {
+        s_isRecord = (s_allPhasesBestCs == 0) || (s_finalCs < s_allPhasesBestCs);
+        if (s_isRecord) {
+            s_allPhasesBestCs = s_finalCs;
+            if (s_allPhasesCfg != nullptr && s_allPhasesCtx != nullptr && s_allPhasesVar != 0) {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%u", s_finalCs);
+                s_allPhasesCfg->set_string(s_allPhasesCtx, s_allPhasesVar, buf);
+            }
+            Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        return;
+    }
 
     const u32 prev = (s_idx >= 0 && s_idx < static_cast<int>(kMaxBossGalleryEntries))
                          ? s_best[s_idx] : 0;
@@ -184,7 +211,7 @@ void boss_rush_timer_update() {
         bool engaged = true;
         if (boss_bar_current_fight_state(&lbl, engaged) && engaged) {
             s_state = RUNNING;
-            if (s_chainRun) {
+            if (s_chainRun || s_allPhasesRun) {
                 s_chainCheckpointMs = s_elapsedMs;
             } else {
                 s_elapsedMs = 0;
@@ -198,6 +225,12 @@ void boss_rush_timer_update() {
     }
     case RUNNING: {
         if (boss_bar_boss_defeated_now()) {
+            if (s_allPhasesRun && !all_phases_final_phase()) {
+                s_state = IDLE;
+                s_provisionalMs = 0;
+                s_haveLastTick = false;
+                break;
+            }
             finalize();
             break;
         }
@@ -264,10 +297,10 @@ bool boss_rush_timer_active_cs(unsigned int* outCs) {
     if (!g_configBossRushTimer) return false;
     if (s_state == RUNNING)  { if (outCs) *outCs = cs_now(); return true; }
     if (s_state == FINISHED) {
-        if (outCs) *outCs = s_chainRun ? cs_now() : s_finalCs;
+        if (outCs) *outCs = (s_chainRun && !s_allPhasesRun) ? cs_now() : s_finalCs;
         return true;
     }
-    if (s_chainRun && s_elapsedMs > 0) {
+    if ((s_chainRun || s_allPhasesRun) && s_elapsedMs > 0) {
         if (outCs) *outCs = cs_now();
         return true;
     }
@@ -296,6 +329,10 @@ bool boss_rush_timer_last_was_record() {
 void boss_rush_timer_clear_best() {
     for (u32& b : s_best) b = 0;
     save_to_string();
+    s_allPhasesBestCs = 0;
+    if (s_allPhasesCfg != nullptr && s_allPhasesCtx != nullptr && s_allPhasesVar != 0) {
+        s_allPhasesCfg->set_string(s_allPhasesCtx, s_allPhasesVar, "");
+    }
 }
 
 void boss_rush_timer_begin_chain_run() {
@@ -348,6 +385,54 @@ void boss_rush_timer_commit_chain_total() {
     s_finalCs = totalCs;
     s_isRecord = record;
     s_idx = -1;
+}
+
+void boss_rush_timer_begin_all_phases() {
+    s_allPhasesRun = true;
+    s_chainCheckpointMs = 0;
+    s_state = IDLE;
+    s_elapsedMs = 0;
+    s_provisionalMs = 0;
+    s_haveLastTick = false;
+    s_finalCs = 0;
+    s_isRecord = false;
+}
+
+void boss_rush_timer_end_all_phases() {
+    s_allPhasesRun = false;
+    s_chainCheckpointMs = 0;
+    if (s_state == RUNNING) {
+        s_state = IDLE;
+    }
+}
+
+bool boss_rush_timer_all_phases_active() {
+    return s_allPhasesRun;
+}
+
+void boss_rush_timer_init_all_phases_best(const ConfigService* config_svc, ModContext* mod_ctx,
+                                        ConfigVarHandle var) {
+    s_allPhasesCfg = config_svc;
+    s_allPhasesCtx = mod_ctx;
+    s_allPhasesVar = var;
+    s_allPhasesBestCs = 0;
+
+    if (s_allPhasesCfg != nullptr && s_allPhasesVar != 0) {
+        char buf[32];
+        size_t len = 0;
+        if (s_allPhasesCfg->get_string(s_allPhasesCtx, s_allPhasesVar, buf, sizeof(buf), &len) == MOD_OK) {
+            const long cs = std::strtol(buf, nullptr, 10);
+            if (cs > 0) {
+                s_allPhasesBestCs = static_cast<u32>(cs);
+            }
+        }
+    }
+}
+
+bool boss_rush_timer_all_phases_best_cs(unsigned int* outCs) {
+    if (s_allPhasesBestCs == 0) return false;
+    if (outCs) *outCs = s_allPhasesBestCs;
+    return true;
 }
 
 void boss_rush_timer_format(unsigned int cs, char* buf, size_t bufLen) {

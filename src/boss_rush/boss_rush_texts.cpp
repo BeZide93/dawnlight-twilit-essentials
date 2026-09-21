@@ -119,16 +119,22 @@ void draw_boss_rush_texts(float floorY) {
             continue;
         }
 
+        const char* displayName = boss.displayName;
+        if (!g_configBossRushSeparateGanon &&
+            std::strcmp(displayName, "Ganondorf") == 0) {
+            displayName = "Ganondorf (All Phases)";
+        }
+
         const f32 nameCharW = 22.0f, nameCharH = 26.0f;
         const f32 locCharW = 14.0f, locCharH = 17.0f;
 
-        f32 nameW = measure_text_width(boss.displayName, nameCharW);
+        f32 nameW = measure_text_width(displayName, nameCharW);
         f32 locW = boss.location ? measure_text_width(boss.location, locCharW) : 0.0f;
 
         const u8 nameA = static_cast<u8>(255.0f * s_labelFade[tableIdx]);
         const u8 locA = static_cast<u8>(220.0f * s_labelFade[tableIdx]);
 
-        draw_world_label(boss.displayName, screenPos.x - nameW * 0.5f, screenPos.y - nameCharH - locCharH,
+        draw_world_label(displayName, screenPos.x - nameW * 0.5f, screenPos.y - nameCharH - locCharH,
                          nameCharW, nameCharH,
                          JUtility::TColor(255, 236, 170, 255), JUtility::TColor(255, 190, 60, 255), nameA);
 
@@ -141,7 +147,12 @@ void draw_boss_rush_texts(float floorY) {
         if (g_configBossRushTimer) {
             char timeBuf[24];
             u32 bestCs = 0;
-            if (boss_rush_timer_best_cs(static_cast<int>(tableIdx), &bestCs)) {
+            const bool allPhasesEntry = !g_configBossRushSeparateGanon &&
+                                       std::strcmp(boss.displayName, "Ganondorf") == 0;
+            const bool hasBestTime = allPhasesEntry
+                                         ? boss_rush_timer_all_phases_best_cs(&bestCs)
+                                         : boss_rush_timer_best_cs(static_cast<int>(tableIdx), &bestCs);
+            if (hasBestTime) {
                 char t[16];
                 boss_rush_timer_format(bestCs, t, sizeof(t));
                 std::snprintf(timeBuf, sizeof(timeBuf), "Best  %s", t);
@@ -196,10 +207,16 @@ void draw_boss_rush_fight_timer() {
     }
 
     const int tIdx = boss_rush_current_target_index();
+    const bool allPhasesTarget =
+        (tIdx >= 0 && static_cast<size_t>(tIdx) < g_bossGalleryCount &&
+         !g_configBossRushSeparateGanon &&
+         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Ganondorf") == 0);
     u32 bestCs = 0;
     bool hasBest = false;
     if (boss_rush_timer_chain_active()) {
         hasBest = g_configBossRushShowBestTimer && boss_rush_timer_chain_best_cs(&bestCs);
+    } else if (allPhasesTarget) {
+        hasBest = g_configBossRushShowBestTimer && boss_rush_timer_all_phases_best_cs(&bestCs);
     } else {
         hasBest = g_configBossRushShowBestTimer && (tIdx >= 0) &&
                   boss_rush_timer_best_cs(tIdx, &bestCs);
@@ -209,8 +226,7 @@ void draw_boss_rush_fight_timer() {
                             hasBest, hasBest ? bestCs : 0);
 }
 
-void draw_boss_rush_debug_coords(daAlink_c* link) {
-    if (link == nullptr) return;
+void draw_boss_rush_debug_coords(daAlink_c*) {
 
     JUTFont* font = mDoExt_getSubFont();
     if (!font) font = mDoExt_getMesgFont();
@@ -219,7 +235,7 @@ void draw_boss_rush_debug_coords(daAlink_c* link) {
     const f32 boxX = 16.0f;
     const f32 boxY = 130.0f;
     const f32 boxW = 210.0f;
-    const f32 boxH = 132.0f;
+    const f32 boxH = 42.0f;
     J2DFillBox(boxX, boxY, boxW, boxH, JUtility::TColor(12, 16, 24, 190));
 
     J2DFillBox(boxX, boxY, 3.0f, boxH, JUtility::TColor(240, 195, 75, 250));
@@ -232,29 +248,6 @@ void draw_boss_rush_debug_coords(daAlink_c* link) {
     char buf[64];
     f32 curY = boxY + 6.0f;
 
-    std::snprintf(buf, sizeof(buf), "X:   %9.2f", link->current.pos.x);
-    draw_world_label(buf, textX, curY, charW, charH,
-                     JUtility::TColor(255, 255, 255, 255), JUtility::TColor(210, 210, 210, 255), 255);
-    curY += lineH;
-
-    std::snprintf(buf, sizeof(buf), "Y:   %9.2f", link->current.pos.y);
-    draw_world_label(buf, textX, curY, charW, charH,
-                     JUtility::TColor(255, 255, 255, 255), JUtility::TColor(210, 210, 210, 255), 255);
-    curY += lineH;
-
-    std::snprintf(buf, sizeof(buf), "Z:   %9.2f", link->current.pos.z);
-    draw_world_label(buf, textX, curY, charW, charH,
-                     JUtility::TColor(255, 255, 255, 255), JUtility::TColor(210, 210, 210, 255), 255);
-    curY += lineH;
-
-    s16 rawAngle = link->shape_angle.y;
-    f32 deg = (static_cast<f32>(rawAngle) * 360.0f) / 65536.0f;
-    if (deg < 0.0f) deg += 360.0f;
-    std::snprintf(buf, sizeof(buf), "Ang: %6d (%5.1f deg)", rawAngle, deg);
-    draw_world_label(buf, textX, curY, charW, charH,
-                     JUtility::TColor(255, 230, 130, 255), JUtility::TColor(240, 180, 60, 255), 255);
-    curY += lineH;
-
     const char* stage = dComIfGp_getStartStageName();
     int room = dComIfGp_roomControl_getStayNo();
     std::snprintf(buf, sizeof(buf), "Stg: %s (R%d)", stage ? stage : "-", room);
@@ -262,32 +255,10 @@ void draw_boss_rush_debug_coords(daAlink_c* link) {
                      JUtility::TColor(180, 220, 255, 255), JUtility::TColor(130, 170, 220, 255), 255);
     curY += lineH;
 
-    s16 point = dComIfGp_getStartStagePoint();
-    std::snprintf(buf, sizeof(buf), "Pt:  %d", point);
+    const int layer = dComIfG_play_c::getLayerNo(0);
+    std::snprintf(buf, sizeof(buf), "Lyr: %d", layer);
     draw_world_label(buf, textX, curY, charW, charH,
                      JUtility::TColor(180, 255, 190, 255), JUtility::TColor(130, 220, 150, 255), 255);
-    curY += lineH;
-
-    camera_process_class* cam = dComIfGp_getCamera(0);
-    if (cam != nullptr) {
-        s16 camAngle = cam->angle.y;
-        f32 camDeg = (static_cast<f32>(camAngle) * 360.0f) / 65536.0f;
-        if (camDeg < 0.0f) camDeg += 360.0f;
-        std::snprintf(buf, sizeof(buf), "Cam: %6d (%5.1f deg)", camAngle, camDeg);
-        draw_world_label(buf, textX, curY, charW, charH,
-                         JUtility::TColor(255, 200, 200, 255), JUtility::TColor(220, 140, 140, 255), 255);
-        curY += lineH;
-    }
-
-    const char* fightLabel = nullptr;
-    bool fightEngaged = false;
-    if (boss_bar_current_fight_state(&fightLabel, fightEngaged)) {
-        std::snprintf(buf, sizeof(buf), "Fight: %s", fightLabel);
-    } else {
-        std::snprintf(buf, sizeof(buf), "Fight: (none tracked)");
-    }
-    draw_world_label(buf, textX, curY, charW, charH,
-                     JUtility::TColor(230, 200, 255, 255), JUtility::TColor(180, 140, 220, 255), 255);
 
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port) port->setup2D();
