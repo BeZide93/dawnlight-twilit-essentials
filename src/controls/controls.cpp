@@ -7,7 +7,7 @@
 
 const char* const kControlsButtonLabels[CTRL_BTN_COUNT] = {
     "Z", "L", "R", "A", "B", "X", "Y",
-    "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "L3", "R3",
+    "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "L3", "R3", "L2", "R2",
 };
 
 static const int kControlsDefaultBinding[CTRL_BIND_COUNT] = {
@@ -61,8 +61,26 @@ static u32 controls_ext_button_bit(int button) {
     return 0;
 }
 
+/* L2/R2 are the analog trigger axes, read from the raw trigger values (0-255) instead of the
+ * PAD_TRIGGER_L/R bits, so they stay bound to the physical triggers even when those bits are
+ * digitally remapped in the controller settings. The pull threshold mirrors the trigger
+ * activation zone configured per controller (full pull when unavailable, e.g. on keyboard). */
+static bool controls_trigger_held(bool left) {
+    JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
+    if (gamePad == nullptr) {
+        return false;
+    }
+    const int raw = left ? gamePad->getAnalogL() : gamePad->getAnalogR();
+    const PADDeadZones* deadZones = PADGetDeadZones(PAD_1);
+    const int zone = (deadZones != nullptr) ? (left ? deadZones->leftTriggerActivationZone
+                                                    : deadZones->rightTriggerActivationZone)
+                                            : 31150;
+    return raw * 32767 > zone * 255;
+}
+
 /* Per-frame snapshot of the ext buttons, refreshed right after each pad read so
- * controls_binding_pressed() can report a rising edge for them. */
+ * controls_binding_pressed() can report a rising edge for them. held-state queries do not
+ * rely on it: PADStatus::extButton is refilled by every PADRead, so it is read directly. */
 DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
 
 static u32 s_extHeldPrev = 0;
@@ -77,12 +95,17 @@ bool controls_binding_held(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT) {
         return false;
     }
+    const int button = clamp_button_index(g_controlsBinding[b], b);
+    switch (button) {
+    case CTRL_BTN_L2: return controls_trigger_held(true);
+    case CTRL_BTN_R2: return controls_trigger_held(false);
+    default: break;
+    }
     const u32 bit = controls_binding_bit(b);
     if (bit != 0) {
         return (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & bit) != 0;
     }
-    return (s_extHeldCur &
-            controls_ext_button_bit(clamp_button_index(g_controlsBinding[b], b))) != 0;
+    return (JUTGamePad::mPadStatus[PAD_1].extButton & controls_ext_button_bit(button)) != 0;
 }
 
 bool controls_binding_pressed(int b) {

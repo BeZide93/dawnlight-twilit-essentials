@@ -8,7 +8,8 @@
 struct ConfigService;
 struct HookService;
 
-/* Physical buttons that can be bound, in the order used by every SELECT control. */
+/* Physical buttons that can be bound, in the order used by every SELECT control. L2/R2 are
+ * the analog trigger axes and stay readable even when PAD_TRIGGER_L/R are remapped. */
 enum ControlsButton {
     CTRL_BTN_Z = 0,
     CTRL_BTN_L,
@@ -23,6 +24,8 @@ enum ControlsButton {
     CTRL_BTN_DPAD_RIGHT,
     CTRL_BTN_L3,
     CTRL_BTN_R3,
+    CTRL_BTN_L2,
+    CTRL_BTN_R2,
     CTRL_BTN_COUNT,
 };
 

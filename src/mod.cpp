@@ -1749,7 +1749,7 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
     ui_add_select(left, "Sprint button", g_controlsVars[CTRL_BIND_SPRINT],
         "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while swimming. "
-        "Note: L3/R3 are the stick clicks.</p>",
+        "Note: L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>",
         kControlsButtonLabels, CTRL_BTN_COUNT, is_controls_sprint_disabled);
 
     return MOD_OK;
