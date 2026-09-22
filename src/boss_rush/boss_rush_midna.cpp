@@ -815,8 +815,7 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
         }
     }
     const bool isDeathSword = targetName != nullptr && std::strcmp(targetName, "Death Sword") == 0;
-    const bool isPuppetZelda = targetName != nullptr && std::strcmp(targetName, "Puppet Zelda") == 0;
-    const bool transformAllowed = isDeathSword || isBeastGanonPhase || isPuppetZelda;
+    const bool transformAllowed = isDeathSword || isBeastGanonPhase;
 
     if (mode == BossRushMidnaMode::Fight && (wantSimpleBmgMenu || !transformAllowed)) {
         if (wantSimpleBmgMenu && s_bossRushMidnaHorseNextNode != mods::flow::kEnd) {

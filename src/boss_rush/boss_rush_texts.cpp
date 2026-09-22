@@ -207,10 +207,13 @@ void draw_boss_rush_fight_timer() {
     }
 
     const int tIdx = boss_rush_current_target_index();
-    const bool allPhasesTarget =
-        (tIdx >= 0 && static_cast<size_t>(tIdx) < g_bossGalleryCount &&
-         !g_configBossRushSeparateGanon &&
-         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Ganondorf") == 0);
+    const bool isGanonPhase = (tIdx >= 0 && static_cast<size_t>(tIdx) < g_bossGalleryCount &&
+        (std::strcmp(g_bossGalleryTable[tIdx].displayName, "Ganondorf") == 0 ||
+         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Puppet Zelda") == 0 ||
+         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Beast Ganon") == 0 ||
+         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Horseback Ganon") == 0));
+    const bool allPhasesTarget = boss_rush_timer_all_phases_active() ||
+                                 (!g_configBossRushSeparateGanon && isGanonPhase);
     u32 bestCs = 0;
     bool hasBest = false;
     if (boss_rush_timer_chain_active()) {

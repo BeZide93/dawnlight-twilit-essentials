@@ -1700,7 +1700,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
         "into the Boss Rush chamber.</p>");
 
-#if 0
+#if 1
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;

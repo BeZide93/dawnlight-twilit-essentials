@@ -59,9 +59,7 @@ u32                  s_allPhasesBestCs = 0;
 inline u32 cs_now() { return static_cast<u32>(s_elapsedMs / 10ull); }
 
 bool all_phases_final_phase() {
-    const char* stage = dComIfGp_getStartStageName();
-    return stage != nullptr && std::strcmp(stage, "D_MN09B") == 0 &&
-           g_dComIfG_gameInfo.info.getDan().isSwitch(1);
+    return boss_rush_gauntlet_phase() == 4;
 }
 
 void load_from_string(const char* s) {
@@ -285,7 +283,9 @@ void boss_rush_timer_notify_defeat() {
 }
 
 void boss_rush_timer_reset_run() {
-    if (s_state == RUNNING) s_state = IDLE;
+    s_state = IDLE;
+    s_finalCs = 0;
+    s_isRecord = false;
     if (!s_chainRun) {
         s_elapsedMs = 0;
     }
@@ -401,9 +401,12 @@ void boss_rush_timer_begin_all_phases() {
 void boss_rush_timer_end_all_phases() {
     s_allPhasesRun = false;
     s_chainCheckpointMs = 0;
-    if (s_state == RUNNING) {
-        s_state = IDLE;
-    }
+    s_state = IDLE;
+    s_finalCs = 0;
+    s_isRecord = false;
+    s_elapsedMs = 0;
+    s_provisionalMs = 0;
+    s_haveLastTick = false;
 }
 
 bool boss_rush_timer_all_phases_active() {
