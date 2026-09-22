@@ -121,20 +121,25 @@ static void addModelShadow(daAlink_c *alink, J3DModel *model) {
   }
 }
 
-static bool isWolfOrTransforming(daAlink_c *alink) {
+static bool isFullWolf(daAlink_c *alink) {
   if (alink == nullptr) {
     return true;
   }
-  if (alink->checkWolf()) {
+  return alink->checkWolf() && !alink->checkMetamorphose() && !alink->checkWolfShapeReverse();
+}
+
+static bool isWolfTransforming(daAlink_c *alink) {
+  if (alink == nullptr) {
+    return false;
+  }
+  return alink->checkMetamorphose() || alink->checkWolfShapeReverse();
+}
+
+static bool isWolf(daAlink_c *alink) {
+  if (alink == nullptr) {
     return true;
   }
-  if (alink->checkWolfShapeReverse()) {
-    return true;
-  }
-  if (alink->checkMetamorphose()) {
-    return true;
-  }
-  return false;
+  return alink->checkWolf() || alink->checkMetamorphose() || alink->checkWolfShapeReverse();
 }
 
 static bool isInWarpVisual(daAlink_c *alink) {
@@ -147,8 +152,7 @@ static bool isInWarpVisual(daAlink_c *alink) {
 }
 
 static MtxP getBoneMtx(daAlink_c *alink, const char *boneName) {
-  if (alink == nullptr || alink->mpLinkModel == nullptr ||
-      boneName == nullptr || isWolfOrTransforming(alink)) {
+  if (alink == nullptr || alink->mpLinkModel == nullptr || boneName == nullptr) {
     return nullptr;
   }
 
@@ -402,7 +406,7 @@ static void loadBowModel(const LogService *log_svc, ModContext *mod_ctx) {
 
   if (s_customBowModel != nullptr) {
     s_gearShaderCapable[0] = true;
-    s_customBowModel->setBaseScale(cXyz(1.0f, 1.0f, 1.0f));
+    s_customBowModel->setBaseScale(cXyz(0.75f, 0.75f, 0.75f));
     enable_material_fog(s_customBowModel);
   }
 }
@@ -507,7 +511,7 @@ static void loadQuiverModel(const LogService *log_svc, ModContext *mod_ctx) {
 
   if (s_customQuiverModel != nullptr) {
     s_gearShaderCapable[1] = true;
-    s_customQuiverModel->setBaseScale(cXyz(1.25f, 1.25f, 1.25f));
+    s_customQuiverModel->setBaseScale(cXyz(0.73f, 0.73f, 0.73f));
     enable_material_fog(s_customQuiverModel);
   }
 }
@@ -993,25 +997,50 @@ static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
   return true;
 }
 
-static void gear_warp_step(GearWarpState &gear, bool wantShow) {
-  gear.scale = wantShow ? 1.0f : 0.0f;
-  gear.visible = wantShow;
+static Mtx s_lastSheathMtx;
+static bool s_hasLastSheathMtx = false;
+
+static Mtx s_lastWaistMtx;
+static bool s_hasLastWaistMtx = false;
+
+static Mtx s_lastLanternBeltMtx;
+static bool s_hasLastLanternBeltMtx = false;
+
+static bool s_wasWolf = false;
+
+static void gear_warp_step(GearWarpState &gear, bool wantShow, bool isMetamorphose) {
+  if (!isMetamorphose) {
+    gear.scale = wantShow ? 1.0f : 0.0f;
+    gear.visible = wantShow;
+    return;
+  }
+
+  const f32 target = wantShow ? 1.0f : 0.0f;
+  const f32 step = wantShow ? 0.15f : 0.08f;
+  if (gear.scale < target) {
+    gear.scale += step;
+    if (gear.scale > target) {
+      gear.scale = target;
+    }
+  } else if (gear.scale > target) {
+    gear.scale -= step;
+    if (gear.scale < target) {
+      gear.scale = target;
+    }
+  }
+  gear.visible = (gear.scale > 0.001f);
 }
 
-static void sync_gear_to_warp(daAlink_c *alink, bool &bow, bool &quiver,
-                              bool &lantern) {
+static void sync_gear_to_warp(daAlink_c *alink, bool wantBow, bool wantQuiver,
+                              bool wantLantern, bool isMetamorphose) {
   (void)alink;
-  gear_warp_step(s_bowWarp, bow);
-  gear_warp_step(s_quiverWarp, quiver);
-  gear_warp_step(s_lanternWarp, lantern);
-
-  if (bow && !s_bowWarp.visible) bow = false;
-  if (quiver && !s_quiverWarp.visible) quiver = false;
-  if (lantern && !s_lanternWarp.visible) lantern = false;
+  gear_warp_step(s_bowWarp, wantBow, isMetamorphose);
+  gear_warp_step(s_quiverWarp, wantQuiver, isMetamorphose);
+  gear_warp_step(s_lanternWarp, wantLantern, isMetamorphose);
 }
 
 static void renderLantern(daAlink_c *alink) {
-  if (alink == nullptr || isWolfOrTransforming(alink)) {
+  if (alink == nullptr || s_lanternWarp.scale <= 0.001f) {
     return;
   }
 
@@ -1021,8 +1050,7 @@ static void renderLantern(daAlink_c *alink) {
     return;
   }
 
-  if (alink->mpLinkModel == nullptr ||
-      alink->getClothesChangeWaitTimer() != 0) {
+  if (alink->getClothesChangeWaitTimer() != 0) {
     return;
   }
 
@@ -1031,71 +1059,85 @@ static void renderLantern(daAlink_c *alink) {
     return;
   }
 
-  J3DModelData *modelData = alink->mpLinkModel->getModelData();
+  J3DModelData *modelData = (alink->mpLinkModel != nullptr) ? alink->mpLinkModel->getModelData() : nullptr;
   MtxP beltMtx = (modelData != nullptr && modelData->getJointNum() > 0x10)
                      ? alink->mpLinkModel->getAnmMtx(0x10)
                      : getBoneMtx(alink, "waist");
   if (beltMtx != nullptr) {
     mDoMtx_stack_c::copy(beltMtx);
-    const f32 lanternY =
-        (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e) ? 5.0f : 4.5f;
-    mDoMtx_stack_c::transM(-1.0f, lanternY, 9.0f);
-    mDoMtx_stack_c::XYZrotM(cM_deg2s(-75.0f), cM_deg2s(62.0f), cM_deg2s(89.0f));
-    model->setBaseScale(
-        cXyz(s_lanternWarp.scale, s_lanternWarp.scale, s_lanternWarp.scale));
-    model->setBaseTRMtx(mDoMtx_stack_c::get());
-
-    cXyz &flamePos = alink->mKandelaarFlamePos;
-    if (flamePos.abs2() < 1.0f) {
-      mDoMtx_multVecZero(mDoMtx_stack_c::get(), &flamePos);
-      flamePos.y -= 17.0f;
-    }
-
-    model->calc();
-
-    g_env_light.settingTevStruct_colget_player(&alink->tevStr);
-    g_env_light.setLightTevColorType_MAJI(model, &alink->tevStr);
-    mDoExt_modelUpdateDL(model);
-    addModelShadow(alink, model);
+    std::memcpy(s_lastLanternBeltMtx, beltMtx, sizeof(Mtx));
+    s_hasLastLanternBeltMtx = true;
+  } else if (s_hasLastLanternBeltMtx) {
+    mDoMtx_stack_c::copy(s_lastLanternBeltMtx);
+  } else {
+    return;
   }
+
+  const f32 lanternY =
+      (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e) ? 5.0f : 4.5f;
+  mDoMtx_stack_c::transM(-1.0f, lanternY, 9.0f);
+  mDoMtx_stack_c::XYZrotM(cM_deg2s(-75.0f), cM_deg2s(62.0f), cM_deg2s(89.0f));
+  model->setBaseScale(
+      cXyz(s_lanternWarp.scale, s_lanternWarp.scale, s_lanternWarp.scale));
+  model->setBaseTRMtx(mDoMtx_stack_c::get());
+
+  cXyz &flamePos = alink->mKandelaarFlamePos;
+  if (flamePos.abs2() < 1.0f) {
+    mDoMtx_multVecZero(mDoMtx_stack_c::get(), &flamePos);
+    flamePos.y -= 17.0f;
+  }
+
+  model->calc();
+
+  g_env_light.settingTevStruct_colget_player(&alink->tevStr);
+  g_env_light.setLightTevColorType_MAJI(model, &alink->tevStr);
+  mDoExt_modelUpdateDL(model);
+  addModelShadow(alink, model);
 }
 
 static void renderBow(daAlink_c *alink, bool shouldShowEquipment,
                       bool isBowInHand) {
-  if (!shouldShowEquipment || isBowInHand || s_customBowModel == nullptr) {
+  if (!shouldShowEquipment || isBowInHand || s_customBowModel == nullptr || s_bowWarp.scale <= 0.001f) {
     return;
   }
 
-  MtxP bowMtx = alink->mSheathModel->getBaseTRMtx();
+  MtxP bowMtx = (alink->mSheathModel != nullptr) ? alink->mSheathModel->getBaseTRMtx() : nullptr;
 
   if (bowMtx != nullptr) {
     mDoMtx_stack_c::copy(bowMtx);
-    const f32 bowY = daPy_py_c::checkSwordGet() ? 6.0f : 2.0f;
-    if (g_configVisibleEquipMirrorBow) {
-      mDoMtx_stack_c::transM(22.0f, bowY, -4.0f);
-      mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(-56.0f),
-                              degToS16(0.0f));
-    } else {
-      mDoMtx_stack_c::transM(25.0f, bowY, -14.0f);
-      mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(56.0f),
-                              degToS16(0.0f));
-    }
-
-    cXyz scale(0.75f * s_bowWarp.scale, 0.75f * s_bowWarp.scale,
-               0.75f * s_bowWarp.scale);
-    s_customBowModel->setBaseScale(scale);
-    s_customBowModel->setBaseTRMtx(mDoMtx_stack_c::get());
-    s_customBowModel->calc();
-
-    g_env_light.settingTevStruct_colget_player(&alink->tevStr);
-    g_env_light.setLightTevColorType_MAJI(s_customBowModel, &alink->tevStr);
-    mDoExt_modelUpdateDL(s_customBowModel);
-    addModelShadow(alink, s_customBowModel);
+    std::memcpy(s_lastSheathMtx, bowMtx, sizeof(Mtx));
+    s_hasLastSheathMtx = true;
+  } else if (s_hasLastSheathMtx) {
+    mDoMtx_stack_c::copy(s_lastSheathMtx);
+  } else {
+    return;
   }
+
+  const f32 bowY = daPy_py_c::checkSwordGet() ? 6.0f : 2.0f;
+  if (g_configVisibleEquipMirrorBow) {
+    mDoMtx_stack_c::transM(22.0f, bowY, -4.0f);
+    mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(-56.0f),
+                            degToS16(0.0f));
+  } else {
+    mDoMtx_stack_c::transM(25.0f, bowY, -14.0f);
+    mDoMtx_stack_c::XYZrotM(degToS16(90.0f), degToS16(56.0f),
+                            degToS16(0.0f));
+  }
+
+  cXyz scale(0.75f * s_bowWarp.scale, 0.75f * s_bowWarp.scale,
+             0.75f * s_bowWarp.scale);
+  s_customBowModel->setBaseScale(scale);
+  s_customBowModel->setBaseTRMtx(mDoMtx_stack_c::get());
+  s_customBowModel->calc();
+
+  g_env_light.settingTevStruct_colget_player(&alink->tevStr);
+  g_env_light.setLightTevColorType_MAJI(s_customBowModel, &alink->tevStr);
+  mDoExt_modelUpdateDL(s_customBowModel);
+  addModelShadow(alink, s_customBowModel);
 }
 
 static void renderQuiver(daAlink_c* alink, bool shouldShowEquipment) {
-  if (!shouldShowEquipment || s_customQuiverModel == nullptr) {
+  if (!shouldShowEquipment || s_customQuiverModel == nullptr || s_quiverWarp.scale <= 0.001f) {
     return;
   }
 
@@ -1103,56 +1145,62 @@ static void renderQuiver(daAlink_c* alink, bool shouldShowEquipment) {
 
   if (quiverMtx != nullptr) {
     mDoMtx_stack_c::copy(quiverMtx);
-
-    f32 quiverScale;
-    if (g_configVisibleEquipQuiverOnBelt) {
-      if (s_loadedQuiverType == 3) {
-        mDoMtx_stack_c::transM(25.0f, 5.0f, 23.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(0.0f), degToS16(120.0f), degToS16(135.0f));
-
-        quiverScale = 0.73f;
-      } else if (s_loadedQuiverType == 2) {
-        mDoMtx_stack_c::transM(25.0f, 5.0f, 23.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(0.0f), degToS16(-15.0f), degToS16(135.0f));
-
-        quiverScale = 0.73f;
-      } else {
-        mDoMtx_stack_c::transM(25.0f, 5.0f, 24.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(45.0f), degToS16(-95.0f), degToS16(90.0f));
-
-        quiverScale = 0.73f;
-      }
-    } else {
-      if (s_loadedQuiverType == 3) {
-        mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(-70.0f), degToS16(0.0f), degToS16(90.0f));
-
-        quiverScale = 1.1f;
-      } else if (s_loadedQuiverType == 2) {
-        mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(-90.0f), degToS16(30.0f), degToS16(0.0f));
-
-        quiverScale = 1.1f;
-      } else {
-        mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
-        mDoMtx_stack_c::XYZrotM(degToS16(-90.0f), degToS16(30.0f), degToS16(0.0f));
-
-        quiverScale = 1.0f;
-      }
-    }
-
-    s_customQuiverModel->setBaseScale(cXyz(quiverScale * s_quiverWarp.scale,
-                                           quiverScale * s_quiverWarp.scale,
-                                           quiverScale * s_quiverWarp.scale));
-
-    s_customQuiverModel->setBaseTRMtx(mDoMtx_stack_c::get());
-    s_customQuiverModel->calc();
-
-    g_env_light.settingTevStruct_colget_player(&alink->tevStr);
-    g_env_light.setLightTevColorType_MAJI(s_customQuiverModel, &alink->tevStr);
-    mDoExt_modelUpdateDL(s_customQuiverModel);
-    addModelShadow(alink, s_customQuiverModel);
+    std::memcpy(s_lastWaistMtx, quiverMtx, sizeof(Mtx));
+    s_hasLastWaistMtx = true;
+  } else if (s_hasLastWaistMtx) {
+    mDoMtx_stack_c::copy(s_lastWaistMtx);
+  } else {
+    return;
   }
+
+  f32 quiverScale;
+  if (g_configVisibleEquipQuiverOnBelt) {
+    if (s_loadedQuiverType == 3) {
+      mDoMtx_stack_c::transM(25.0f, 5.0f, 23.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(0.0f), degToS16(120.0f), degToS16(135.0f));
+
+      quiverScale = 0.73f;
+    } else if (s_loadedQuiverType == 2) {
+      mDoMtx_stack_c::transM(25.0f, 5.0f, 23.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(0.0f), degToS16(-15.0f), degToS16(135.0f));
+
+      quiverScale = 0.73f;
+    } else {
+      mDoMtx_stack_c::transM(25.0f, 5.0f, 24.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(45.0f), degToS16(-95.0f), degToS16(90.0f));
+
+      quiverScale = 0.73f;
+    }
+  } else {
+    if (s_loadedQuiverType == 3) {
+      mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(-70.0f), degToS16(0.0f), degToS16(90.0f));
+
+      quiverScale = 1.1f;
+    } else if (s_loadedQuiverType == 2) {
+      mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(-90.0f), degToS16(30.0f), degToS16(0.0f));
+
+      quiverScale = 1.1f;
+    } else {
+      mDoMtx_stack_c::transM(25.0f, 15.0f, 5.0f);
+      mDoMtx_stack_c::XYZrotM(degToS16(-90.0f), degToS16(30.0f), degToS16(0.0f));
+
+      quiverScale = 1.0f;
+    }
+  }
+
+  s_customQuiverModel->setBaseScale(cXyz(quiverScale * s_quiverWarp.scale,
+                                         quiverScale * s_quiverWarp.scale,
+                                         quiverScale * s_quiverWarp.scale));
+
+  s_customQuiverModel->setBaseTRMtx(mDoMtx_stack_c::get());
+  s_customQuiverModel->calc();
+
+  g_env_light.settingTevStruct_colget_player(&alink->tevStr);
+  g_env_light.setLightTevColorType_MAJI(s_customQuiverModel, &alink->tevStr);
+  mDoExt_modelUpdateDL(s_customQuiverModel);
+  addModelShadow(alink, s_customQuiverModel);
 }
 
 static const char *s_cachedArcName = nullptr;
@@ -1173,9 +1221,12 @@ static void invalidateEquipmentModels() {
     s_gearShaderCapable[slot] = false;
     s_gearModelWarpOn[slot] = false;
   }
-  s_bowWarp = {true, 0.0f};
-  s_quiverWarp = {true, 0.0f};
-  s_lanternWarp = {true, 0.0f};
+  s_bowWarp = {true, 1.0f};
+  s_quiverWarp = {true, 1.0f};
+  s_lanternWarp = {true, 1.0f};
+  s_hasLastSheathMtx = false;
+  s_hasLastWaistMtx = false;
+  s_hasLastLanternBeltMtx = false;
 }
 
 static bool syncEquipmentModelCache(daAlink_c *alink) {
@@ -1193,7 +1244,6 @@ static bool syncEquipmentModelCache(daAlink_c *alink) {
   int roomNo = fopAcM_GetRoomNo(alink);
 
   if (s_cachedLinkInstance != alink ||
-      s_cachedLinkModel != alink->mpLinkModel ||
       s_cachedArcName != alink->mArcName ||
       (stageName != nullptr && std::strcmp(s_cachedStageName, stageName) != 0)) {
     invalidateEquipmentModels();
@@ -1206,6 +1256,9 @@ static bool syncEquipmentModelCache(daAlink_c *alink) {
     } else {
       s_cachedStageName[0] = '\0';
     }
+    s_cachedRoomNo = roomNo;
+  } else {
+    s_cachedLinkModel = alink->mpLinkModel;
     s_cachedRoomNo = roomNo;
   }
 
@@ -1230,27 +1283,6 @@ static bool isSceneLoadStable() {
       (cur == nullptr || std::strcmp(next, cur) != 0)) {
     return false;
   }
-
-  static char s_stableStage[16] = {0};
-  static s32 s_stableRoom = -1;
-  static int s_stableFrames = 0;
-
-  const char *stage = (cur != nullptr) ? cur : "";
-  daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
-  s32 room = (alink != nullptr) ? fopAcM_GetRoomNo(alink) : -1;
-
-  if (std::strncmp(s_stableStage, stage, sizeof(s_stableStage) - 1) != 0 ||
-      s_stableRoom != room) {
-    std::strncpy(s_stableStage, stage, sizeof(s_stableStage) - 1);
-    s_stableStage[sizeof(s_stableStage) - 1] = '\0';
-    s_stableRoom = room;
-    s_stableFrames = 0;
-    return false;
-  }
-  if (s_stableFrames < 10) {
-    s_stableFrames++;
-    return false;
-  }
   return true;
 }
 
@@ -1269,25 +1301,40 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
   }
 
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
-  if (!alink || !alink->mpLinkModel || alink->mpLinkModel->getModelData() == nullptr ||
-      isWolfOrTransforming(alink)) {
+  if (!alink) {
     return;
   }
 
-  // Conditions that used to hard-hide the gear now just drive the fade; the
-  // gear keeps rendering (shrinking) until its scale reaches zero.
+  const bool inMetamorphose =
+      (alink->mProcID == daAlink_c::PROC_METAMORPHOSE ||
+       alink->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY);
+
+  if (!inMetamorphose) {
+    s_wasWolf = alink->checkWolf();
+  }
+
+  const bool isWolfNow = alink->checkWolf();
+  const bool isTransformingToHuman = inMetamorphose && s_wasWolf && !isWolfNow;
+  const bool isTransformingToWolf = inMetamorphose && !s_wasWolf;
+  const bool isHuman = (!isWolfNow && !isTransformingToWolf) || isTransformingToHuman;
+
+  if (isWolfNow && !inMetamorphose && s_bowWarp.scale <= 0.001f &&
+      s_quiverWarp.scale <= 0.001f && s_lanternWarp.scale <= 0.001f) {
+    return;
+  }
+
   const bool cacheOk = syncEquipmentModelCache(alink);
   const bool playerDrawn =
       !alink->checkPlayerNoDraw() && !isInWarpVisual(alink);
   const bool sceneStable = isSceneLoadStable();
 
-  bool shouldShowBow = cacheOk && playerDrawn && sceneStable &&
-                       g_configVisibleEquipShowBow && checkShouldShowBow();
-  bool shouldShowQuiver = shouldShowBow;
-  bool shouldShowLantern = cacheOk && playerDrawn && sceneStable &&
-                           g_configVisibleEquipShowLantern && checkShouldShowLantern();
+  bool wantShowBow = cacheOk && isHuman && playerDrawn && sceneStable &&
+                     g_configVisibleEquipShowBow && checkShouldShowBow();
+  bool wantShowQuiver = wantShowBow;
+  bool wantShowLantern = cacheOk && isHuman && playerDrawn && sceneStable &&
+                         g_configVisibleEquipShowLantern && checkShouldShowLantern();
 
-  if (shouldShowBow) {
+  if (wantShowBow || s_bowWarp.visible) {
     if (s_customBowModel == nullptr) {
       loadBowModel(s_logSvc, s_modCtx);
     }
@@ -1318,16 +1365,14 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
         safeOffWarpMaterial(capableData[slot]);
       }
       s_gearModelWarpOn[slot] = inWarp;
-      static const char *const kGearSlotNames[3] = {"bow", "quiver", "lantern"};
     }
   }
 
-  sync_gear_to_warp(alink, shouldShowBow, shouldShowQuiver, shouldShowLantern);
+  sync_gear_to_warp(alink, wantShowBow, wantShowQuiver, wantShowLantern, inMetamorphose);
 
   if (inWarp) {
     if (s_gearShaderCapable[0]) {
       s_bowWarp = {true, 1.0f};
-      shouldShowBow = g_configVisibleEquipShowBow && checkShouldShowBow();
       if (s_customBowModel != nullptr && s_customBowModel->getModelData() != nullptr) {
         applyWarpSRT(s_customBowModel->getModelData(), alink->current.pos,
                      alink->field_0x3478, alink->field_0x347c, "bow");
@@ -1335,7 +1380,6 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
     }
     if (s_gearShaderCapable[1]) {
       s_quiverWarp = {true, 1.0f};
-      shouldShowQuiver = shouldShowBow;
       if (s_customQuiverModel != nullptr && s_customQuiverModel->getModelData() != nullptr) {
         applyWarpSRT(s_customQuiverModel->getModelData(), alink->current.pos,
                      alink->field_0x3478, alink->field_0x347c, "quiver");
@@ -1343,7 +1387,6 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
     }
     if (s_gearShaderCapable[2] && lanternModel != nullptr) {
       s_lanternWarp = {true, 1.0f};
-      shouldShowLantern = g_configVisibleEquipShowLantern && checkShouldShowLantern();
       J3DModelData *lanternData = lanternModel->getModelData();
       if (lanternData != nullptr) {
         applyWarpSRT(lanternData, alink->current.pos,
@@ -1373,13 +1416,13 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
   }
   GXSetFog(GX_FOG_PERSP_LIN, tev.mFogStartZ, tev.mFogEndZ, viewNearZ, viewFarZ, fogCol);
 
-  if (shouldShowBow) {
-    renderBow(alink, shouldShowBow, isBowInHand);
+  if (s_bowWarp.visible) {
+    renderBow(alink, true, isBowInHand);
   }
-  if (shouldShowQuiver) {
-    renderQuiver(alink, shouldShowQuiver);
+  if (s_quiverWarp.visible) {
+    renderQuiver(alink, true);
   }
-  if (shouldShowLantern) {
+  if (s_lanternWarp.visible) {
     renderLantern(alink);
   }
 
@@ -1393,7 +1436,7 @@ static void on_alink_status_window_draw_post(ModContext *, void *, void *, void 
 
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
   if (!alink || !alink->checkStatusWindowDraw() || !alink->mpLinkModel ||
-      alink->mpLinkModel->getModelData() == nullptr || isWolfOrTransforming(alink)) {
+      alink->mpLinkModel->getModelData() == nullptr || isFullWolf(alink)) {
     return;
   }
   if (!syncEquipmentModelCache(alink)) {
@@ -1444,12 +1487,15 @@ void update_visible_equipment(const LogService *log_svc, ModContext *mod_ctx) {
   }
 
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
+  if (alink == nullptr) {
+    return;
+  }
 
   if (!syncEquipmentModelCache(alink)) {
     return;
   }
 
-  if (!alink->mpLinkModel || isWolfOrTransforming(alink)) {
+  if (isFullWolf(alink)) {
     return;
   }
 
