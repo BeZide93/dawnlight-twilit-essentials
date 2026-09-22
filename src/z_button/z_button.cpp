@@ -22,6 +22,9 @@ bool isNativeZButtonEngine() {
     return false;
 }
 
+static bool s_midnaScaleSaved = false;
+static f32 s_origMidnaIconScale = 1.1f;
+
 ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, ModContext* mod_ctx, ModError*) {
     g_zModCtx = mod_ctx;
 
@@ -32,12 +35,8 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
         return MOD_OK;
     }
 
-    if (!g_configCustomZButtonEnabled) {
-        if (log_svc) {
-        }
-        return MOD_OK;
-    }
-
+    // Hooks are registered unconditionally so the submod can be toggled at
+    // runtime; every hook re-checks g_configCustomZButtonEnabled per call.
     mods::hook::add_pre<SetActiveCursorHook>(hook_svc, on_set_active_cursor_pre);
     mods::hook::add_post<SetActiveCursorHook>(hook_svc, on_set_active_cursor_post);
     mods::hook::add_pre<SetSelectItemHook>(hook_svc, on_set_select_item_pre);
@@ -100,8 +99,11 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
     s_wasActive = true;
 
     if (g_configCustomZButtonEnabled) {
-        f32 scale = 0.85f;
-        g_drawHIO.mMidnaIconScale = scale;
+        if (!s_midnaScaleSaved) {
+            s_midnaScaleSaved = true;
+            s_origMidnaIconScale = g_drawHIO.mMidnaIconScale;
+        }
+        g_drawHIO.mMidnaIconScale = 0.85f;
 
         g_drawHIO.mButtonZItemPosX = 0.0f;
         g_drawHIO.mButtonZItemPosY = 0.0f;
@@ -114,6 +116,10 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
 }
 
 void shutdown_z_button() {
+    if (s_midnaScaleSaved) {
+        g_drawHIO.mMidnaIconScale = s_origMidnaIconScale;
+    }
+
     if (g_zKanteraIcon != nullptr) {
         JKR_DELETE(g_zKanteraIcon);
         g_zKanteraIcon = nullptr;

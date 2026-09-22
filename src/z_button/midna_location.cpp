@@ -235,19 +235,28 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
                 z_btnl->show();
                 z_btnl->setAlpha(255);
             }
+            if (zbtn_n) {
+                for (J2DPane* child = zbtn_n->getFirstChildPane(); child != nullptr; child = child->getNextChildPane()) {
+                    if (child == midonaPane) {
+                        continue;
+                    }
+                    child->show();
+                    child->setAlpha(255);
+                }
+            }
         }
     }
 }
 
 HookAction on_meter_button_execute_pre(ModContext*, void* args, void*, void*) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
+    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
     return HOOK_CONTINUE;
 }
 
 void on_meter_button_execute_post(ModContext*, void* args, void*, void*) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return;
+    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
 }
@@ -255,7 +264,7 @@ void on_meter_button_execute_post(ModContext*, void* args, void*, void*) {
 DEFINE_HOOK(&dMeterButton_c::draw, MeterButtonDrawHook);
 
 HookAction on_meter_button_draw_pre(ModContext*, void* args, void*, void*) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
+    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
     return HOOK_CONTINUE;

@@ -14,14 +14,14 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
         return;
     }
 
+    if (!g_configCustomZButtonEnabled) {
+        return;
+    }
+
     // Iron Boots come off as soon as they are no longer assigned to any
     // button (e.g. another item was placed over them on X). Polled after the
     // game update so only settled assignment states are observed.
     check_iron_boots_unequip_on_overwrite();
-
-    if (!g_configCustomZButtonEnabled) {
-        return;
-    }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
     const u32 midnaBit = PAD_BUTTON_LEFT;

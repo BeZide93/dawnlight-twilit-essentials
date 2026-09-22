@@ -505,23 +505,22 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
         return HOOK_CONTINUE;
     }
 
-    if (is_boss_rush_ganon_fight()) {
-        dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
-        dComIfGs_onEventBit(dSv_event_flag_c::M_067);
-        dComIfGs_onEventBit(0x0540);
-        dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
-        dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
-        if (draw != nullptr) {
-            draw->field_0x724 = 1.0f;
-            draw->mButtonZAlpha = 1.0f;
-        }
-    }
-
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine()) {
         return HOOK_CONTINUE;
     }
 
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
+
+    if (is_boss_rush_ganon_fight()) {
+        dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
+        dComIfGs_onEventBit(dSv_event_flag_c::M_067);
+        dComIfGs_onEventBit(0x0540);
+        dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
+        if (draw != nullptr) {
+            draw->field_0x724 = 1.0f;
+            draw->mButtonZAlpha = 1.0f;
+        }
+    }
 
     u32& param0 = mods::arg_ref<u32>(args, 1);
     param0 &= ~0x1000000u;
