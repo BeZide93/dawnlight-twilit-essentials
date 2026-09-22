@@ -144,6 +144,14 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
                 }
             }
             dMeter2Info_setItemColor(zItem, mainPic, shinePic, nullptr, nullptr);
+            /* Bottle-content icons (pou fire, fairy, bee child, worm) load
+               the content overlay as the main texture; the game modulates it
+               with the 2nd color, not the 1st that setItemColor applies
+               (dMeter2_ItemType 27..30). */
+            const u8 zItemType = g_meter2_info.getItemType(zItem);
+            if (zItemType >= 27 && zItemType <= 30 && mainPic != nullptr) {
+                g_meter2_info.set2ndColor(zItemType, mainPic);
+            }
         }
 
         g_zHasSecondLayer = (readResult > 1 || isComboItem);
