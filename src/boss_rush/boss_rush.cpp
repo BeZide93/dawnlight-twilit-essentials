@@ -185,6 +185,9 @@ static const cXyz kArmogohmaFightSpawnPos{0.0f, 0.0f, 2391.84f};
 
 static const cXyz kBeastGanonFightSpawnPos{0.0f, 0.0f, -2890.0f};
 
+static const cXyz kGanondorfFightSpawnPos{600.0f, 1100.0f, 0.0f};
+static const s16 kGanondorfFightAngle = static_cast<s16>(-0x4000);
+
 const BossGalleryEntry g_bossGalleryTable[] = {
     {"Ook",          "Forest Temple",       "E_mk",   "mk.bmd",     nullptr,  "mk_wait.bck",       "D_MN05B", 0, 51, 0, 1.2f,  0.0f,  260.0f},
     {"Diababa",      "Forest Temple",       "B_bq",   "bq.bmd",     nullptr,  "bq_wait01.bck",     "D_MN05A", 0, 50, 0, 0.275f, 0.0f,  260.0f, 0.0f,
@@ -231,7 +234,8 @@ const BossGalleryEntry g_bossGalleryTable[] = {
      &kBeastGanonFightSpawnPos, static_cast<s16>(0)},
     {"Horseback Ganon",  "Hyrule Field",        "Horse",  "hs.bmd",     nullptr,  "hs_wait_01.bck",    "D_MN09B", 0,  0, 0, 0.8f,  0.0f,  260.0f, 0.0f, "HoZelda", "zelh.bmd", nullptr, "zelh_waith.bck"},
     {"Ganondorf",    "Hyrule Castle",       "B_gnd",  "egnd.bmd",   nullptr,  "egnd_wait02.bck",   "D_MN09B", 1, 0,  0, 0.8f,  0.0f,  260.0f, 0.0f,
-     nullptr, nullptr, nullptr, nullptr, nullptr, g_ganondorfParts, kGanondorfPartCount, nullptr, "egnd_core_beat.brk"},
+     nullptr, nullptr, nullptr, nullptr, nullptr, g_ganondorfParts, kGanondorfPartCount, nullptr, "egnd_core_beat.brk",
+     nullptr, nullptr, &kGanondorfFightSpawnPos, kGanondorfFightAngle},
 };
 const size_t g_bossGalleryCount = sizeof(g_bossGalleryTable) / sizeof(g_bossGalleryTable[0]);
 
@@ -452,6 +456,12 @@ static void clear_boss_rush_session_marker() {
 
 static bool s_chamberEquipsPending = false;
 static int  s_chamberEquipsFrames  = 0;
+
+// Set when the entry warp ends; the custom equip suppression must only land
+// once the transition fader is fully black, or the model visibly pops from the
+// custom tunic to the hero tunic in the last frames of the warp cinematic.
+static bool s_equipSuppressWaitBlack = false;
+static int  s_equipSuppressWaitBlackFrames = 0;
 
 static bool s_exitSaveReloadPending = false;
 static bool s_exitCardLoadArmed = false;
@@ -1513,6 +1523,8 @@ static ActorId s_gbId = {};
 static u32  s_gndId = 0;
 static int  s_gndStableFrames = 0;
 
+static bool s_needInPlaceFade = false;
+
 static void trigger_ganon_ground_duel() {
     const int gndIdx = gauntlet_next_phase_index("Horseback Ganon");
     if (gndIdx >= 0) {
@@ -1523,6 +1535,7 @@ static void trigger_ganon_ground_duel() {
     s_gndStableFrames = 0;
     s_gndId = 0;
     s_gbId = {};
+    s_needInPlaceFade = true;
     g_dComIfG_gameInfo.info.getDan().onSwitch(1);
     dComIfGs_onSaveDunSwitch(1);
     dComIfGs_onOneZoneSwitch(15, -1);
@@ -1550,10 +1563,49 @@ static void update_ganon_ground_duel() {
         s_gbId = {};
         s_gndId = 0;
         s_gndStableFrames = 0;
+        s_needInPlaceFade = false;
+    }
+
+    fopAc_ac_c* fk = fopAcM_SearchByName(fpcNm_E_FK_e);
+    if (fk != nullptr) {
+        fopAcM_delete(fk);
+    }
+    fopAc_ac_c* zelda = fopAcM_SearchByName(fpcNm_HOZELDA_e);
+    if (zelda != nullptr) {
+        fopAcM_delete(zelda);
+    }
+    fopAc_ac_c* horse = reinterpret_cast<fopAc_ac_c*>(dComIfGp_getHorseActor());
+    if (horse != nullptr) {
+        fopAcM_delete(horse);
+        dComIfGp_setHorseActor(nullptr);
+    }
+
+    cXyz arenaCenter(0.0f, 1100.0f, 0.0f);
+    fopAc_ac_c* gb = fopAcM_SearchByName(fpcNm_OBJ_GB_e);
+    bool gbNear = false;
+    if (gb != nullptr) {
+        const f32 dx = gb->current.pos.x - arenaCenter.x;
+        const f32 dy = gb->current.pos.y - arenaCenter.y;
+        const f32 dz = gb->current.pos.z - arenaCenter.z;
+        gbNear = (dx * dx + dy * dy + dz * dz) < 5000.0f * 5000.0f;
+    }
+    if (gb != nullptr && gbNear) {
+        if (s_gbId == 0) s_gbId = gb->id;
+    } else if (s_gbId == 0 && svc_actor && s_modCtx) {
+        ActorSpawnParams sp{};
+        sp.parameters = 0xF0069600;
+        sp.argument = 0;
+        sp.room_num = 0;
+        sp.position = {arenaCenter.x, arenaCenter.y, arenaCenter.z};
+        sp.angle = {0, 0, 0};
+        sp.scale = {1.0f, 1.0f, 1.0f};
+        svc_actor->create_actor(s_modCtx, fpcNm_OBJ_GB_e, &sp, &s_gbId);
     }
 
     if (!s_duelReady) {
-        boss_rush_screen_hold_black();
+        if (s_needInPlaceFade) {
+            boss_rush_screen_hold_black();
+        }
         s_holdBlackFrames++;
 
         daAlink_c* link = daAlink_getAlinkActorClass();
@@ -1565,37 +1617,8 @@ static void update_ganon_ground_duel() {
         if (gnd->id != s_gndId) {
             s_gndId = gnd->id;
             s_gndStableFrames = 0;
-            s_gbId = {};
         } else if (s_gndStableFrames < 9999) {
             s_gndStableFrames++;
-        }
-
-        fopAc_ac_c* fk = fopAcM_SearchByName(fpcNm_E_FK_e);
-        while (fk != nullptr) {
-            fopAcM_delete(fk);
-            fk = fopAcM_SearchByName(fpcNm_E_FK_e);
-        }
-
-        cXyz arenaCenter(0.0f, 1100.0f, 0.0f);
-        fopAc_ac_c* gb = fopAcM_SearchByName(fpcNm_OBJ_GB_e);
-        bool gbNear = false;
-        if (gb != nullptr) {
-            const f32 dx = gb->current.pos.x - arenaCenter.x;
-            const f32 dy = gb->current.pos.y - arenaCenter.y;
-            const f32 dz = gb->current.pos.z - arenaCenter.z;
-            gbNear = (dx * dx + dy * dy + dz * dz) < 5000.0f * 5000.0f;
-        }
-        if (gb != nullptr && gbNear) {
-            if (s_gbId == 0) s_gbId = gb->id;
-        } else if (s_gndStableFrames >= 5 && !gbNear && s_gbId == 0 && svc_actor && s_modCtx) {
-            ActorSpawnParams sp{};
-            sp.parameters = 0xF0069600;
-            sp.argument = 0;
-            sp.room_num = 0;
-            sp.position = {arenaCenter.x, arenaCenter.y, arenaCenter.z};
-            sp.angle = {0, 0, 0};
-            sp.scale = {1.0f, 1.0f, 1.0f};
-            svc_actor->create_actor(s_modCtx, fpcNm_OBJ_GB_e, &sp, &s_gbId);
         }
 
         bbi::ganondorf_force_ground_duel(gnd);
@@ -1621,10 +1644,10 @@ static void update_ganon_ground_duel() {
         gnd->old.pos = gndPos;
         gnd->shape_angle.x = 0;
         gnd->shape_angle.z = 0;
-        gnd->shape_angle.y = 0x37FE;
+        gnd->shape_angle.y = 0x4000;
         gnd->current.angle.x = 0;
         gnd->current.angle.z = 0;
-        gnd->current.angle.y = 0x37FE;
+        gnd->current.angle.y = 0x4000;
         gnd->speed.set(0.0f, 0.0f, 0.0f);
         gnd->speedF = 0.0f;
         gnd->gravity = -5.0f;
@@ -1641,30 +1664,19 @@ static void update_ganon_ground_duel() {
             kankyo->wether = 1;
         }
 
-        if (s_holdBlackFrames == 1) {
-            if (link->checkHorseRide()) {
-                link->onForceHorseGetOff();
-            }
-            link->procWaitInit();
-            link->cancelOriginalDemo();
-            dComIfGp_event_reset();
-            if (link->mEquipItem != 0x103) {
-                link->swordEquip(TRUE);
-                link->setSwordModel();
-            }
+        if (link->checkHorseRide()) {
+            link->onForceHorseGetOff();
         }
-
-        fopAc_ac_c* horse = reinterpret_cast<fopAc_ac_c*>(dComIfGp_getHorseActor());
-        if (horse != nullptr) {
-            cXyz awayPos(0.0f, -5000.0f, 0.0f);
-            horse->current.pos = awayPos;
-            horse->old.pos = awayPos;
-            horse->speed.set(0.0f, 0.0f, 0.0f);
-            horse->speedF = 0.0f;
+        link->procWaitInit();
+        link->cancelOriginalDemo();
+        dComIfGp_event_reset();
+        if (link->mEquipItem != 0x103) {
+            link->swordEquip(TRUE);
+            link->setSwordModel();
         }
 
         cXyz linkPos(600.0f, 1100.0f, 0.0f);
-        const s16 linkAngle = static_cast<s16>(-0x4802);
+        const s16 linkAngle = static_cast<s16>(-0x4000);
         link->current.pos = linkPos;
         link->old.pos = linkPos;
         link->shape_angle.y = linkAngle;
@@ -1683,10 +1695,13 @@ static void update_ganon_ground_duel() {
             fopCamM_SetAngleY(cam, linkAngle);
         }
 
-        if ((s_holdBlackFrames >= 25 && s_gndStableFrames >= 15 && s_gbId != 0) || s_holdBlackFrames >= 45) {
+        if (!s_needInPlaceFade || (s_holdBlackFrames >= 25 && s_gndStableFrames >= 15 && s_gbId != 0) || s_holdBlackFrames >= 45) {
             s_duelReady = true;
             Z2GetAudioMgr()->bgmStart(Z2BGM_VS_GANON_04, 0, 0);
-            boss_rush_screen_fade_in(0.06f);
+            if (s_needInPlaceFade) {
+                boss_rush_screen_fade_in(0.06f);
+                s_needInPlaceFade = false;
+            }
         }
     }
 }
@@ -3911,7 +3926,8 @@ static HookAction on_dungeon_return_warp_pre(ModContext*, void*, void*, void*) {
     s_dungeonClearWarpPending = false;
     s_dungeonClearWarpFrames  = 0;
 
-    custom_equip_set_suppressed(true);
+    s_equipSuppressWaitBlack = true;
+    s_equipSuppressWaitBlackFrames = 0;
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
 
     s_chamberEquipsPending = true;
@@ -3947,7 +3963,8 @@ static HookAction on_skip_portal_obj_warp_pre(ModContext*, void*, void*, void*) 
         human_warp_cinematic_end();
     }
 
-    custom_equip_set_suppressed(true);
+    s_equipSuppressWaitBlack = true;
+    s_equipSuppressWaitBlackFrames = 0;
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
 
     s_chamberEquipsPending = true;
@@ -4255,6 +4272,8 @@ static void close_boss_rush_session() {
     s_retryWarpActive = false;
     s_chamberEquipsPending = false;
     s_chamberEquipsFrames = 0;
+    s_equipSuppressWaitBlack = false;
+    s_equipSuppressWaitBlackFrames = 0;
 
     boss_rush_timer_end_chain_run();
     boss_rush_timer_end_all_phases();
@@ -4912,11 +4931,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     }
 
     if (s_pendingFightIndex != -1) {
-        const char* curSt = dComIfGp_getStartStageName();
-        if (curSt != nullptr && std::strcmp(curSt, "D_MN09B") == 0 &&
-            g_dComIfG_gameInfo.info.getDan().isSwitch(1)) {
-            boss_rush_screen_hold_black();
-        }
         ++s_warpWatchdogFrames;
         if (s_warpWatchdogFrames % 60 == 0) {
             const char* st = dComIfGp_getStartStageName();
@@ -5230,6 +5244,17 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             boss_rush_save_apply_equips_to_savedata();
             s_chamberEquipsPending = false;
             s_chamberEquipsFrames = 0;
+        }
+    }
+
+    if (s_equipSuppressWaitBlack) {
+        JUTFader* supFader = mDoGph_gInf_c::getFader();
+        const s32 supFaderStatus = (supFader != nullptr) ? supFader->getStatus() : -1;
+        ++s_equipSuppressWaitBlackFrames;
+        if (supFaderStatus == JUTFader::None || s_equipSuppressWaitBlackFrames >= 600) {
+            custom_equip_set_suppressed(true);
+            s_equipSuppressWaitBlack = false;
+            s_equipSuppressWaitBlackFrames = 0;
         }
     }
 
@@ -5718,6 +5743,8 @@ void shutdown_boss_rush() {
     s_shouldAutoSaveCaptured = false;
     s_chamberEquipsPending = false;
     s_chamberEquipsFrames = 0;
+    s_equipSuppressWaitBlack = false;
+    s_equipSuppressWaitBlackFrames = 0;
     s_bossRushModeActive = false;
     s_swordDrawnLatched = false;
     s_activeFightIndex = -1;
