@@ -571,19 +571,32 @@ void load_model(Entry& e) {
 
     if (e.def.kind == CE_TUNIC) {
         void* hatBmd = find_bmd_matching(e.arc, "head");
+        if (!hatBmd) hatBmd = find_bmd_matching(e.arc, "hat");
         if (!hatBmd) hatBmd = get_arc_res(e.arc, "al_head.bmd", 0x0010);
+        if (!hatBmd) hatBmd = get_arc_res(e.arc, "_head.bmd");
+        if (!hatBmd) hatBmd = get_arc_res(e.arc, "head.bmd");
+        if (!hatBmd) hatBmd = get_arc_res(e.arc, "_hat.bmd");
+        if (!hatBmd) hatBmd = get_arc_res(e.arc, "hat.bmd");
         if (hatBmd) {
             e.hatModel = load_single_bmd(hatBmd, 0x11000084, true);
         }
 
         void* faceBmd = find_bmd_matching(e.arc, "face");
         if (!faceBmd) faceBmd = get_arc_res(e.arc, "al_face.bmd", 0x000E);
+        if (!faceBmd) faceBmd = get_arc_res(e.arc, "_face.bmd");
+        if (!faceBmd) faceBmd = get_arc_res(e.arc, "face.bmd");
         if (faceBmd) {
             e.faceModel = load_single_bmd(faceBmd, 0x11020284, true);
         }
 
         void* handBmd = find_bmd_matching(e.arc, "hand");
+        if (!handBmd) handBmd = find_bmd_matching(e.arc, "hands");
         if (!handBmd) handBmd = get_arc_res(e.arc, "al_hands.bmd", 0x000F);
+        if (!handBmd) handBmd = get_arc_res(e.arc, "_hands.bmd");
+        if (!handBmd) handBmd = get_arc_res(e.arc, "hands.bmd");
+        if (!handBmd) handBmd = get_arc_res(e.arc, "_hand.bmd");
+        if (!handBmd) handBmd = get_arc_res(e.arc, "hand.bmd");
+        if (!handBmd) handBmd = get_arc_res(e.arc, "al_hand.bmd");
         if (handBmd) {
             e.handModel = load_single_bmd(handBmd, 0x11000084, true);
         }
