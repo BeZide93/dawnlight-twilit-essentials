@@ -14,11 +14,14 @@
 #include "JSystem/JKernel/JKRExpHeap.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "JSystem/JUtility/JUTTexture.h"
+#include "SSystem/SComponent/c_lib.h"
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "d/d_stage.h"
 #include "d/d_camera.h"
+#include "d/d_resorce.h"
+#include "res/Object/Always.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_pc/f_pc_manager.h"
@@ -44,6 +47,9 @@ DEFINE_HOOK(&dMenu_Collect3D_c::_delete, CeCollect3DDeleteHook);
 DEFINE_HOOK(&daAlink_c::initStatusWindow, CeInitStatusWindowHook);
 
 DEFINE_HOOK(&J3DModel::calc, J3DModelCalcHook);
+
+DEFINE_HOOK(&daAlink_c::warpModelTexScroll, CeWarpModelTexScrollHook);
+DEFINE_HOOK(&daAlink_c::changeWarpMaterial, CeChangeWarpMaterialHook);
 
 namespace {
 
@@ -311,7 +317,121 @@ static bool bmd_vertex_format_ok(const void* bmd) {
     return true;
 }
 
-static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
+static const J3DTexMtxInfo s_warpTexMtxInfo = {
+    0x00,
+    0x08, 0x00, 0x00,
+    {0.5f, 0.5f, 0.0f},
+    {0.1f, 0.1f, 0, 0.0f, 0.0f},
+    {
+        {0.5f, 0.0f, 0.0f, 0.5f},
+        {0.0f, 0.5f, 0.0f, 0.5f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    },
+};
+
+static void safe_on_warp_material(J3DModelData* modelData) {
+    if (modelData == nullptr) return;
+    u16 matNum = modelData->getMaterialNum();
+    for (u16 i = 0; i < matNum; ++i) {
+        J3DMaterial* material = modelData->getMaterialNodePointer(i);
+        if (material == nullptr) continue;
+        J3DTevBlock* tevBlock = material->getTevBlock();
+        if (tevBlock == nullptr) continue;
+        u8 tevStageNum = tevBlock->getTevStageNum();
+        if (tevStageNum == 0) continue;
+        J3DTevOrder* tevorder = tevBlock->getTevOrder(tevStageNum - 1);
+        if (tevorder != nullptr && tevorder->getTexMap() == 3) {
+            continue;
+        }
+        tevBlock->setTevStageNum(tevStageNum + 1);
+        J3DTexGenBlock* texGenBlock = material->getTexGenBlock();
+        if (texGenBlock != nullptr) {
+            texGenBlock->setTexGenNum(texGenBlock->getTexGenNum() + 1);
+        }
+    }
+}
+
+static void safe_off_warp_material(J3DModelData* modelData) {
+    if (modelData == nullptr) return;
+    u16 matNum = modelData->getMaterialNum();
+    for (u16 i = 0; i < matNum; ++i) {
+        J3DMaterial* material = modelData->getMaterialNodePointer(i);
+        if (material == nullptr) continue;
+        J3DTevBlock* tevBlock = material->getTevBlock();
+        if (tevBlock == nullptr) continue;
+        u8 tevStageNum = tevBlock->getTevStageNum();
+        if (tevStageNum <= 1) continue;
+        J3DTevOrder* tevorder = tevBlock->getTevOrder(tevStageNum - 1);
+        if (tevorder == nullptr || tevorder->getTexMap() != 3) {
+            continue;
+        }
+        tevBlock->setTevStageNum(tevStageNum - 1);
+        J3DTexGenBlock* texGenBlock = material->getTexGenBlock();
+        if (texGenBlock != nullptr && texGenBlock->getTexGenNum() > 1) {
+            texGenBlock->setTexGenNum(texGenBlock->getTexGenNum() - 1);
+        }
+    }
+}
+
+static void safe_apply_warp_srt(J3DModelData* modelData, const cXyz& pos, f32 transX, f32 transY) {
+    if (modelData == nullptr) return;
+    u16 matNum = modelData->getMaterialNum();
+    if (matNum == 0) return;
+
+    mDoMtx_stack_c::transS(-pos.x, -pos.y, -pos.z);
+    camera_process_class* camera = dComIfGp_getCamera(g_dComIfG_gameInfo.play.getPlayerCameraID(0));
+    if (camera == nullptr) {
+        camera = dComIfGp_getCamera(0);
+    }
+    if (camera != nullptr) {
+        mDoMtx_stack_c::YrotM(fopCamM_GetAngleY(camera));
+    } else {
+        mDoMtx_stack_c::YrotM(0);
+    }
+
+    J3DTexMtx* updatedMtxs[8] = {};
+    int updatedCount = 0;
+
+    for (u16 m = 0; m < matNum && m < 8; ++m) {
+        J3DMaterial* mat = modelData->getMaterialNodePointer(m);
+        if (mat == nullptr || mat->getTexGenBlock() == nullptr) continue;
+        J3DTexGenBlock* texGen = mat->getTexGenBlock();
+        u32 num = texGen->getTexGenNum();
+        J3DTexMtx* warpTexMtx = nullptr;
+        if (num > 0 && num <= 8) {
+            warpTexMtx = texGen->getTexMtx(num - 1);
+        }
+        if (warpTexMtx == nullptr) {
+            for (u32 i = 0; i < 8; ++i) {
+                if (texGen->getTexMtx(i) != nullptr) {
+                    warpTexMtx = texGen->getTexMtx(i);
+                    break;
+                }
+            }
+        }
+        if (warpTexMtx == nullptr) continue;
+
+        bool alreadyUpdated = false;
+        for (int u = 0; u < updatedCount; ++u) {
+            if (updatedMtxs[u] == warpTexMtx) {
+                alreadyUpdated = true;
+                break;
+            }
+        }
+        if (alreadyUpdated) continue;
+        if (updatedCount < 8) {
+            updatedMtxs[updatedCount++] = warpTexMtx;
+        }
+
+        J3DTexMtxInfo& texMtxInfo = warpTexMtx->getTexMtxInfo();
+        texMtxInfo.mSRT.mTranslationX = transX;
+        texMtxInfo.mSRT.mTranslationY = transY;
+        cMtx_concat(s_warpTexMtxInfo.mEffectMtx, mDoMtx_stack_c::get(), texMtxInfo.mEffectMtx);
+    }
+}
+
+static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084, bool isWarpModel = false) {
     if (!bmd) return nullptr;
 
     static const char* const kValidMagics[] = { "J3D2bmd3", "J3D2bdl4" };
@@ -326,44 +446,54 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     JKRHeap* rootHeap = JKRHeap::getRootHeap();
     JKRHeap* old = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
 
-    J3DModelData* data = J3DModelLoaderDataBase::load(bmd, 0x59020010);
-    if (!data || data->getMaterialNum() == 0) {
-        if (old != nullptr) mDoExt_setCurrentHeap(old);
-        return nullptr;
+    J3DModelData* data = nullptr;
+    if (isWarpModel) {
+        data = dRes_info_c::loaderBasicBmd('BMWR', bmd);
     }
 
-    if (J3DTexture* tex = data->getTexture()) {
-        const u16 texNum = tex->getNum();
-        for (u16 i = 0; i < texNum; ++i) {
-            ResTIMG* t = tex->getResTIMG(i);
-            if (t == nullptr) continue;
-            const bool degenerate = t->width == 0 || t->height == 0;
-            const bool unsupported = !(t->format <= 6 || t->format == 14 ||
-                                       (t->format >= 0x41 && t->format <= 0x4E));
-            if (t->width == 0) t->width = 8;
-            if (t->height == 0) t->height = 8;
-            if (t->imageOffset == 0) t->imageOffset = 0x20;
-            if (unsupported) t->format = 3;
-            if (degenerate || unsupported) {
-                tex->setResTIMG(i, *t);
+    if (data == nullptr) {
+        data = J3DModelLoaderDataBase::load(bmd, 0x59020010);
+        if (!data || data->getMaterialNum() == 0) {
+            if (old != nullptr) mDoExt_setCurrentHeap(old);
+            return nullptr;
+        }
+
+        if (J3DTexture* tex = data->getTexture()) {
+            const u16 texNum = tex->getNum();
+            for (u16 i = 0; i < texNum; ++i) {
+                ResTIMG* t = tex->getResTIMG(i);
+                if (t == nullptr) continue;
+                const bool degenerate = t->width == 0 || t->height == 0;
+                const bool unsupported = !(t->format <= 6 || t->format == 14 ||
+                                           (t->format >= 0x41 && t->format <= 0x4E));
+                if (t->width == 0) t->width = 8;
+                if (t->height == 0) t->height = 8;
+                if (t->imageOffset == 0) t->imageOffset = 0x20;
+                if (unsupported) t->format = 3;
+                if (degenerate || unsupported) {
+                    tex->setResTIMG(i, *t);
+                }
             }
         }
-    }
 
-    for (u16 i = 0; i < data->getMaterialNum(); i++) {
-        J3DMaterial* mat = data->getMaterialNodePointer(i);
-        mat->change();
-        if (J3DMaterialAnm* anm = JKR_NEW J3DMaterialAnm()) {
-            mat->setMaterialAnm(anm);
+        for (u16 i = 0; i < data->getMaterialNum(); i++) {
+            J3DMaterial* mat = data->getMaterialNodePointer(i);
+            mat->change();
+            if (J3DMaterialAnm* anm = JKR_NEW J3DMaterialAnm()) {
+                mat->setMaterialAnm(anm);
+            }
+        }
+
+        if (data->newSharedDisplayList(J3DMdlFlag_UseSingleDL) == kJ3DError_Success) {
+            data->simpleCalcMaterial(const_cast<MtxP>(j3dDefaultMtx));
+            data->makeSharedDL();
         }
     }
 
-    if (data->newSharedDisplayList(J3DMdlFlag_UseSingleDL) == kJ3DError_Success) {
-        data->simpleCalcMaterial(const_cast<MtxP>(j3dDefaultMtx));
-        data->makeSharedDL();
-    }
+    safe_on_warp_material(data);
+    J3DModel* model = mDoExt_J3DModel__create(data, 0x80000, diffFlags | 0x2000400);
+    safe_off_warp_material(data);
 
-    J3DModel* model = mDoExt_J3DModel__create(data, 0x80000, diffFlags);
     if (old != nullptr) mDoExt_setCurrentHeap(old);
     return model;
 }
@@ -443,19 +573,19 @@ void load_model(Entry& e) {
         void* hatBmd = find_bmd_matching(e.arc, "head");
         if (!hatBmd) hatBmd = get_arc_res(e.arc, "al_head.bmd", 0x0010);
         if (hatBmd) {
-            e.hatModel = load_single_bmd(hatBmd, 0x11000084);
+            e.hatModel = load_single_bmd(hatBmd, 0x11000084, true);
         }
 
         void* faceBmd = find_bmd_matching(e.arc, "face");
         if (!faceBmd) faceBmd = get_arc_res(e.arc, "al_face.bmd", 0x000E);
         if (faceBmd) {
-            e.faceModel = load_single_bmd(faceBmd, 0x11020284);
+            e.faceModel = load_single_bmd(faceBmd, 0x11020284, true);
         }
 
         void* handBmd = find_bmd_matching(e.arc, "hand");
         if (!handBmd) handBmd = get_arc_res(e.arc, "al_hands.bmd", 0x000F);
         if (handBmd) {
-            e.handModel = load_single_bmd(handBmd, 0x11000084);
+            e.handModel = load_single_bmd(handBmd, 0x11000084, true);
         }
 
         void* bodyBmd = nullptr;
@@ -470,7 +600,7 @@ void load_model(Entry& e) {
             bodyBmd = get_arc_res(e.arc, "al.bmd");
         }
         if (bodyBmd) {
-            e.model = load_single_bmd(bodyBmd, 0x11000084);
+            e.model = load_single_bmd(bodyBmd, 0x11000084, true);
         }
     } else {
         void* bmd = nullptr;
@@ -479,14 +609,14 @@ void load_model(Entry& e) {
             if (bmd == nullptr) bmd = e.arc->getIdxResource(e.def.modelFileId);
         }
         if (bmd != nullptr) {
-            e.model = load_single_bmd(bmd, 0x11000084);
+            e.model = load_single_bmd(bmd, 0x11000084, true);
         }
 
         if (e.def.kind == CE_SWORD && e.def.sheathFileId != 0xFFFF) {
             void* sBmd = e.arc->getResource(static_cast<u16>(e.def.sheathFileId));
             if (sBmd == nullptr) sBmd = e.arc->getIdxResource(e.def.sheathFileId);
             if (sBmd != nullptr) {
-                e.sheathModel = load_single_bmd(sBmd, 0x11000084);
+                e.sheathModel = load_single_bmd(sBmd, 0x11000084, true);
             }
         }
     }
@@ -1244,6 +1374,116 @@ static void on_custom_equip_new_save(ModContext*, uint32_t, void*) {
     save_custom_equip_state(CE_TUNIC, 0);
 }
 
+static void safe_on_warp_entry(const Entry& e) {
+    if (e.model != nullptr) safe_on_warp_material(e.model->getModelData());
+    if (e.sheathModel != nullptr) safe_on_warp_material(e.sheathModel->getModelData());
+    if (e.hatModel != nullptr) safe_on_warp_material(e.hatModel->getModelData());
+    if (e.faceModel != nullptr) safe_on_warp_material(e.faceModel->getModelData());
+    if (e.handModel != nullptr) safe_on_warp_material(e.handModel->getModelData());
+}
+
+static void safe_off_warp_entry(const Entry& e) {
+    if (e.model != nullptr) safe_off_warp_material(e.model->getModelData());
+    if (e.sheathModel != nullptr) safe_off_warp_material(e.sheathModel->getModelData());
+    if (e.hatModel != nullptr) safe_off_warp_material(e.hatModel->getModelData());
+    if (e.faceModel != nullptr) safe_off_warp_material(e.faceModel->getModelData());
+    if (e.handModel != nullptr) safe_off_warp_material(e.handModel->getModelData());
+}
+
+static void safe_apply_warp_srt_entry(const Entry& e, const cXyz& pos, f32 transX, f32 transY) {
+    if (e.model != nullptr) safe_apply_warp_srt(e.model->getModelData(), pos, transX, transY);
+    if (e.sheathModel != nullptr) safe_apply_warp_srt(e.sheathModel->getModelData(), pos, transX, transY);
+    if (e.hatModel != nullptr) safe_apply_warp_srt(e.hatModel->getModelData(), pos, transX, transY);
+    if (e.faceModel != nullptr) safe_apply_warp_srt(e.faceModel->getModelData(), pos, transX, transY);
+    if (e.handModel != nullptr) safe_apply_warp_srt(e.handModel->getModelData(), pos, transX, transY);
+}
+
+static void on_warp_model_tex_scroll_replace(ModContext*, void* args, void* ret, void*) {
+    if (!args || !ret) return;
+    daAlink_c* self = mods::arg<daAlink_c*>(args, 0);
+    int* rv = static_cast<int*>(ret);
+    *rv = 0;
+    if (self == nullptr) return;
+
+    self->field_0x3478 += 0.15f;
+    if (self->field_0x3478 >= 1.0f) {
+        self->field_0x3478 -= 1.0f;
+    }
+
+    *rv = cLib_chaseF(&self->field_0x347c, self->field_0x3480, 0.06f);
+    self->field_0x3484 = cLib_minMaxLimit<f32>(0.5f * self->field_0x347c, 0.0f, 1.0f);
+
+    safe_apply_warp_srt(self->field_0x064C, self->current.pos, self->field_0x3478, self->field_0x347c);
+    if (self->mSwordModel != nullptr) safe_apply_warp_srt(self->mSwordModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+    if (self->mShieldModel != nullptr) safe_apply_warp_srt(self->mShieldModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+    if (self->mSheathModel != nullptr) safe_apply_warp_srt(self->mSheathModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+
+    if (self->checkWolf()) {
+        if (self->mpWlChainModels[0] != nullptr) safe_apply_warp_srt(self->mpWlChainModels[0]->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+    } else {
+        if (self->mpLinkFaceModel != nullptr) safe_apply_warp_srt(self->mpLinkFaceModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+        if (self->mpLinkHatModel != nullptr) safe_apply_warp_srt(self->mpLinkHatModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+        if (self->mpLinkHandModel != nullptr) safe_apply_warp_srt(self->mpLinkHandModel->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+        if (self->mpLinkBootModels[0] != nullptr) safe_apply_warp_srt(self->mpLinkBootModels[0]->getModelData(), self->current.pos, self->field_0x3478, self->field_0x347c);
+    }
+
+    for (int i = 0; i < kMaxDefs; ++i) {
+        safe_apply_warp_srt_entry(s_entries[i], self->current.pos, self->field_0x3478, self->field_0x347c);
+    }
+}
+
+static void on_change_warp_material_replace(ModContext*, void* args, void*, void*) {
+    if (!args) return;
+    daAlink_c* self = mods::arg<daAlink_c*>(args, 0);
+    int matMode = mods::arg<int>(args, 1);
+    if (self == nullptr) return;
+
+    if (matMode == daAlink_c::WARP_MAT_MODE_0) {
+        safe_on_warp_material(self->field_0x064C);
+        if (self->mSwordModel != nullptr) safe_on_warp_material(self->mSwordModel->getModelData());
+        if (self->mShieldModel != nullptr) safe_on_warp_material(self->mShieldModel->getModelData());
+        if (self->mSheathModel != nullptr) safe_on_warp_material(self->mSheathModel->getModelData());
+
+        if (self->checkWolf()) {
+            if (self->mpWlChainModels[0] != nullptr) safe_on_warp_material(self->mpWlChainModels[0]->getModelData());
+        } else {
+            if (self->mpLinkFaceModel != nullptr) safe_on_warp_material(self->mpLinkFaceModel->getModelData());
+            if (self->mpLinkHatModel != nullptr) safe_on_warp_material(self->mpLinkHatModel->getModelData());
+            if (self->mpLinkHandModel != nullptr) safe_on_warp_material(self->mpLinkHandModel->getModelData());
+            if (self->mpLinkBootModels[0] != nullptr) safe_on_warp_material(self->mpLinkBootModels[0]->getModelData());
+        }
+
+        for (int i = 0; i < kMaxDefs; ++i) {
+            safe_on_warp_entry(s_entries[i]);
+        }
+    } else {
+        safe_off_warp_material(self->field_0x064C);
+        if (self->mSwordModel != nullptr) safe_off_warp_material(self->mSwordModel->getModelData());
+        if (self->mShieldModel != nullptr) safe_off_warp_material(self->mShieldModel->getModelData());
+        if (self->mSheathModel != nullptr) safe_off_warp_material(self->mSheathModel->getModelData());
+
+        if (self->checkWolf()) {
+            if (self->mpWlChainModels[0] != nullptr) safe_off_warp_material(self->mpWlChainModels[0]->getModelData());
+        } else {
+            if (self->mpLinkFaceModel != nullptr) safe_off_warp_material(self->mpLinkFaceModel->getModelData());
+            if (self->mpLinkHatModel != nullptr) safe_off_warp_material(self->mpLinkHatModel->getModelData());
+            if (self->mpLinkHandModel != nullptr) safe_off_warp_material(self->mpLinkHandModel->getModelData());
+            if (self->mpLinkBootModels[0] != nullptr) safe_off_warp_material(self->mpLinkBootModels[0]->getModelData());
+        }
+
+        for (int i = 0; i < kMaxDefs; ++i) {
+            safe_off_warp_entry(s_entries[i]);
+        }
+
+        for (int i = 0; i < 6; i++) {
+            JPABaseEmitter* emitterp = dComIfGp_particle_getEmitter(self->field_0x3240[i]);
+            if (emitterp != nullptr) {
+                emitterp->stopDrawParticle();
+            }
+        }
+    }
+}
+
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*);
 HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*);
 HookAction on_alink_init_status_window_pre(ModContext*, void*, void*, void*);
@@ -1270,6 +1510,9 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
 
     mods::hook::add_pre<MwExecuteHook>(hook_svc, on_mw_execute_pre_doll_safety);
     mods::hook::add_pre<J3DModelCalcHook>(hook_svc, on_j3dmodel_calc_pre);
+
+    mods::hook::replace<CeWarpModelTexScrollHook>(hook_svc, on_warp_model_tex_scroll_replace);
+    mods::hook::replace<CeChangeWarpMaterialHook>(hook_svc, on_change_warp_material_replace);
 }
 
 static void on_stage_changed() {
@@ -1342,42 +1585,20 @@ static void doll_session_watchdog() {
 static void custom_equip_menu_doll_begin() {
     s_dollSwapActive = false;
     daAlink_c* a = player();
-    if (a == nullptr) { log_collect_info("[doll] abort: no player"); return; }
-    if (is_wolf(a)) { log_collect_info("[doll] abort: is_wolf"); return; }
+    if (a == nullptr) return;
+    if (is_wolf(a)) return;
 
-    if (s_originalLinkModel == nullptr) {
-        log_collect_info("[doll] abort: no captured vanilla model (nothing custom equipped)");
-        return;
-    }
-    if (a->mpLinkModel == s_originalLinkModel) {
-        log_collect_info("[doll] abort: mpLinkModel already vanilla");
-        return;
-    }
+    if (s_originalLinkModel == nullptr) return;
+    if (a->mpLinkModel == s_originalLinkModel) return;
 
-    if (J3DModelData* vanillaData = s_originalLinkModel->getModelData()) {
-        if (J3DModelData* customData = a->mpLinkModel->getModelData()) {
-            log_collect_info("[doll] model compare: vanilla joints=%u shapes=%u drawMtx=%u | "
-                             "custom joints=%u shapes=%u drawMtx=%u",
-                             vanillaData->getJointNum(), vanillaData->getShapeNum(), vanillaData->getDrawMtxNum(),
-                             customData->getJointNum(), customData->getShapeNum(), customData->getDrawMtxNum());
-        }
-    }
     if (a->mpLinkModel == nullptr || a->mpLinkHatModel == nullptr ||
         a->mpLinkFaceModel == nullptr || a->mpLinkHandModel == nullptr) {
-        log_collect_info("[doll] abort: actor sub-model null (body=%p hat=%p face=%p hand=%p)",
-                         (void*)a->mpLinkModel, (void*)a->mpLinkHatModel,
-                         (void*)a->mpLinkFaceModel, (void*)a->mpLinkHandModel);
         return;
     }
     if (s_originalLinkModel == nullptr || s_originalHatModel == nullptr ||
         s_originalFaceModel == nullptr || s_originalHandModel == nullptr) {
-        log_collect_info("[doll] abort: original sub-model null (body=%p hat=%p face=%p hand=%p)",
-                         (void*)s_originalLinkModel, (void*)s_originalHatModel,
-                         (void*)s_originalFaceModel, (void*)s_originalHandModel);
         return;
     }
-    log_collect_info("[doll] begin: swapping doll to vanilla models (body=%p->%p)",
-                     (void*)a->mpLinkModel, (void*)s_originalLinkModel);
 
     a->mpLinkModel     = s_originalLinkModel;
     a->mpLinkHatModel  = s_originalHatModel;
@@ -1403,47 +1624,29 @@ static void custom_equip_menu_doll_begin() {
     }
 
     s_dollSwapActive = true;
-    log_collect_info("[doll] begin: swap done, s_dollSwapActive=true");
 }
 
 static void custom_equip_menu_doll_end() {
-
     s_dollSwapActive = false;
 }
 
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*) {
-    log_collect_info("[doll] HOOK FIRED: on_collect_3d_create_pre");
     if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
     return HOOK_CONTINUE;
 }
 
 HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*) {
-    log_collect_info("[doll] HOOK FIRED: on_collect_3d_delete_pre");
     custom_equip_menu_doll_end();
     return HOOK_CONTINUE;
 }
 
 HookAction on_alink_init_status_window_pre(ModContext*, void*, void*, void*) {
-    log_collect_info("[doll] HOOK FIRED: on_alink_init_status_window_pre");
     if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
     return HOOK_CONTINUE;
 }
 
 HookAction on_mw_execute_pre_doll_safety(ModContext*, void*, void*, void*) {
     return HOOK_CONTINUE;
-#if 0
-    if (!is_collection_menu_enabled()) return HOOK_CONTINUE;
-
-    if (!dComIfGp_isPauseFlag()) return HOOK_CONTINUE;
-    daAlink_c* a = player();
-
-    if (a != nullptr && !s_dollSwapActive && s_originalLinkModel != nullptr &&
-        a->mpLinkModel != s_originalLinkModel) {
-        log_collect_info("[doll] HOOK FIRED: on_mw_execute_pre_doll_safety (tunic on actor, swapping)");
-        custom_equip_menu_doll_begin();
-    }
-    return HOOK_CONTINUE;
-#endif
 }
 
 HookAction on_j3dmodel_calc_pre(ModContext*, void* args, void*, void*) {
