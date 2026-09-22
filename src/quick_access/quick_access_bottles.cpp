@@ -273,6 +273,7 @@ bool quick_access_bottles_hotkey_active() {
 
 static const int QB_ITEM_PROC_KANDELAAR_POUR = 8;
 static const int QB_ITEM_PROC_COMMON_CHANGE_ITEM = 12;
+static const int QB_ITEM_PROC_BOTTLE_SWING = 13;
 
 static u8 s_pendingSlot = 0xFF;
 static u8 s_pendingItem = 0;
@@ -306,7 +307,9 @@ static void bottles_finish_pending() {
     const u8 result = (s_pendingItem == dItemNo_MILK_BOTTLE_e)
                           ? static_cast<u8>(dItemNo_HALF_MILK_BOTTLE_e)
                           : static_cast<u8>(dItemNo_EMPTY_BOTTLE_e);
-    dComIfGs_setBottleItemIn(s_pendingItem, result);
+    if (bottle_item(s_pendingSlot) == s_pendingItem) {
+        dComIfGs_setBottleItemIn(s_pendingItem, result);
+    }
 
     if (dComIfGs_getSelectItemIndex(SELECT_ITEM_B) != s_preSelectIndex) {
         dComIfGs_setSelectItemIndex(SELECT_ITEM_B, s_preSelectIndex);
@@ -357,10 +360,20 @@ static void bottles_use_bottle(int slotIdx) {
            (int)g_zInventorySlot, (int)resolved_select_item(2));
 
     g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, item);
+    dComIfGs_setSelectItemIndex(SELECT_ITEM_B, SLOT_11 + slotIdx);
 
     int proc = link->checkNewItemChange(SELECT_ITEM_B);
     if (isOil && proc == QB_ITEM_PROC_COMMON_CHANGE_ITEM) {
         proc = QB_ITEM_PROC_KANDELAAR_POUR;
+    }
+
+    if (item == dItemNo_EMPTY_BOTTLE_e && link->mEquipItem != dItemNo_KANTERA_e) {
+        if (proc == QB_ITEM_PROC_COMMON_CHANGE_ITEM && link->mEquipItem == dItemNo_NONE_e) {
+            link->setBottleModel(dItemNo_EMPTY_BOTTLE_e);
+            proc = QB_ITEM_PROC_BOTTLE_SWING;
+        } else if (proc == 0 && link->mEquipItem == dItemNo_EMPTY_BOTTLE_e) {
+            proc = QB_ITEM_PROC_BOTTLE_SWING;
+        }
     }
 
     qb_log("[qb] use_bottle: checkNewItemChange proc=%d", proc);
@@ -368,6 +381,8 @@ static void bottles_use_bottle(int slotIdx) {
     if (proc == 0) {
         qb_log("[qb] use_bottle: proc==0, bailing (error sound)");
         bottles_play_error_se();
+        g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, playBefore);
+        dComIfGs_setSelectItemIndex(SELECT_ITEM_B, s_preSelectIndex);
         return;
     }
 
