@@ -174,6 +174,13 @@ void draw_boss_rush_texts(float floorY) {
 }
 
 void draw_boss_rush_fight_timer() {
+    if (boss_rush_timer_preview_active()) {
+        // Position preview: draw a frozen sample time (1:23.45) while the
+        // offsets are being adjusted in the Customization tab.
+        boss_rush_timer_v2_draw(8345, false, false, false, 0, 0.0f);
+        return;
+    }
+
     if (!g_configBossRushTimer) {
         return;
     }
