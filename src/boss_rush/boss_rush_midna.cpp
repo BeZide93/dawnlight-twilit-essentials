@@ -12,6 +12,7 @@
 #include "d/d_meter2_info.h"
 #include "d/d_msg_object.h"
 #include "f_op/f_op_overlap_mng.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
 #include "JSystem/JUtility/JUTFader.h"
 #include "mods/svc/hook.h"
@@ -24,6 +25,7 @@ struct BossRushNotTalkHook;
 DEFINE_HOOK(&daAlink_c::notTalk, BossRushNotTalkHook);
 
 extern bool g_dpadLeftTrig;
+extern bool g_configCustomZButtonEnabled;
 
 static int s_talkHoldTicks = 0;
 
@@ -903,6 +905,13 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
 
     bool triggered = link->midnaTalkTrigger() || g_dpadLeftTrig;
+    // The z-button mod captures dpad-left only while no menu/event state is
+    // up; while those states are active the raw button stays untouched in the
+    // pad info, so read it here to keep the call working in every state.
+    if (g_configCustomZButtonEnabled) {
+        triggered = triggered ||
+            (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
+    }
 #if PLATFORM_GCN
     triggered = triggered || mDoCPd_c::getTrigZ(PAD_1);
 #endif
@@ -973,6 +982,18 @@ void update_boss_rush_midna(const LogService*, ModContext*) {
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (link == nullptr) {
         return;
+    }
+
+    if (is_in_boss_rush_chamber()) {
+        // A fresh boss-rush save keeps the Midna availability bits unset
+        // (M_067 riding bit, 0x0540 back-ride bit) with F_0800 "Midna can't
+        // be called" set. The engine then fades the HUD Midna icon out while
+        // the z-button HUD keeps re-showing it, which flickers per frame.
+        // Hold the bits while waiting in the chamber, like the Ganon fight
+        // workaround does.
+        dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
+        dComIfGs_onEventBit(dSv_event_flag_c::M_067);
+        dComIfGs_onEventBit(0x0540);
     }
 
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
