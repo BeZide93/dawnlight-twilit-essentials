@@ -2643,13 +2643,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("stamina", s_staminaInitialized);
     s_puppetZeldaPatternInitialized = init_puppet_zelda_pattern(svc_hook, error) == MOD_OK;
     log_init_result("puppet_zelda_pattern", s_puppetZeldaPatternInitialized);
-    if (g_configCollectionStarterEquip || g_configCollectionShowOrdonHero) {
-        s_collectionMenuInitialized = init_collection_menu(svc_hook, svc_log, svc_save, mod_ctx, error) == MOD_OK;
-        log_init_result("collection_menu", s_collectionMenuInitialized);
-    } else {
-        s_collectionMenuInitialized = false;
-        log_init_result("collection_menu (skipped: both collection options off)", true);
-    }
+    s_collectionMenuInitialized = init_collection_menu(svc_hook, svc_log, svc_save, mod_ctx, error) == MOD_OK;
+    log_init_result("collection_menu", s_collectionMenuInitialized);
     s_collectionMenuChestInitialized = init_collection_menu_chest(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("collection_menu_shield", s_collectionMenuChestInitialized);
 
