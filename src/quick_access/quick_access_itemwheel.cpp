@@ -1,6 +1,7 @@
 #include "quick_access_itemwheel.hpp"
 #include "quick_access.hpp"
 #include "quick_access_internal.hpp"
+#include "../boss_rush/boss_rush.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_save.h"
@@ -11,6 +12,9 @@
 bool g_configQuickAccessHideWheelItems = false;
 
 bool itemwheel_filter_active() {
+    if (is_boss_rush_active()) {
+        return false;
+    }
     return g_configQuickAccessEnabled && g_configQuickAccessHideWheelItems;
 }
 
@@ -69,9 +73,18 @@ ModResult init_quick_access_itemwheel(const HookService* hook_svc, ModError*) {
 }
 
 void update_quick_access_itemwheel() {
-    if (itemwheel_filter_active() && itemwheel_lineup_has_hidden_item()) {
+    static bool s_wasFiltering = false;
+    bool filter = itemwheel_filter_active();
+    if (filter) {
+        if (itemwheel_lineup_has_hidden_item()) {
+            quick_access_itemwheel_refresh();
+        }
+    } else if (s_wasFiltering) {
+        // filter just became inactive (e.g. entered boss rush): the lineup is
+        // still compacted, so rebuild it to show every item again
         quick_access_itemwheel_refresh();
     }
+    s_wasFiltering = filter;
 }
 
 void shutdown_quick_access_itemwheel() {}

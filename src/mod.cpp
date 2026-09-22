@@ -16,6 +16,7 @@
 #include "boss_rush/boss_rush_models.hpp"
 #include "boss_rush/boss_rush_equipment.hpp"
 #include "boss_rush/boss_rush_timer.hpp"
+#include "boss_rush/boss_rush_timer_v2.hpp"
 #include "boss_rush/boss_rush_portal.hpp"
 #include "boss_rush/boss_rush_dpad.hpp"
 #include "boss_rush/boss_rush_save.hpp"
@@ -593,6 +594,10 @@ static void on_oxygen_vignette_changed(ModContext*, ConfigVarHandle, const Confi
 
 static bool is_boss_rush_timer_sub_disabled(ModContext* ctx, void* user) {
     return is_boss_rush_fight_toggle_disabled(ctx, user);
+}
+
+static bool is_boss_rush_timer_pos_disabled(ModContext*, void*) {
+    return !g_configBossRushTimer;
 }
 
 static void on_boss_rush_timer_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1242,7 +1247,7 @@ static void ui_add_select(UiElementHandle pane, const char* label, ConfigVarHand
 }
 
 static void ui_add_number(UiElementHandle pane, const char* label, ConfigVarHandle var,
-                          const char* help_rml) {
+                          const char* help_rml, UiPredicateFn disabled = nullptr) {
     if (!svc_ui || var == 0) return;
     UiControlDesc c = UI_CONTROL_DESC_INIT;
     c.kind = UI_CONTROL_NUMBER;
@@ -1253,6 +1258,7 @@ static void ui_add_number(UiElementHandle pane, const char* label, ConfigVarHand
     c.min = INT32_MIN;
     c.max = INT32_MAX;
     c.step = 1;
+    c.is_disabled = disabled;
     svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
 }
 
@@ -1812,6 +1818,14 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
         "<p>Horizontal position of the boss bar as an offset.</p>");
     ui_add_number(left, "Y Offset", g_bossBarVars[1],
         "<p>Vertical position of the boss bar as an offset.</p>");
+
+    svc_ui->pane_add_section(mod_ctx, left, "Boss Rush Timer");
+    ui_add_number(left, "X Offset", g_bossRushTimerPosVars[0],
+        "<p>Horizontal position of the Boss Rush timer as an offset.</p>",
+        is_boss_rush_timer_pos_disabled);
+    ui_add_number(left, "Y Offset", g_bossRushTimerPosVars[1],
+        "<p>Vertical position of the Boss Rush timer as an offset.</p>",
+        is_boss_rush_timer_pos_disabled);
 
     return MOD_OK;
 }
@@ -2580,6 +2594,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_controls_config(svc_config, svc_hook, mod_ctx);
         init_stamina_bar_config(svc_config, mod_ctx);
         init_boss_bar_config(svc_config, mod_ctx);
+        init_boss_rush_timer_pos_config(svc_config, mod_ctx);
     }
 
 
@@ -2656,6 +2671,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     if (++s_customizationTabIdleFrames > 2) {
         stamina_bar_preview_cancel();
         boss_bar_preview_cancel();
+        boss_rush_timer_preview_cancel();
     }
 
     if (s_generalInitialized) update_general(svc_log, mod_ctx);
