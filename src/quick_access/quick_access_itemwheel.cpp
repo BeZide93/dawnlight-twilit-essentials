@@ -64,6 +64,29 @@ static bool itemwheel_lineup_has_hidden_item() {
     return false;
 }
 
+static const u8 kLineupItemSlots[23] = {
+    10, 8, 6, 2, 9, 4, 3, 0, 1, 23, 20, 5, 15, 16, 17, 11, 12, 13, 14, 19, 18, 22, 21,
+};
+
+static int itemwheel_lineup_missing_count() {
+    const dSv_player_item_c& item = g_dComIfG_gameInfo.info.getPlayer().getItem();
+    const bool filter = itemwheel_filter_active();
+    int expected = 0;
+    for (u8 i = 0; i < 23; i++) {
+        u8 itemNo = item.mItems[kLineupItemSlots[i]];
+        if (itemNo != dItemNo_NONE_e && !(filter && itemwheel_is_hidden_item(itemNo))) {
+            expected++;
+        }
+    }
+    int linedUp = 0;
+    for (u8 i = 0; i < MAX_ITEM_SLOTS; i++) {
+        if (item.mItemSlots[i] != 0xFF) {
+            linedUp++;
+        }
+    }
+    return expected - linedUp;
+}
+
 ModResult init_quick_access_itemwheel(const HookService* hook_svc, ModError*) {
     if (hook_svc) {
         mods::hook::add_post<SvSetLineUpItemQuickAccessHook>(hook_svc,
@@ -73,18 +96,11 @@ ModResult init_quick_access_itemwheel(const HookService* hook_svc, ModError*) {
 }
 
 void update_quick_access_itemwheel() {
-    static bool s_wasFiltering = false;
-    bool filter = itemwheel_filter_active();
-    if (filter) {
-        if (itemwheel_lineup_has_hidden_item()) {
-            quick_access_itemwheel_refresh();
-        }
-    } else if (s_wasFiltering) {
-        // filter just became inactive (e.g. entered boss rush): the lineup is
-        // still compacted, so rebuild it to show every item again
+    if (itemwheel_lineup_missing_count() > 0) {
+        quick_access_itemwheel_refresh();
+    } else if (itemwheel_filter_active() && itemwheel_lineup_has_hidden_item()) {
         quick_access_itemwheel_refresh();
     }
-    s_wasFiltering = filter;
 }
 
 void shutdown_quick_access_itemwheel() {}

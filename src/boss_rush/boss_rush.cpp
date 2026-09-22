@@ -5044,6 +5044,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     clear_boss_dungeon_clear_flags(boss.stage);
                     g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
                     apply_boss_rush_loadout(false);
+                    apply_boss_rush_equipment_restriction(boss);
                 }
 
                 if (!g_configBossRushSeparateGanon && std::strcmp(boss.displayName, "Ganondorf") == 0) {

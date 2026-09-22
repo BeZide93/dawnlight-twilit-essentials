@@ -120,9 +120,17 @@ void apply_boss_rush_equipment_restriction(const BossGalleryEntry& boss) {
     keep_or_strip(SLOT_6,  have, IT_BALL);
     keep_or_strip(SLOT_8,  have, IT_ROD);
     keep_or_strip(SLOT_10, have, IT_CLAW);
+    strip_slot(SLOT_11);
+    strip_slot(SLOT_12);
+    strip_slot(SLOT_13);
+    strip_slot(SLOT_14);
     strip_slot(SLOT_15);
     strip_slot(SLOT_16);
     strip_slot(SLOT_17);
+    strip_slot(SLOT_18);
+    strip_slot(SLOT_21);
+    strip_slot(SLOT_22);
+    dComIfGs_setLineUpItem();
 
     static const u16 kSkillFlags[7] = {
         dSv_event_flag_c::F_0338, dSv_event_flag_c::F_0339, dSv_event_flag_c::F_0340,

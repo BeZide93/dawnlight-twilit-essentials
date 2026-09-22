@@ -59,18 +59,6 @@ bool accept_preset_image(const void* data, size_t size, const char* source) {
 void load_preset() {
     s_presetAvailable = false;
 
-    const ResourceService* res_svc = get_resource_service();
-    if (res_svc != nullptr && s_modCtx != nullptr) {
-        ResourceBuffer buf = RESOURCE_BUFFER_INIT;
-        if (res_svc->load(s_modCtx, kResPresetPath, &buf) == MOD_OK) {
-            const bool ok = accept_preset_image(buf.data, buf.size, "mod bundle res/");
-            res_svc->free(s_modCtx, &buf);
-            if (ok) {
-                return;
-            }
-        }
-    }
-
     if (svc_host != nullptr && s_modCtx != nullptr) {
         const char* dir = nullptr;
         if (svc_host->data_dir(s_modCtx, &dir) == MOD_OK && dir != nullptr) {
@@ -81,8 +69,19 @@ void load_preset() {
                 static u8 s_fileBuf[sizeof(PresetHeader) + sizeof(dSv_save_c)];
                 const size_t n = std::fread(s_fileBuf, 1, sizeof(s_fileBuf), f);
                 std::fclose(f);
-                accept_preset_image(s_fileBuf, n, "data_dir");
+                if (accept_preset_image(s_fileBuf, n, "data_dir")) {
+                    return;
+                }
             }
+        }
+    }
+
+    const ResourceService* res_svc = get_resource_service();
+    if (res_svc != nullptr && s_modCtx != nullptr) {
+        ResourceBuffer buf = RESOURCE_BUFFER_INIT;
+        if (res_svc->load(s_modCtx, kResPresetPath, &buf) == MOD_OK) {
+            accept_preset_image(buf.data, buf.size, "mod bundle res/");
+            res_svc->free(s_modCtx, &buf);
         }
     }
 }
