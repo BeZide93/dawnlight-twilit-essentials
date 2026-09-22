@@ -143,7 +143,7 @@ static void draw_debug_coords_overlay() {
 }
 
 static void on_debug_coords_draw_post(ModContext*, void*, void*, void*) {
-    draw_debug_coords_overlay();
+    //draw_debug_coords_overlay();
 }
 
 static bool s_titleModActive = true;
@@ -418,6 +418,8 @@ static ConfigVarHandle s_varStaminaMax = 0;
 static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
 static ConfigVarHandle s_varStaminaPerHeart = 0;
 static ConfigVarHandle s_varStaminaRegen = 0;
+static ConfigVarHandle s_varStaminaRegenDelay = 0;
+static ConfigVarHandle s_varStaminaSlowHangRegen = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
 static ConfigVarHandle s_varStaminaSrcRolls = 0;
@@ -725,6 +727,18 @@ static void set_stamina_max_value(ModContext* ctx, void*, const UiControlValue* 
 static void on_stamina_regen_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configStaminaRegen = static_cast<int>(value->int_value);
+    }
+}
+
+static void on_stamina_regen_delay_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaRegenDelay = static_cast<int>(value->int_value);
+    }
+}
+
+static void on_stamina_slow_hang_regen_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaSlowHangRegen = value->bool_value;
     }
 }
 
@@ -1351,6 +1365,25 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    if (s_varStaminaRegenDelay != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_NUMBER;
+        c.label = "Refill delay";
+        c.help_rml = "<p>How many seconds stamina waits after you stop draining it "
+            "before it starts to refill (default: 2).</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varStaminaRegenDelay;
+        c.is_disabled = is_stamina_sub_disabled;
+        c.min = 0;
+        c.max = 10;
+        c.step = 1;
+        c.suffix = "s";
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
+    ui_add_toggle(left, "Slow regen while hanging", s_varStaminaSlowHangRegen,
+        "<p>While hanging still on ivy or on a ledge, stamina recovers very slowly "
+        "(about a seventh of the normal rate) instead of staying frozen. Moving or "
+        "climbing on the wall still drains stamina.</p>", is_stamina_sub_disabled);
     svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
     ui_add_toggle(left, "Sprint (hold roll button)", s_varStaminaSprint,
         "<p>Hold the roll button while running to sprint.</p>");
@@ -2255,6 +2288,26 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varStaminaRegen, &v);
             g_configStaminaRegen = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varStaminaRegen, on_stamina_regen_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaRegenDelay = CONFIG_VAR_DESC_INIT;
+        descStaminaRegenDelay.name = "staminaRegenDelay";
+        descStaminaRegenDelay.type = CONFIG_VAR_INT;
+        descStaminaRegenDelay.default_int = 2;
+        if (svc_config->register_var(mod_ctx, &descStaminaRegenDelay, &s_varStaminaRegenDelay) == MOD_OK) {
+            int64_t v = 2;
+            svc_config->get_int(mod_ctx, s_varStaminaRegenDelay, &v);
+            g_configStaminaRegenDelay = static_cast<int>(v);
+            svc_config->subscribe(mod_ctx, s_varStaminaRegenDelay, on_stamina_regen_delay_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaSlowHangRegen = CONFIG_VAR_DESC_INIT;
+        descStaminaSlowHangRegen.name = "staminaSlowHangRegen";
+        descStaminaSlowHangRegen.type = CONFIG_VAR_BOOL;
+        descStaminaSlowHangRegen.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descStaminaSlowHangRegen, &s_varStaminaSlowHangRegen) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSlowHangRegen, &g_configStaminaSlowHangRegen);
+            svc_config->subscribe(mod_ctx, s_varStaminaSlowHangRegen, on_stamina_slow_hang_regen_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStaminaSprint = CONFIG_VAR_DESC_INIT;

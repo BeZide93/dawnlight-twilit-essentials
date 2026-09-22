@@ -13,6 +13,8 @@ extern int  g_configStaminaMax;
 extern bool g_configStaminaScaleWithHearts;
 extern int  g_configStaminaPerHeart;
 extern int  g_configStaminaRegen;
+extern int  g_configStaminaRegenDelay;
+extern bool g_configStaminaSlowHangRegen;
 
 extern float g_configStaminaBarX;
 extern float g_configStaminaBarY;

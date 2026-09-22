@@ -41,6 +41,8 @@ int  g_configStaminaMax     = 100;
 bool g_configStaminaScaleWithHearts = false;
 int  g_configStaminaPerHeart = 15;
 int  g_configStaminaRegen   = 100;
+int  g_configStaminaRegenDelay = 2;
+bool g_configStaminaSlowHangRegen = true;
 
 float g_configStaminaBarX = 0.0f;
 float g_configStaminaBarY = 0.0f;
@@ -104,6 +106,9 @@ DEFINE_HOOK(&daAlink_c::procCutDownInit, StamCutDown);
 DEFINE_HOOK(&daAlink_c::procCutHeadInit, StamCutHead);
 DEFINE_HOOK(&daAlink_c::procGuardAttackInit, StamGuardAttack);
 DEFINE_HOOK(&daAlink_c::checkRestHPAnime, StaminaTiredCheck);
+DEFINE_HOOK(&daAlink_c::changeHangEndProc, StamHangEnd);
+DEFINE_HOOK(&daAlink_c::procHangWallCatch, StamHangWallCatch);
+DEFINE_HOOK(&daAlink_c::checkLadderFall, StamLadderFall);
 
 static f32 s_stamina    = 100.0f;
 static f32 s_display    = 100.0f;
@@ -122,6 +127,9 @@ static f32  s_extraDrain  = 0.0f;
 static constexpr f32 kStaminaScaleMinHearts = 3.0f;
 static constexpr f32 kStaminaScaleMaxHearts = 20.0f;
 static constexpr f32 kStaminaScaleBaseValue = 100.0f;
+
+// Share of the normal refill rate granted while hanging at rest.
+static constexpr f32 kHangRestRegenFactor = 0.15f;
 
 static f32 stamina_scaled_max_for_hearts() {
     f32 hearts = static_cast<f32>(dComIfGs_getMaxLife()) / 4.0f;
@@ -275,6 +283,20 @@ static void tired_check_post(ModContext*, void* args, void* retval, void*) {
     }
 }
 
+// Out of stamina: let go of ledges and ivy. This replicates the game's own
+// drop-input branch of changeHangEndProc (hangs), procHangWallCatch and
+// checkLadderFall (climb walls / ivy), so the release looks vanilla.
+static HookAction hang_drop_pre(ModContext*, void* args, void* retval, void*) {
+    if (!g_configStaminaEnabled || !g_configStaminaSrcHang) return HOOK_CONTINUE;
+    if (!in_gameplay() || !empty()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || link->checkWolf()) return HOOK_CONTINUE;
+    link->speed.y = 0.0f;
+    const int result = link->procFallInit(1, link->mpHIO->mAutoJump.m.mFallInterpolation);
+    if (retval) *static_cast<int*>(retval) = result;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 static int s_denyCooldown = 0;
 
 static void deny() {
@@ -299,10 +321,16 @@ static int  s_hiddenSkillLock = 0;
 static constexpr int kHiddenSkillLockFrames = 20;
 static constexpr f32 kRecentSpendDecay       = 0.25f;
 
+// The game runs at 30 fps; the refill delay is configured in whole seconds.
+static int regen_delay_frames() {
+    int frames = g_configStaminaRegenDelay * 30;
+    return frames < 0 ? 0 : frames;
+}
+
 static void spend_raw(f32 cost) {
     s_stamina -= cost;
     if (s_stamina < 0.0f) s_stamina = 0.0f;
-    s_regenDelay = 50;
+    s_regenDelay = regen_delay_frames();
     s_showTimer = 50;
     s_pulse = 1.0f;
 }
@@ -450,6 +478,20 @@ static bool is_hidden_skill_proc_state(daAlink_c* link) {
     }
 }
 
+// Static rest states while clinging to ivy or a ledge - no movement, no drain.
+static bool is_hang_rest_proc(daAlink_c* link) {
+    if (!link) return false;
+    switch (link->mProcID) {
+    case daAlink_c::PROC_HANG_WAIT:
+    case daAlink_c::PROC_HANG_READY:
+    case daAlink_c::PROC_HANG_WALL_CATCH:
+    case daAlink_c::PROC_CLIMB_WAIT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void update_stamina(const LogService*, ModContext*) {
     if (s_staminaBarPreviewFrames > 0) s_staminaBarPreviewFrames--;
     s_blockedThisFrame = false;
@@ -497,7 +539,7 @@ void update_stamina(const LogService*, ModContext*) {
 
     if (rate > 0.0f) {
         s_stamina -= rate;
-        s_regenDelay = 45;
+        s_regenDelay = regen_delay_frames();
         s_showTimer = 45;
         s_pulse = 1.0f;
     } else {
@@ -506,7 +548,11 @@ void update_stamina(const LogService*, ModContext*) {
         } else {
             f32 pct = static_cast<f32>(g_configStaminaRegen);
             if (pct < 10.0f) pct = 10.0f;
-            s_stamina += 1.3f * pct / 100.0f;
+            f32 base = 1.3f;
+            if (g_configStaminaSlowHangRegen && is_hang_rest_proc(link)) {
+                base = 1.3f * kHangRestRegenFactor;
+            }
+            s_stamina += base * pct / 100.0f;
         }
         if (s_showTimer > 0) s_showTimer--;
     }
@@ -640,6 +686,9 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_post<StaminaMeterDrawHook>(hook_svc, on_stamina_meter_draw_post);
 
     mods::hook::add_post<StaminaTiredCheck>(hook_svc, tired_check_post);
+    mods::hook::add_pre<StamHangEnd>(hook_svc, hang_drop_pre);
+    mods::hook::add_pre<StamHangWallCatch>(hook_svc, hang_drop_pre);
+    mods::hook::add_pre<StamLadderFall>(hook_svc, hang_drop_pre);
 
     mods::hook::add_pre<StamSwordSwing>(hook_svc, sword_swing_pre);
     mods::hook::add_post<StamSwordSwing>(hook_svc, sword_swing_post);
