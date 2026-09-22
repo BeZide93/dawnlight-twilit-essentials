@@ -524,9 +524,22 @@ inline void ganondorf_force_ground_duel(fopAc_ac_c* a) {
     b_gnd_class* g = reinterpret_cast<b_gnd_class*>(a);
     g->mNoDrawTimer = 0;
     g->mActionMode  = 10;
-    g->mMoveMode    = 0;
+    g->mMoveMode    = 1;
     g->mDrawHorse   = 0;
+    g->mDrawZelda   = 0;
     g->mDemoCamMode = 0;
+    g->mHideSheath  = 1;
+    g->field_0x770  = 0;
+    g->field_0x772  = 0;
+    g->field_0xc44[0] = 200;
+    if (g->mpModelMorf != nullptr) {
+        void* bck = dComIfG_getObjectRes("B_gnd", 0x5D /* B_GND_BCK_EGND_WALK */);
+        if (bck != nullptr) {
+            g->mAnmID = 0x5D;
+            g->mpModelMorf->setAnm(reinterpret_cast<J3DAnmTransform*>(bck), 2, 0.0f, 1.0f, 0.0f, -1.0f);
+        }
+    }
+    a->eventInfo.offCondition(2);
     if (a->health <= 0) a->health = 100;
 }
 

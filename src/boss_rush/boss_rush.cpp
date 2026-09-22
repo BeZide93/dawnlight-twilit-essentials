@@ -53,6 +53,7 @@ extern const SaveService* svc_save;
 #include "d/actor/d_a_obj_lv4bridge.h"
 #include "d/actor/d_a_obj_swspinner.h"
 #include "d/actor/d_a_obj_msima.h"
+#include "d/actor/d_a_mant.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_actor_iter.h"
@@ -1502,23 +1503,45 @@ static void update_deathsword_auto_wolf() {
     link->procCoMetamorphoseInit();
 }
 
+static int gauntlet_next_phase_index(const char* currentName);
+
+static bool s_duelReady = false;
+static int  s_holdBlackFrames = 0;
+static u32  s_duelGen = ~0u;
+static ActorId s_gbId = {};
+static u32  s_gndId = 0;
+static int  s_gndStableFrames = 0;
+
+static void trigger_ganon_ground_duel() {
+    const int gndIdx = gauntlet_next_phase_index("Horseback Ganon");
+    if (gndIdx >= 0) {
+        s_activeFightIndex = gndIdx;
+    }
+    s_duelReady = false;
+    s_holdBlackFrames = 0;
+    s_gndStableFrames = 0;
+    s_gndId = 0;
+    s_gbId = {};
+    g_dComIfG_gameInfo.info.getDan().onSwitch(1);
+    dComIfGs_onSaveDunSwitch(1);
+    dComIfGs_onOneZoneSwitch(15, -1);
+    s_gauntletPhase = 4;
+}
+
 static void update_ganon_ground_duel() {
     const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "D_MN09B") != 0) return;
     if (!is_boss_rush_active() || s_returningToChamber) return;
     if (s_pendingFightIndex != -1) return;
-    if (!g_dComIfG_gameInfo.info.getDan().isSwitch(1)) return;
 
     const int t = boss_rush_target_index();
     if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount) return;
-    if (std::strcmp(g_bossGalleryTable[t].displayName, "Ganondorf") != 0) return;
 
-    static bool s_duelReady = false;
-    static int  s_holdBlackFrames = 0;
-    static u32  s_duelGen = ~0u;
-    static ActorId s_gbId = {};
-    static u32  s_gndId = 0;
-    static int  s_gndStableFrames = 0;
+    const bool isGanondorf = (std::strcmp(g_bossGalleryTable[t].displayName, "Ganondorf") == 0);
+    const bool isGroundMode = (s_gauntletPhase == 4 ||
+                               g_dComIfG_gameInfo.info.getDan().isSwitch(1) ||
+                               dComIfGs_isSaveDunSwitch(1));
+    if (!isGroundMode && !isGanondorf) return;
 
     if (instant_fight_rearm(s_duelGen)) {
         s_duelReady = false;
@@ -1547,8 +1570,9 @@ static void update_ganon_ground_duel() {
         }
 
         fopAc_ac_c* fk = fopAcM_SearchByName(fpcNm_E_FK_e);
-        if (fk != nullptr) {
+        while (fk != nullptr) {
             fopAcM_delete(fk);
+            fk = fopAcM_SearchByName(fpcNm_E_FK_e);
         }
 
         cXyz arenaCenter(0.0f, 1100.0f, 0.0f);
@@ -1573,17 +1597,70 @@ static void update_ganon_ground_duel() {
             svc_actor->create_actor(s_modCtx, fpcNm_OBJ_GB_e, &sp, &s_gbId);
         }
 
-        if (bbi::ganondorf_horse_demo_pending(gnd)) {
-            bbi::ganondorf_force_ground_duel(gnd);
-        }
+        bbi::ganondorf_force_ground_duel(gnd);
         gnd->health = 100;
+
+        b_gnd_class* bgnd = reinterpret_cast<b_gnd_class*>(gnd);
+        bgnd->mHideSheath = 1;
+        bgnd->field_0x770 = 0;
+        bgnd->field_0x772 = 0;
+        bgnd->mMoveMode = 1;
+        bgnd->field_0xc44[0] = 200;
+
+        if (bgnd->mpModelMorf != nullptr) {
+            void* bck = dComIfG_getObjectRes("B_gnd", 0x5D /* B_GND_BCK_EGND_WALK */);
+            if (bck != nullptr) {
+                bgnd->mAnmID = 0x5D;
+                bgnd->mpModelMorf->setAnm(reinterpret_cast<J3DAnmTransform*>(bck), 2, 0.0f, 1.0f, 0.0f, -1.0f);
+            }
+        }
 
         cXyz gndPos(-600.0f, 1100.0f, 0.0f);
         gnd->current.pos = gndPos;
         gnd->old.pos = gndPos;
+        gnd->shape_angle.x = 0;
+        gnd->shape_angle.z = 0;
         gnd->shape_angle.y = 0x37FE;
+        gnd->current.angle.x = 0;
+        gnd->current.angle.z = 0;
         gnd->current.angle.y = 0x37FE;
         gnd->speed.set(0.0f, 0.0f, 0.0f);
+        gnd->speedF = 0.0f;
+        gnd->gravity = -5.0f;
+
+        bgnd->mAcch.CrrPos(dComIfG_Bgsp());
+
+        mant_class* mant_p = reinterpret_cast<mant_class*>(fopAcM_SearchByID(bgnd->mMantChildID));
+        if (mant_p != nullptr) {
+            mant_p->field_0x3969 = 1;
+        }
+
+        dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+        if (kankyo != nullptr) {
+            kankyo->wether = 1;
+        }
+
+        if (s_holdBlackFrames == 1) {
+            if (link->checkHorseRide()) {
+                link->onForceHorseGetOff();
+            }
+            link->procWaitInit();
+            link->cancelOriginalDemo();
+            dComIfGp_event_reset();
+            if (link->mEquipItem != 0x103) {
+                link->swordEquip(TRUE);
+                link->setSwordModel();
+            }
+        }
+
+        fopAc_ac_c* horse = reinterpret_cast<fopAc_ac_c*>(dComIfGp_getHorseActor());
+        if (horse != nullptr) {
+            cXyz awayPos(0.0f, -5000.0f, 0.0f);
+            horse->current.pos = awayPos;
+            horse->old.pos = awayPos;
+            horse->speed.set(0.0f, 0.0f, 0.0f);
+            horse->speedF = 0.0f;
+        }
 
         cXyz linkPos(600.0f, 1100.0f, 0.0f);
         const s16 linkAngle = static_cast<s16>(-0x4802);
@@ -1593,8 +1670,6 @@ static void update_ganon_ground_duel() {
         link->current.angle.y = linkAngle;
         link->speed.set(0.0f, 0.0f, 0.0f);
         link->speedF = 0.0f;
-        link->cancelOriginalDemo();
-        dComIfGp_event_reset();
 
         camera_process_class* cam = boss_rush_get_active_player_camera();
         if (cam != nullptr) {
@@ -1607,10 +1682,10 @@ static void update_ganon_ground_duel() {
             fopCamM_SetAngleY(cam, linkAngle);
         }
 
-        if ((s_holdBlackFrames >= 15 && s_gndStableFrames >= 5 && s_gbId != 0) || s_holdBlackFrames >= 45) {
+        if ((s_holdBlackFrames >= 25 && s_gndStableFrames >= 15 && s_gbId != 0) || s_holdBlackFrames >= 45) {
             s_duelReady = true;
             Z2GetAudioMgr()->bgmStart(Z2BGM_VS_GANON_04, 0, 0);
-            boss_rush_screen_fade_in(0.1f);
+            boss_rush_screen_fade_in(0.06f);
         }
     }
 }
@@ -3282,6 +3357,31 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
         }
     }
 
+    static bool s_duelPhaseSwordLatched = false;
+    static bool s_duelPhaseSwordFired = false;
+    {
+        fopAc_ac_c* gnd = fopAcM_SearchByName(fpcNm_B_GND_e);
+        const bool isGroundMode = (s_gauntletPhase == 4 ||
+                                   g_dComIfG_gameInfo.info.getDan().isSwitch(1) ||
+                                   dComIfGs_isSaveDunSwitch(1));
+        if (gnd == nullptr || !isGroundMode) {
+            s_duelPhaseSwordLatched = false;
+            s_duelPhaseSwordFired = false;
+        } else if (inArena && !s_duelPhaseSwordLatched && !link->checkWolf()) {
+            if (link->mEquipItem == 0x103) {
+                s_duelPhaseSwordLatched = true;
+            } else if (!s_duelPhaseSwordFired) {
+                const bool quiet = !link->checkEventRun() && !dComIfGp_event_runCheck();
+                if (quiet) {
+                    link->swordEquip(TRUE);
+                    link->setSwordModel();
+                    s_duelPhaseSwordFired = true;
+                    boss_rush_debug_log("[ganondorf] duel sword draw fired once");
+                }
+            }
+        }
+    }
+
     const int targetIdx = boss_rush_target_index();
     const bool isMorpheelTarget = (targetIdx >= 0 && static_cast<size_t>(targetIdx) < g_bossGalleryCount &&
                                   std::strcmp(g_bossGalleryTable[targetIdx].displayName, "Morpheel") == 0);
@@ -4641,16 +4741,25 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             const char* tn = g_bossGalleryTable[gt].displayName;
             const char* stage = dComIfGp_getStartStageName();
             const bool dan1 = stage != nullptr && std::strcmp(stage, "D_MN09B") == 0 &&
-                              g_dComIfG_gameInfo.info.getDan().isSwitch(1);
+                              (g_dComIfG_gameInfo.info.getDan().isSwitch(1) ||
+                               dComIfGs_isSaveDunSwitch(1) ||
+                               s_gauntletPhase == 4 ||
+                               std::strcmp(tn, "Ganondorf") == 0);
             int phase;
-            if (std::strcmp(tn, "Puppet Zelda") == 0) {
+            if (stage != nullptr && std::strcmp(stage, "D_MN09B") == 0) {
+                phase = dan1 ? 4 : 1;
+            } else if (stage != nullptr && std::strcmp(stage, "D_MN09A") == 0) {
+                const bool isBeast = (dComIfG_play_c::getLayerNo(0) == 1 ||
+                                      fopAcM_SearchByName(fpcNm_B_MGN_e) != nullptr);
+                phase = isBeast ? 3 : 2;
+            } else if (std::strcmp(tn, "Puppet Zelda") == 0) {
                 phase = 2;
             } else if (std::strcmp(tn, "Beast Ganon") == 0) {
                 phase = 3;
             } else if (std::strcmp(tn, "Horseback Ganon") == 0) {
                 phase = 1;
             } else {
-                phase = dan1 ? 4 : 2;
+                phase = dan1 ? 4 : 1;
             }
 
             if (phase != s_gauntletPhase) {
@@ -5260,19 +5369,21 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
              std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0)) {
             const char* curStage = dComIfGp_getStartStageName();
             const bool isGroundDuel = (curStage != nullptr && std::strcmp(curStage, "D_MN09B") == 0 &&
-                                       std::strcmp(g_bossGalleryTable[gt].displayName,
-                                                   "Ganondorf") == 0 &&
-                                       g_dComIfG_gameInfo.info.getDan().isSwitch(1));
+                                       (std::strcmp(g_bossGalleryTable[gt].displayName, "Ganondorf") == 0 || s_gauntletPhase == 4) &&
+                                       (g_dComIfG_gameInfo.info.getDan().isSwitch(1) || dComIfGs_isSaveDunSwitch(1) || s_gauntletPhase == 4));
             if (isGroundDuel) {
                 s_gauntletLadderActive = false;
                 advance_boss_rush_run(log_svc, mod_ctx, "Ganondorf defeated");
                 return;
             }
             const int phase = boss_rush_gauntlet_phase();
+            if (phase == 1 || std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0) {
+                // In-place transition between Horseback Ganon and Ganondorf Duel; do not commit stage warp
+                return;
+            }
             const char* want = (phase == 2)   ? "Beast Ganon"
                                : (phase == 3) ? "Horseback Ganon"
-                               : (phase == 1) ? "Ganondorf"
-                                              : nullptr;
+                               : nullptr;
             if (want != nullptr) {
                 for (size_t i = 0; i < g_bossGalleryCount; ++i) {
                     if (std::strcmp(g_bossGalleryTable[i].displayName, want) == 0) {
@@ -5294,7 +5405,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         const char* hbStage = dComIfGp_getStartStageName();
         const bool isGroundDuelNow =
             (hbStage != nullptr && std::strcmp(hbStage, "D_MN09B") == 0 &&
-             g_dComIfG_gameInfo.info.getDan().isSwitch(1));
+             (g_dComIfG_gameInfo.info.getDan().isSwitch(1) ||
+              dComIfGs_isSaveDunSwitch(1) ||
+              s_gauntletPhase == 4));
         const bool isHorsebackTarget = (gt >= 0 && static_cast<size_t>(gt) < g_bossGalleryCount &&
             !isGroundDuelNow &&
             (std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0 ||
@@ -5318,31 +5431,32 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 s_horsebackGanonSawHorse = true;
             }
             if (s_horsebackGanonKoTimer >= 0) {
-                if (s_horsebackGanonKoTimer > 0) {
-                    if (s_horsebackGanonKoTimer <= 25) {
-                        boss_rush_screen_fade_out(0.04f);
+                if (!g_configBossRushSeparateGanon) {
+                    fopAc_ac_c* gnd = fopAcM_SearchByName(fpcNm_B_GND_e);
+                    if (gnd != nullptr) {
+                        b_gnd_class* g = reinterpret_cast<b_gnd_class*>(gnd);
+                        g->mDemoCamMode = 0;
+                        gnd->eventInfo.offCondition(2);
                     }
+                    dComIfGp_event_reset();
+                }
+
+                boss_rush_screen_fade_out(0.055f);
+
+                if (s_horsebackGanonKoTimer > 0) {
                     --s_horsebackGanonKoTimer;
                 } else {
-                    static int s_hbBlackWait = 0;
                     if (!boss_rush_screen_is_fully_black()) {
-                        if (++s_hbBlackWait < 30) {
-                            return;
-                        }
+                        boss_rush_screen_fade_out(0.08f);
+                        return;
                     }
-                    s_hbBlackWait = 0;
                     s_horsebackGanonKoTimer = -1;
                     s_horsebackGanonSawHorse = false;
                     boss_rush_screen_hold_black();
                     if (!g_configBossRushSeparateGanon) {
-                        const int gIdx = gauntlet_next_phase_index("Horseback Ganon");
-                        if (gIdx >= 0) {
-                            s_gauntletLadderActive = true;
-                            commit_boss_rush_fight_warp(static_cast<size_t>(gIdx),
-                                                        daAlink_getAlinkActorClass(),
-                                                        log_svc, mod_ctx);
-                            return;
-                        }
+                        s_gauntletLadderActive = true;
+                        trigger_ganon_ground_duel();
+                        return;
                     }
                     advance_boss_rush_run(log_svc, mod_ctx, "Horseback Ganon defeated");
                     return;
@@ -5352,8 +5466,15 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 if (gnd != nullptr) {
                     int gam, gmm, gdcm, ghorse, ghp, gkd;
                     bbi::ganondorf_read(gnd, gam, gmm, gdcm, ghorse, ghp, gkd);
-                    if (gam >= 6 || ghorse == 0) {
-                        s_horsebackGanonKoTimer = 60;
+                    if (gam == 6 || ghp <= 0) {
+                        s_horsebackGanonKoTimer = (!g_configBossRushSeparateGanon) ? 22 : 65;
+                        if (!g_configBossRushSeparateGanon) {
+                            boss_rush_screen_fade_out(0.055f);
+                            b_gnd_class* g = reinterpret_cast<b_gnd_class*>(gnd);
+                            g->mDemoCamMode = 0;
+                            gnd->eventInfo.offCondition(2);
+                            dComIfGp_event_reset();
+                        }
                     }
                 }
             }
@@ -5547,7 +5668,9 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
                     continue;
                 }
                 if (std::strcmp(curStage, "D_MN09B") == 0) {
-                    const bool isGround = g_dComIfG_gameInfo.info.getDan().isSwitch(1);
+                    const bool isGround = (g_dComIfG_gameInfo.info.getDan().isSwitch(1) ||
+                                           dComIfGs_isSaveDunSwitch(1) ||
+                                           s_gauntletPhase == 4);
                     if (isGround && std::strcmp(boss.displayName, "Horseback Ganon") == 0) {
                         continue;
                     }
