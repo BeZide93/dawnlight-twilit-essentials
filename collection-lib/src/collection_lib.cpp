@@ -1,16 +1,7 @@
-// dusklight-collection-lib - single translation unit.
-//
-// The library is deliberately built as ONE unity translation unit: the hook
-// entry structs (DEFINE_HOOK) live in the internal headers and must exist
-// exactly once per binary, which the original in-mod code guaranteed by
-// #including all implementation files from one .cpp. This file keeps that
-// exact structure so the proven code compiles unmodified.
-
 #include <collection_lib/collection_lib.hpp>
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 
-// Implementation units, in the original dependency order.
 #include "collection_common.cpp"
 #include "custom_equip.cpp"
 #include "collection_page.cpp"
@@ -18,30 +9,11 @@
 #include "collection_nav.cpp"
 #include "collection_equip.cpp"
 
-// ---------------------------------------------------------------------------
-// Services
-// ---------------------------------------------------------------------------
-
-// The library loads icons (.bti) and models (.arc) from the OWNING MOD's
-// res/ directory. The owning mod already imports the ResourceService for
-// itself - reuse that import instead of declaring a second one with the
-// same service_id (the package validator rejects duplicate imports).
 extern const ResourceService* svc_resource;
 
 const ResourceService* cl_get_resource_service() {
     return svc_resource;
 }
-
-// ---------------------------------------------------------------------------
-// Consumer slot registration
-//
-// The menu screen-build code re-runs slot registration every time the screen
-// is built (idempotent per kind+item). The DATA lives in the consuming mod, so
-// instead of hardwired register_custom_* functions the library invokes one
-// consumer-provided callback - set it via collectionlib_set_register_callback.
-// ---------------------------------------------------------------------------
-// Vanilla-wired slots (row/column claims + predicates)
-// ---------------------------------------------------------------------------
 
 struct VanillaSlotEntry {
     u8 row, item;
@@ -64,7 +36,6 @@ static int cl_add_vanilla_slot(u8 row, const CollectionVanillaSlotDef& def) {
 int collectionlib_add_vanilla_slot(u8 row, const CollectionVanillaSlotDef& def) { return cl_add_vanilla_slot(row, def); }
 
 int collectionlib_remove_slot(u8 row, u8 item) {
-    // 1) drop vanilla-wired claims at this cell
     for (int i = 0; i < s_vanillaSlotCount;) {
         if (s_vanillaSlots[i].row == row && s_vanillaSlots[i].item == item) {
             for (int j = i; j < s_vanillaSlotCount - 1; j++) s_vanillaSlots[j] = s_vanillaSlots[j + 1];
@@ -74,7 +45,6 @@ int collectionlib_remove_slot(u8 row, u8 item) {
         }
     }
 
-    // 2) unregister custom slots parked at this cell
     for (int id = custom_equip_count() - 1; id >= 0; id--) {
         const CustomEquipDef* d = custom_equip_get(id);
         if (d == nullptr) continue;
@@ -82,7 +52,6 @@ int collectionlib_remove_slot(u8 row, u8 item) {
         if (r == row && d->item == item) custom_equip_remove(id);
     }
 
-    // 3) record + suppress
     cl_remove_cell(row, item);
     collectionlib_request_reload();
     return 0;
@@ -90,16 +59,9 @@ int collectionlib_remove_slot(u8 row, u8 item) {
 
 int collectionlib_clear_all_slots() {
     log_collect_info("clear_all_slots: wiping %d vanilla claims + %d custom slots", s_vanillaSlotCount, custom_equip_count());
-    // vanilla-wired claims (ordon shield / clothes / wooden sword cells)
     s_vanillaSlotCount = 0;
-    // registered custom slots (swords / shields / tunics)
     custom_equip_reset_registry();
-    // hide every vanilla gear cell that is not re-registered afterwards
     cl_set_vanilla_layout_hidden(true);
-    // NOTE: no collectionlib_request_reload() here. This runs at the top of
-    // the register callback, which itself executes on every screen build - a
-    // reload request from inside it recreates the screen every build forever
-    // (delete/create loop until the menu heap dies).
     return 0;
 }
 
@@ -126,7 +88,6 @@ bool cl_column_occupied(u8 row, u8 item) {
     return false;
 }
 
-// Thunks: resolve the vanilla slot at a grid cell and defer to its callbacks.
 bool cl_vanilla_slot_unlocked(u8 x, u8 y) {
     for (int i = 0; i < s_vanillaSlotCount; ++i) {
         const SlotCell c = grid_cell(s_vanillaSlots[i].row, s_vanillaSlots[i].item);
@@ -143,8 +104,6 @@ bool cl_vanilla_slot_equipped(u8 x, u8 y) {
     return false;
 }
 
-// ---------------------------------------------------------------------------
-
 static void (*s_registerSlotsFn)() = nullptr;
 
 void collectionlib_set_register_callback(void (*fn)()) {
@@ -152,15 +111,11 @@ void collectionlib_set_register_callback(void (*fn)()) {
 }
 
 void collectionlib_run_slot_registration() {
-    s_vanillaSlotCount = 0;   // re-claimed by the consumer's callback
+    s_vanillaSlotCount = 0;
     if (s_registerSlotsFn != nullptr) {
         s_registerSlotsFn();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Feature switches (see collection_common.hpp)
-// ---------------------------------------------------------------------------
 
 static bool (*s_unequipPolicy)() = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
@@ -172,19 +127,11 @@ void collectionlib_set_keep_ordon_shield_policy(bool (*fn)()) { s_keepOrdonShiel
 bool cl_unequip_enabled() { return s_unequipPolicy != nullptr && s_unequipPolicy(); }
 bool cl_keep_ordon_shield_enabled() { return s_keepOrdonShieldPolicy != nullptr && s_keepOrdonShieldPolicy(); }
 
-
-// ---------------------------------------------------------------------------
-// Slot utilities
-// ---------------------------------------------------------------------------
-
 CollectionSlot collectionlib_get_slot(u8 row, u8 item) {
     if (row < 1 || row > 3 || item < 1 || item > 4) return CollectionSlot{};
     return CollectionSlot{row, item};
 }
 
-// Recorded slot moves: replayed at the end of every apply_collect_shifts, so
-// they survive screen rebuilds (the game rebuilds all panes each open) and
-// widescreen relayouts. Bounded, no heap.
 struct SlotMoveOp {
     u8 row, fromItem, toItem;
     bool active;
@@ -203,7 +150,7 @@ bool collectionlib_move_slot(CollectionSlot from, u8 newItem) {
     for (int i = 0; i < 16; ++i) {
         if (s_slotMoves[i].active && s_slotMoves[i].row == from.row &&
             s_slotMoves[i].fromItem == from.item) {
-            s_slotMoves[i].toItem = newItem;   // update an existing op
+            s_slotMoves[i].toItem = newItem;
             return true;
         }
     }
@@ -237,12 +184,7 @@ int collectionlib_add_tunic_slot(u8 item, const CustomEquipDef& def) {
     return custom_equip_register(d);
 }
 
-// First column of `row` AFTER the hardcoded vanilla prefix (ordon sword /
-// master sword always occupy the visual slots the base layout hardcodes, so
-// custom slots append behind them). row 1/2 prefix = 3 columns, row 3 = 4.
-// Returns 0 when the row is full.
 static u8 cl_next_free_column(u8 row) {
-    // blank layout: vanilla columns are gone - custom slots start flush left
     const u8 first = cl_vanilla_layout_hidden() ? 1 : ((row == 3) ? 5 : 4);
     for (u8 col = first; col <= 12; ++col) {
         if (!cl_item_exists(row, col)) return col;
@@ -268,8 +210,6 @@ int collectionlib_add_next_tunic_slot(const CustomEquipDef& def) {
     return id;
 }
 
-
-
 CollectionSlotRef collectionlib_get_slot_ref(u8 row, u8 item) {
     return CollectionSlotRef{row, item};
 }
@@ -282,7 +222,7 @@ bool CollectionSlotRef::remove() const {
 
 bool CollectionSlotRef::move(u8 newRow, u8 newItem) const {
     if (row == 0 || item == 0) return false;
-    if (newRow != row) return false;   // rows are independent layouts for now
+    if (newRow != row) return false;
     return collectionlib_move_slot(CollectionSlot{row, item}, newItem);
 }
 
@@ -297,8 +237,6 @@ int CollectionSlotRef::replace(const CustomEquipDef& def) const {
 
 int collectionlib_add_slot_override(u8 row, u8 item, const CustomEquipDef& def) {
     if (row < 1 || row > 3 || item == 0) return -1;
-    // An override occupies the cell - it must not stay suppressed by an
-    // earlier (or stray) .remove() at the same position.
     cl_clear_removed_cell(row, item);
     CustomEquipDef d = def;
     d.kind = (row == 1) ? CE_SWORD : (row == 2) ? CE_SHIELD : CE_TUNIC;
@@ -306,25 +244,12 @@ int collectionlib_add_slot_override(u8 row, u8 item, const CustomEquipDef& def) 
     return custom_equip_register(d);
 }
 
-
 Slot get_slot(u8 row, u8 item) {
     return Slot{row, item};
 }
 void collectionlib_request_reload() {
     s_needReloadCollect = true;
 }
-
-// ---------------------------------------------------------------------------
-// System heap headroom
-//
-// TP's m_Do_machine.cpp carves zeldaHeap out of systemHeap and leaves
-// systemHeap with only 0x10000 (64 KB) free. On PC Dusklight, read_anm_resource
-// (status window) and ARAM decompression buffers allocate from
-// JKRAllocFromSysHeap - when archives or background models load, systemHeap is
-// easily exhausted, which is an instant fatal crash (JKRExpHeap::do_alloc
-// failure / OSPanic) when opening the pause collection menu. Expand it once
-// with a generous 32 MB heap carved from rootHeap (~230 MB free).
-// ---------------------------------------------------------------------------
 
 static void ensure_collection_heap_capacity() {
     static bool s_done = false;
@@ -354,13 +279,6 @@ static void ensure_collection_heap_capacity() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// HUD B-button icon: while a custom sword is equipped, the game keeps showing
-// the backing vanilla sword's icon (drawButtonB derives it from
-// dComIfGs_getSelectEquipSword). Override the texture right after the game
-// refreshes it.
-// ---------------------------------------------------------------------------
-
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemB, CollectionLibItemBTextureHook);
 
 static void cl_item_b_texture_post(ModContext*, void* args, void*, void*) {
@@ -388,14 +306,10 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
     g_saveSvc = save_svc;
     g_logSvc = log_svc;
 
-    // Run the consumer's slot registration once (the screen-build code re-runs
-    // it on every collection screen build via collectionlib_run_slot_registration),
-    // then restore the previously equipped custom gear from the save.
     collectionlib_run_slot_registration();
     custom_equip_restore_from_save();
 
     if (hook_svc != nullptr) {
-        // Area transition & spawn preservation
         mods::hook::add_pre<DaAlinkCreateHook>(hook_svc, on_da_alink_create_pre);
         mods::hook::add_post<DaAlinkCreateHook>(hook_svc, on_da_alink_create_post);
         mods::hook::add_pre<DaAlinkChangeLinkHook>(hook_svc, on_da_alink_change_link_pre);
@@ -405,7 +319,6 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
         mods::hook::add_pre<Meter2InfoSetShieldHook>(hook_svc, on_meter2_info_set_shield_pre);
         mods::hook::add_pre<MsgFlowGetCheckHook>(hook_svc, on_msg_flow_get_check_pre);
 
-        // Screen layout & lifecycle
         mods::hook::add_post<MenuCollect2DCreateHook>(hook_svc, on_menu_collect_2d_create_post);
         mods::hook::add_pre<MenuCollect2DDeleteHook>(hook_svc, on_menu_collect_2d_delete_pre);
         mods::hook::add_pre<ScreenSetHook>(hook_svc, on_screen_set_pre);
@@ -414,19 +327,9 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
         mods::hook::add_post<MenuCollect2DMoveHook>(hook_svc, on_menu_collect_2d_move_post);
         mods::hook::add_post<MwExecuteHook>(hook_svc, on_mw_execute_post);
 
-        // Menu navigation & item description strings
-        // getItemTag() installs with MOD_ERROR on this build (too small a
-        // function for the detour mechanism) - on_get_item_tag_pre's callback
-        // below silently never runs as a result. Logged once at startup so a
-        // future engine/SDK update that changes this doesn't go unnoticed.
         ModResult r_getItemTag = mods::hook::add_pre<GetItemTagHook>(hook_svc, on_get_item_tag_pre);
         ModResult r_pointerWait = mods::hook::add_pre<PointerWaitHook>(hook_svc, on_pointer_wait_pre);
 
-        // Resolve dusk::menu_pointer's hit_pane/set_hover_target/peek_click
-        // addresses directly (symbol lookup only, no detour/patch attempt) so
-        // the pointerWait replacement below can call them as plain function
-        // pointers - see collection_nav.cpp for why these can't be normal
-        // linked C++ calls. Logged once at startup for the same reason as above.
         if (hook_svc->resolve) {
             void* hitPaneAddr = nullptr;
             ModResult r_resolve = hook_svc->resolve(mod_ctx, kHitPaneMangledName, &hitPaneAddr, nullptr);
@@ -448,18 +351,11 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
         }
         mods::hook::add_pre<CursorPosSetHook>(hook_svc, on_cursor_pos_set_pre);
         mods::hook::add_pre<CursorMoveHook>(hook_svc, on_cursor_move_pre);
-        // getItemTag() can't be hooked on this build (MOD_ERROR above) - vanilla
-        // pointerWait() therefore never finds Hylian Shield/Reinforced Shield/
-        // Magic Armor. Replace the whole function: run the real original first
-        // (unchanged for every other cell), fall back to our own hit_pane() check
-        // against those 3 known-good panes only if it found nothing.
         ModResult r_pointerWaitReplace = mods::hook::replace<PointerWaitHook>(hook_svc, on_pointer_wait_replace);
         mods::hook::add_post<PointerWaitHook>(hook_svc, on_pointer_wait_post);
         mods::hook::add_pre<SetItemNameStringHook>(hook_svc, on_set_item_name_string_pre);
         mods::hook::add_pre<GetStringKanjiHook>(hook_svc, on_get_string_kanji_pre);
         mods::hook::add_pre<MsgStringGetStringLocalHook>(hook_svc, on_get_string_local_pre);
-
-        // Equipment actions & frame highlights
         mods::hook::add_pre<WaitProcHook>(hook_svc, on_wait_proc_pre);
         mods::hook::add_post<WaitProcHook>(hook_svc, on_wait_proc_post);
         mods::hook::add_pre<PointerActivateCurrentHook>(hook_svc, on_pointer_activate_current_pre);
@@ -470,10 +366,7 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
         mods::hook::add_pre<SetEquipFrameColorShieldHook>(hook_svc, on_set_equip_frame_shield_pre);
         mods::hook::add_pre<SetEquipFrameColorClothesHook>(hook_svc, on_set_equip_frame_clothes_pre);
 
-        // Custom sword/shield/tunic model swap on Link (world + doll).
         custom_equip_init_hooks(hook_svc, g_saveSvc);
-
-        // HUD B-button icon override for equipped custom swords.
         mods::hook::add_post<CollectionLibItemBTextureHook>(hook_svc, cl_item_b_texture_post);
     }
     return MOD_OK;
@@ -487,7 +380,7 @@ void collectionlib_update() {
 void collectionlib_shutdown() {
     collection_page_teardown();
     custom_equip_shutdown();
-    slot_registry_clear();   // drops the mod slots' pane pointers
+    slot_registry_clear();
     s_picTunagiKen2 = nullptr;
     s_picTunagiTate2 = nullptr;
     s_picTunagiFuku3 = nullptr;
@@ -496,21 +389,8 @@ void collectionlib_shutdown() {
     s_currentCollect2D = nullptr;
 }
 
-
-// ---------------------------------------------------------------------------
-// Slot move replay (called from apply_collect_shifts, layout.cpp)
-//
-// Positions per row (1-based, matching apply_collect_shifts):
-//   row 1 (swords):  1 = ken_n0,  2 = registry, 3 = ken_n1, 4 = heart_n
-//   row 2 (shields): 1 = tate_n0, 2 = registry, 3 = tate_n1
-//   row 3 (clothes): 1 = registry, 2 = fuku_n0, 3 = fuku_n1, 4 = fuku_n2
-// "registry" = a SlotSpec placed by addSlot at that row position (its panes
-// come from the slot registry). Frames follow the icon containers; vanilla
-// frame panes are the matching 'ken_g_0' style tags.
-// ---------------------------------------------------------------------------
-
 struct RowPanePair {
-    u64 iconTag;   // vanilla icon container pane (0 = registry slot)
+    u64 iconTag;
     u64 frameTag;
 };
 
@@ -542,7 +422,6 @@ void cl_apply_slot_moves(J2DScreen* screen, f32 baseX, f32 dx) {
         const f32 toFrameX = toX + frameDx;
         const f32 rowY = collection_row_icon_y(static_cast<u8>(row - 1));
 
-        // Source panes: registry slot first, then the vanilla pane table.
         const SlotCell srcCell = grid_cell(row, from);
         const SlotSpec* src = slot_at(srcCell.x, srcCell.y);
         J2DPane* icon = nullptr;
@@ -560,8 +439,6 @@ void cl_apply_slot_moves(J2DScreen* screen, f32 baseX, f32 dx) {
         set_pane_pos(icon, toX, rowY);
         if (frame != nullptr) set_pane_pos(frame, toFrameX, rowY);
 
-        // Anything parked at the target column (registry slot) shifts aside to
-        // the source column so the two swap without overlapping.
         const SlotCell dstCell = grid_cell(row, to);
         const SlotSpec* dst = slot_at(dstCell.x, dstCell.y);
         if (dst != nullptr && dst->icon != nullptr) {

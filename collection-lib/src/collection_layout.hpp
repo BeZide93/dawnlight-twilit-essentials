@@ -2,12 +2,10 @@
 
 #include "collection_lib/collection_common.hpp"
 
-// Layout & visual functions
 void update_screen_bases(J2DScreen* screen, JKRExpHeap* heap);
 void apply_collect_shifts(dMenu_Collect2D_c* collect2D);
 void update_frame_highlights(dMenu_Collect2D_c* collect2D);
 
-// Hook definitions for screen lifecycle
 DEFINE_HOOK(&dMenu_Collect2D_c::_create, MenuCollect2DCreateHook);
 void on_menu_collect_2d_create_post(ModContext*, void* args, void*, void*);
 

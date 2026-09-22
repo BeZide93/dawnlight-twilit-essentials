@@ -1,9 +1,11 @@
 #include "collection_lib/custom_equip.hpp"
+#include "collection_layout.hpp"
 
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "JSystem/J3DGraphBase/J3DSys.h"
 #include "JSystem/J3DGraphBase/J3DTransform.h"
 #include "JSystem/J3DGraphBase/J3DEnum.h"
 #include "JSystem/J3DGraphLoader/J3DModelLoader.h"
@@ -31,13 +33,17 @@ extern const ResourceService* cl_get_resource_service();
 
 DEFINE_HOOK(&daAlink_c::draw, CeAlinkDrawHook);
 DEFINE_HOOK(&daAlink_c::statusWindowDraw, CeAlinkSwDrawHook);
-DEFINE_HOOK(&daAlink_c::modelDraw, CeModelDrawHook);          // world shield/sword draw
-DEFINE_HOOK(&daAlink_c::basicModelDraw, CeBasicModelDrawHook); // doll shield/sword draw
-DEFINE_HOOK(&daAlink_c::setWaterDropColor, CeSetWaterDropColorHook); // bounds-checked water drop color
-DEFINE_HOOK(&dDlst_shadowControl_c::addReal, CeShadowAddRealHook); // redirect real-time shadow to custom models
-DEFINE_HOOK(&daAlink_c::shadowDraw, CeAlinkShadowDrawHook);       // swap vanilla equip out of Link's real shadow
-DEFINE_HOOK(&dMenu_Collect3D_c::_create, CeCollect3DCreateHook);  // collection doll session start
-DEFINE_HOOK(&dMenu_Collect3D_c::_delete, CeCollect3DDeleteHook);  // collection doll session end
+DEFINE_HOOK(&daAlink_c::modelDraw, CeModelDrawHook);
+DEFINE_HOOK(&daAlink_c::basicModelDraw, CeBasicModelDrawHook);
+DEFINE_HOOK(&daAlink_c::setWaterDropColor, CeSetWaterDropColorHook);
+DEFINE_HOOK(&dDlst_shadowControl_c::addReal, CeShadowAddRealHook);
+DEFINE_HOOK(&daAlink_c::shadowDraw, CeAlinkShadowDrawHook);
+DEFINE_HOOK(&dMenu_Collect3D_c::_create, CeCollect3DCreateHook);
+DEFINE_HOOK(&dMenu_Collect3D_c::_delete, CeCollect3DDeleteHook);
+
+DEFINE_HOOK(&daAlink_c::initStatusWindow, CeInitStatusWindowHook);
+
+DEFINE_HOOK(&J3DModel::calc, J3DModelCalcHook);
 
 namespace {
 
@@ -45,47 +51,29 @@ constexpr int kMaxDefs = 32;
 
 struct Entry {
     CustomEquipDef def;
-    // icon
+
     ResourceBuffer iconBuf = RESOURCE_BUFFER_INIT;
     ResTIMG*       iconTex = nullptr;
-    // icon-from-archive (iconBti = .arc path + iconArcFileId)
+
     ResourceBuffer iconArcBuf  = RESOURCE_BUFFER_INIT;
     JKRArchive*    iconArc     = nullptr;
-    bool           iconArcTried = false;  // stop retrying the mod's own res/
-                                           // copy once it's failed once - it
-                                           // won't start existing later, and
-                                           // custom_equip_icon() runs on every
-                                           // screen rebuild, so without this
-                                           // the failed load (and its error
-                                           // log) repeats forever instead of
-                                           // falling through to the game's
-                                           // already-mounted archive
+    bool           iconArcTried = false;
 
-    // model
     ResourceBuffer arcBuf  = RESOURCE_BUFFER_INIT;
     JKRArchive*    arc     = nullptr;
-    bool           arcIsGame = false; // arc belongs to the game's res system (never unmount/free)
-    J3DModel*      model       = nullptr; // Body (or sword/shield)
-    J3DModel*      sheathModel = nullptr; // Sword sheath
-    J3DModel*      hatModel    = nullptr; // Head / Hat
-    J3DModel*      faceModel   = nullptr; // Face
-    J3DModel*      handModel   = nullptr; // Hands
-    bool           tried     = false;  // stop retrying (success, or gave up)
-    u8             tryCount  = 0;      // consecutive failed load attempts
+    bool           arcIsGame = false;
+    J3DModel*      model       = nullptr;
+    J3DModel*      sheathModel = nullptr;
+    J3DModel*      hatModel    = nullptr;
+    J3DModel*      faceModel   = nullptr;
+    J3DModel*      handModel   = nullptr;
+    bool           tried     = false;
+    u8             tryCount  = 0;
 };
 
 Entry s_entries[kMaxDefs];
 int   s_count = 0;
 
-// iconBti paths already confirmed absent from the mod's own res/ bundle,
-// shared across ALL entries rather than tracked per-entry. Several custom
-// items commonly point at the SAME icon archive (e.g. several swords/shields/
-// tunics all use "Layout/clctres.arc", just with a different iconArcFileId
-// within it) - each Entry's own iconArcTried flag only stops IT from
-// retrying, so without this every item sharing a missing path still
-// independently rediscovers "not in our res/" and logs it once per item,
-// every time the collection screen rebuilds. This makes it at most once per
-// unique path per mod session.
 constexpr int kMaxFailedIconPaths = 8;
 const char* s_failedIconPaths[kMaxFailedIconPaths] = {};
 int         s_failedIconPathCount = 0;
@@ -105,76 +93,26 @@ void mark_icon_path_missing(const char* path) {
     }
 }
 
-int s_activeId[3] = { -1, -1, -1 };   // per CustomEquipKind
+int s_activeId[3] = { -1, -1, -1 };
 int s_equipDebounce = 0;
 char s_cachedStage[16] = {};
 Mtx s_lastBaseMtx[3];
 bool s_hasLastBaseMtx[3] = { false, false, false };
 bool s_linkModelIsWolf = false;
 
-// Diagnostic: logs every current.pos change for a while after a changeLink()/
-// tunic-swap, so a reported position bug can be pinned to an exact frame.
-// 2026-09-12 finding: an A/B log (vanilla clothes vs custom tunic, same shop
-// entry, same instrumentation) showed the steady multi-second per-frame Z creep
-// is IDENTICAL frame-for-frame in both cases - a normal vanilla scripted
-// "walk from the door into the shop" root-motion animation, not a bug, and must
-// NOT be touched. The only actual divergence is exactly the first two frames
-// after a custom-tunic swap, which jump by ~750 and ~1140 units respectively
-// (a normal frame here is 1-10 units) before locking onto the same shared walk
-// cycle as vanilla. That shape - one-time huge deltas only right at a model
-// swap, then perfectly normal afterward - is a root-motion sampling glitch:
-// the engine's per-frame move code diffs the currently-playing animation's root
-// joint pose against last frame's sample to derive speed, and swapping the
-// J3DModel mid-animation makes that comparison straddle two unrelated
-// skeletons (old model's joint layout vs the new custom one), producing a
-// phantom one-frame "jump" as if Link had teleported.
 int s_tunicPosWatchFrames = 0;
 cXyz s_tunicPosWatchLast = {};
-// 2026-09-12, second finding: the position clamp fixed the Z drift, but the
-// camera still ended up facing the wrong way - logging confirmed current.angle
-// is untouched by the glitch (identical before/after every clamped jump), so
-// that wasn't it. fopAc_ac_c carries a SEPARATE field, shape_angle, distinct
-// from current.angle - current.angle is the logical/physics-facing angle,
-// shape_angle is what the actor's own model/shape actually gets drawn (and
-// almost certainly what the camera orients off), and the two can diverge. Track
-// and clamp shape_angle instead (current.angle is still tracked/logged in case
-// it turns out to matter after all, harmless either way).
+
 csXyz s_tunicAngleWatchLast = {};
 csXyz s_tunicShapeAngleWatchLast = {};
 
-// 2026-09-12, third finding: resetRootMtx() right after the model swap did NOT
-// change the jump pattern at all (identical magnitudes still occur and get
-// clamped) - so it isn't touching whatever produces this. And current.angle /
-// shape_angle are now proven byte-identical to vanilla in every logged frame,
-// yet the camera still ends up facing backward - so the camera isn't reading
-// either of those actor fields for its facing. It must be reading its OWN
-// state (camera_class::angle / view.lookat, via dComIfGp_getCamera) which our
-// clamp never touches at all. Log it alongside position/actor-angle so the next
-// report shows what the camera itself is doing when the glitch happens.
 csXyz s_tunicCamAngleWatchLast = {};
 
-// 2026-09-12, fifth finding: pinning camera.angle.y for the full watch window
-// fixed the yaw permanently (confirmed: stayed at -32768 the entire log, no
-// flip at all) - but the camera is STILL visually wrong, because view.lookat.eye
-// (the camera's actual world position, separate from angle) is ALSO corrupted
-// by the exact same glitch, at the exact same first frame - it jumps hundreds
-// of units off at the same moment current.pos does, then only creeps back
-// toward correct extremely slowly (still off by ~630 units after the whole
-// 300-frame/5s window). Unlike angle.y, eye legitimately moves every frame (the
-// camera keeps following Link), so it can't be pinned to a constant - instead,
-// snapshot eye/center right before the swap (last known-good) and revert them
-// at the exact moment a position anomaly is detected, the same way
-// current.pos/angle/shape_angle already get reverted there.
 cXyz s_tunicCamEyeWatchLast = {};
 cXyz s_tunicCamCenterWatchLast = {};
 
-// Active fix: for a short window right after a tunic swap, any per-frame jump
-// far outside the normal 1-10 unit walk-animation range gets reverted (both the
-// position and the speed that produced it) instead of just logged. Only armed
-// by the tunic-swap path itself (NOT the generic every-changeLink watch below),
-// so plain vanilla-clothes movement is never touched.
 int s_tunicPosClampFrames = 0;
-constexpr f32 kTunicPosClampThreshold = 150.0f;  // normal walk deltas seen: <10; glitch deltas seen: >750
+constexpr f32 kTunicPosClampThreshold = 150.0f;
 
 static J3DModel* s_originalLinkModel = nullptr;
 static J3DModel* s_originalHatModel  = nullptr;
@@ -303,7 +241,6 @@ static void* find_body_bmd(JKRArchive* arc) {
     return nullptr;
 }
 
-// The vanilla J3DModel* a custom item of `kind` replaces.
 J3DModel* vanilla_model(daAlink_c* a, CustomEquipKind kind) {
     if (!a) return nullptr;
     switch (kind) {
@@ -318,7 +255,7 @@ static void* get_arc_res(JKRArchive* arc, const char* name, u16 fallbackId = 0xF
     void* res = nullptr;
     if (name && name[0] != '\0') {
         res = arc->getResource(0, name);
-        if (!res) res = arc->getResource(0x424D4433, name); // 'BMD3'
+        if (!res) res = arc->getResource(0x424D4433, name);
         if (!res) res = arc->getResource(name);
     }
     if (!res && fallbackId != 0xFFFF) {
@@ -328,46 +265,17 @@ static void* get_arc_res(JKRArchive* arc, const char* name, u16 fallbackId = 0xF
     return res;
 }
 
-// Attribute assigned to each of J3DVertexBlock's 13 data-array offset fields,
-// in field order (pos, nrm, nbt, clr0, clr1, tex0..tex7). Mirrors
-// J3DModelLoader.cpp's own VertexBlockAttrOrder table - that one is private
-// to that file (not exposed via any header), so this is an independent copy
-// rather than a shared reference. Keep it in sync if the SDK's table changes.
 static const GXAttr kVtxBlockAttrOrder[13] = {
     GX_VA_POS, GX_VA_NRM, GX_VA_NBT, GX_VA_CLR0, GX_VA_CLR1,
     GX_VA_TEX0, GX_VA_TEX1, GX_VA_TEX2, GX_VA_TEX3,
     GX_VA_TEX4, GX_VA_TEX5, GX_VA_TEX6, GX_VA_TEX7,
 };
 
-// Byte-swaps a big-endian u32 read straight off disk into host (little-
-// endian x86) order - written out by hand rather than calling any dusklight-
-// provided swap helper. Those (BE<T>::swap) are declared in a dusklight
-// header but their bodies live in a dusklight .cpp that compiles into the
-// game/engine binary, not into this mod - calling one links fine locally
-// against the SDK's stub import libs (which don't validate real availability)
-// but fails at actual mod-load time with ERROR_PROC_NOT_FOUND, since it was
-// never meant to be an SDK entry point mods can call. Everything this
-// validation needs must be self-contained.
 static u32 be_swap_u32(u32 v) {
     return ((v & 0x000000FFu) << 24) | ((v & 0x0000FF00u) << 8) |
            ((v & 0x00FF0000u) >> 8)  | ((v & 0xFF000000u) >> 24);
 }
 
-// Validates a BMD/BDL's VTX1 chunk: every vertex attribute with a non-null
-// data array must have a matching entry in the format list. Some export
-// tools (common for hand-converted/third-party custom models) produce files
-// where that isn't true - a data array is present but its format was never
-// declared. The stock loader has no defense against this: it hard-OSPanics
-// (a fatal, uncatchable engine abort - not a C++ exception) deep inside
-// J3DModelLoader::readVertexData when it happens, taking the whole game down
-// over one bad model. Reject such files here instead, so load_single_bmd()
-// can fail gracefully like any other bad/missing asset. Reads the SAME
-// on-disk struct layout (J3DVertexBlock, GXVtxAttrFmtList - both plain
-// compile-time type definitions from dusklight headers, not runtime calls
-// into dusklight-compiled code) the real loader does; this is independent
-// validation logic, not a patch to the loader itself.
-// Returns true if there's no VTX1 chunk at all (nothing for us to judge) or
-// if every attribute it references is properly declared.
 static bool bmd_vertex_format_ok(const void* bmd) {
     const auto* fileData = static_cast<const J3DModelFileData*>(bmd);
     const J3DModelBlock* block = fileData->mBlocks;
@@ -378,16 +286,13 @@ static bool bmd_vertex_format_ok(const void* bmd) {
             const auto* vtx = reinterpret_cast<const J3DVertexBlock*>(block);
             const BE(u32)* attrPtrBase = &vtx->mpVtxPosArray;
             const u32 fmtListOffset = vtx->mpVtxAttrFmtList;
-            if (fmtListOffset == 0) return false;   // data arrays but no format list at all
+            if (fmtListOffset == 0) return false;
             const auto* rawFmtList = reinterpret_cast<const GXVtxAttrFmtList*>(
                 reinterpret_cast<uintptr_t>(vtx) + fmtListOffset);
 
             for (int a = 0; a < 13; a++) {
-                if (attrPtrBase[a] == 0) continue;   // attribute not present - fine
+                if (attrPtrBase[a] == 0) continue;
 
-                // Only the attr field (first 4 bytes of each entry) is
-                // needed for this check - cnt/type/frac are irrelevant here,
-                // so there's no need to interpret them at all.
                 bool found = false;
                 for (const GXVtxAttrFmtList* raw = rawFmtList;; raw++) {
                     u32 rawAttr;
@@ -396,30 +301,19 @@ static bool bmd_vertex_format_ok(const void* bmd) {
                     if (attr == GX_VA_NULL) break;
                     if (attr == kVtxBlockAttrOrder[a]) { found = true; break; }
                 }
-                if (!found) return false;   // has data, but no matching format entry - malformed
+                if (!found) return false;
             }
             return true;
         }
         block = reinterpret_cast<const J3DModelBlock*>(
             reinterpret_cast<uintptr_t>(block) + static_cast<u32>(block->mBlockSize));
     }
-    return true;   // no VTX1 chunk found - not ours to judge
+    return true;
 }
 
 static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     if (!bmd) return nullptr;
-    // Sanity-check the magic header before handing raw memory to
-    // J3DModelLoaderDataBase::load() - it has no validation of its own and
-    // OSPanics (a hard, uncatchable engine abort - not a C++ exception) deep
-    // inside vertex-format parsing (getFmt) when handed data that isn't
-    // actually a BMD/BDL. That happens whenever an archive/file reference
-    // resolves to the wrong memory - a stale buffer from a reload-timing
-    // race (custom_equip state can outlive the mod generation that owned it
-    // for a moment - see natives.cpp's cache-generation comment), a mismatched
-    // modelArc name falling through to an unrelated vanilla archive, or a
-    // load that silently left `bmd` pointing at garbage because its ModResult
-    // was never checked. A real J3D model file always starts with "J3D2bmd3"
-    // or "J3D2bdl4" - reject anything else instead of crashing on it.
+
     static const char* const kValidMagics[] = { "J3D2bmd3", "J3D2bdl4" };
     bool magicOk = false;
     for (const char* magic : kValidMagics) {
@@ -427,19 +321,8 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
     }
     if (!magicOk) return nullptr;
 
-    // Catches the specific malformation the magic-header check above can't:
-    // a genuinely valid BMD/BDL whose VTX1 chunk still crashes the loader
-    // (see bmd_vertex_format_ok's own comment).
     if (!bmd_vertex_format_ok(bmd)) return nullptr;
 
-    // Parse + build on the ROOT heap. This runs while the collection menu is
-    // open, and the current heap there belongs to the menu session: J3DModelData,
-    // its per-texture TGXTexObj arrays (J3DTexture allocates them in its ctor)
-    // and the J3DMaterialAnm instances below must outlive the menu - structures
-    // left on a menu heap are freed when it closes, and the equipped sword then
-    // renders with dangling texture memory (the GPU worker faults in
-    // hash_texture_source while resolving the draw - crash on custom sword
-    // selection).
     JKRHeap* rootHeap = JKRHeap::getRootHeap();
     JKRHeap* old = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
 
@@ -449,16 +332,6 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
         return nullptr;
     }
 
-    // Some custom BMDs carry TEX1 entries the host's strict static-texture
-    // resolution cannot handle (0x0 size, no image data, or a GX format outside
-    // its supported set - e.g. the Gilded Sword). Vanilla never samples those,
-    // but resolving them when the sword renders fatals with "invalid texture
-    // source for content hash". Degenerate-but-supported entries get their
-    // ResTIMG patched to a minimal valid 8x8 (in our own resource buffer, so it
-    // is writable); entries with a format outside the host's supported set get
-    // the format rewritten to GX_TF_IA8 (same 32-byte-per-4x4 block size as most
-    // GX tile formats, so the decode stays in bounds - the pixels of such an
-    // entry were never meaningful anyway).
     if (J3DTexture* tex = data->getTexture()) {
         const u16 texNum = tex->getNum();
         for (u16 i = 0; i < texNum; ++i) {
@@ -470,7 +343,7 @@ static J3DModel* load_single_bmd(void* bmd, u32 diffFlags = 0x11000084) {
             if (t->width == 0) t->width = 8;
             if (t->height == 0) t->height = 8;
             if (t->imageOffset == 0) t->imageOffset = 0x20;
-            if (unsupported) t->format = 3;  // GX_TF_IA8
+            if (unsupported) t->format = 3;
             if (degenerate || unsupported) {
                 tex->setResTIMG(i, *t);
             }
@@ -510,11 +383,7 @@ void load_model(Entry& e) {
     if (res == nullptr || g_modCtx == nullptr) return;
 
     if (e.arcBuf.data == nullptr && e.arc == nullptr) {
-        // Force a clean empty state on anything but a clean success - the
-        // ModResult was previously discarded entirely, so a failed load could
-        // leave e.arcBuf in whatever state the service happened to put it in
-        // (its contract only documents the success case) and the code below
-        // would trust e.arcBuf.data as if it were real file contents.
+
         if (res->load(g_modCtx, e.def.modelArc, &e.arcBuf) != MOD_OK) {
             e.arcBuf.data = nullptr;
             e.arcBuf.size = 0;
@@ -525,9 +394,7 @@ void load_model(Entry& e) {
     if (persistHeap == nullptr) persistHeap = static_cast<JKRHeap*>(mDoExt_getGameHeap());
 
     if (e.arcBuf.data == nullptr && e.arc == nullptr) {
-        // Not in the mod's res/ - the game file system is the only remaining
-        // source, and it serves OVERLAY-injected files too, even arcs that do
-        // not exist on the vanilla DVD (the port's file layer maps them in).
+
         if (e.def.modelArc != nullptr && e.def.modelArc[0] != 0) {
             e.arc = JKRArchive::mount(e.def.modelArc, JKRArchive::MOUNT_COMP, persistHeap,
                                       JKRArchive::MOUNT_DIRECTION_HEAD);
@@ -541,19 +408,7 @@ void load_model(Entry& e) {
                 e.arc = JKRArchive::mount(withRes.c_str(), JKRArchive::MOUNT_COMP, persistHeap,
                                           JKRArchive::MOUNT_DIRECTION_HEAD);
             }
-            // NOT arcIsGame: unlike the dComIfG_getObjectResInfo() fallback
-            // further below (which retrieves an EXISTING, game-managed
-            // JKRArchive* we never allocated), THIS mount is one WE just
-            // created via JKRArchive::mount(). Marking it arcIsGame=true
-            // made every cleanup path (note_load_fail, custom_equip_reset_
-            // registry, custom_equip_remove) skip unmounting it - since a
-            // fresh mod generation starts with a zeroed Entry and re-mounts
-            // from scratch, that leaked one JKRArchive (plus its mounted
-            // file data) on the persistent root heap per reload, with
-            // nothing ever freeing the old ones. Enough accumulated reloads
-            // exhausts/fragments that heap, which is consistent with this
-            // crashing only after repeated reloads rather than on the first
-            // one. This mount is ours; we're responsible for freeing it.
+
         }
     }
 
@@ -563,11 +418,7 @@ void load_model(Entry& e) {
             if (e.arc == nullptr) { note_load_fail(e); return; }
         }
     } else if (e.arc == nullptr) {
-        // Game-data fallback: the archive is not in the mod's res/ - treat
-        // `modelArc` as the name of one of the game's OWN object archives
-        // (directory + extension stripped, e.g. "AlLink.arc" -> "AlLink") and
-        // resolve resources from the game's mounted archive instead. That
-        // archive is owned by the game: never unmount or free it here.
+
         char arcName[16] = {};
         const char* base = e.def.modelArc;
         for (const char* c = e.def.modelArc; *c != '\0'; c++) {
@@ -656,7 +507,6 @@ Entry* active_entry(CustomEquipKind kind) {
     return (id >= 0 && id < s_count) ? &s_entries[id] : nullptr;
 }
 
-// Suppress vanilla sword/shield mesh while custom item is active
 HookAction on_alink_model_draw_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
     J3DModel*  m = args ? mods::arg<J3DModel*>(args, 1) : nullptr;
@@ -740,12 +590,6 @@ static bool is_warp_visual(daAlink_c* a) {
            proc == daAlink_c::PROC_TW_GATE;
 }
 
-// ---- Gamepad LED colour override (custom tunics) ---------------------------
-// The vanilla gamepad_color logic (dusk gamepad_color.cpp) picks the LED
-// colour from the EQUIPPED VANILLA tunic. When a custom tunic with a
-// padColor override is worn, recolour every LED write the game makes -
-// last-writer-wins per frame keeps the override visible while it runs, and
-// vanilla colours return automatically once the tunic is off.
 DEFINE_HOOK(&PADSetColor, CePadSetColorHook);
 
 static HookAction on_pad_set_color_pre(ModContext*, void* args, void*, void*) {
@@ -760,14 +604,10 @@ static HookAction on_pad_set_color_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-// POST (daAlink_c::draw + statusWindowDraw): draw custom models
 void on_alink_draw_post(ModContext*, void*, void*, void*) {
     daAlink_c* a = player();
     if (!a || s_linkModelIsWolf || is_full_wolf(a) || is_warp_visual(a)) return;
-    // Cutscenes / boss doors hide Link's whole model via checkPlayerNoDraw()
-    // (the game passes that flag to every modelDraw of his sub-models). The
-    // custom gear is drawn separately here, so honour the same flag or the
-    // custom sword/shield keep floating on an invisible Link.
+
     if (a->checkPlayerNoDraw()) return;
 
     for (int k = 0; k < 3; k++) {
@@ -790,11 +630,6 @@ void on_alink_draw_post(ModContext*, void*, void*, void*) {
     }
 }
 
-// PRE (dDlst_shadowControl_c::addReal): redirect real-time shadow casting to custom
-// models. NOTE: on the desktop symbol manifest this hook does NOT reliably fire
-// (dDlst_shadowControl_c::addReal is inlined / not exported), so the real work is
-// done by the daAlink_c::shadowDraw pre/post pair below - this stays as a
-// belt-and-suspenders redirect for platforms where the symbol IS hookable.
 HookAction on_add_real_shadow_pre(ModContext*, void* args, void* ret, void*) {
     if (!args) return HOOK_CONTINUE;
     dDlst_shadowControl_c* self = mods::arg<dDlst_shadowControl_c*>(args, 0);
@@ -841,20 +676,8 @@ HookAction on_add_real_shadow_pre(ModContext*, void* args, void* ret, void*) {
     return HOOK_CONTINUE;
 }
 
-// -------------------------------------------------------------------------
-// Real-time (projected-silhouette) shadow for custom equip.
-//
-// daAlink_c::shadowDraw() feeds Link's own model plus mSwordModel / mSheathModel /
-// mShieldModel into the real shadow group via dComIfGd_addRealShadow(). We can't
-// reliably hook that inner call on desktop (addReal isn't in the manifest), so we
-// bracket shadowDraw() itself: PRE nulls the vanilla equip model pointers so the
-// engine adds nothing for them, POST restores them and appends OUR custom models
-// to the same shadow id (still valid until the drawlist resets next frame - the
-// exact trick visible_equipment uses for the bow/lantern).
-static J3DModel* s_shadowStash[3] = { nullptr, nullptr, nullptr }; // sword, sheath, shield
+static J3DModel* s_shadowStash[3] = { nullptr, nullptr, nullptr };
 
-// Link's real-shadow group id (field_0x31a4 is what daAlink_c::shadowDraw itself
-// uses for the on-foot case; mounted, the sword isn't drawn so we don't care).
 static u32 ce_link_shadow_id(daAlink_c* a) {
     return static_cast<u32>(a->field_0x31a4);
 }
@@ -901,8 +724,6 @@ void on_alink_shadow_draw_post(ModContext*, void* args, void*, void*) {
     }
 }
 
-// PRE (daAlink_c::setWaterDropColor): prevent out-of-bounds crash on custom tunic models
-// (e.g. Magic Armor code accessing hat material 2 when custom hat only has 2 materials 0..1).
 HookAction on_set_water_drop_color_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
     const J3DGXColorS10* i_color = args ? mods::arg<const J3DGXColorS10*>(args, 1) : nullptr;
@@ -936,7 +757,7 @@ HookAction on_set_water_drop_color_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-}  // namespace
+}
 
 struct CustomEquipSaveBlob {
     u8 shieldItem = 0;
@@ -970,26 +791,12 @@ static void save_custom_equip_state(CustomEquipKind kind, u8 item) {
 
 static bool s_restoredFromSave = false;
 
-// Previous-frame custom_equip_active() snapshot for the state-loss self-heal in
-// custom_equip_update() (see the s_healPending block there).
 static bool s_prevEquipWasActive[3] = { false, false, false };
 static bool s_healPending = false;
 static int s_healAttemptsLeft = 0;
 
-// Frames since this mod generation's custom_equip_update() first ran (i.e.
-// since a fresh init/reload) - NOT reset by anything else, so it only ever
-// matters in the brief window right after a reload. natives.cpp's own
-// cache-generation comment admits "the previous generation may still be
-// unwinding after a reload" - that's a real async race between the OLD
-// generation's teardown (unmounting archives, freeing buffers) and the NEW
-// generation's own first load_model() attempt over shared, game-owned
-// resources (mounted archives) that outlive any single mod generation.
-// There's no way to directly synchronize with that from mod code, so this
-// gives it a short window to settle before the first attempt - purely a
-// best-effort mitigation for a crash (OSPanic deep in the model parser, not
-// a catchable exception) that's otherwise only reachable right after reload.
 static int s_framesSinceUpdateStart = 0;
-constexpr int kModelLoadReloadSettleFrames = 60;   // ~1s at 60fps
+constexpr int kModelLoadReloadSettleFrames = 1;
 
 void custom_equip_restore_from_save() {
     if (!is_gameplay_ready()) return;
@@ -1000,7 +807,6 @@ void custom_equip_restore_from_save() {
 
     dSv_player_status_a_c& st = g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA();
 
-    // 1. Shield
     if (s_activeId[CE_SHIELD] < 0) {
         u8 item = 0;
         if (g_saveSvc != nullptr && g_modCtx != nullptr) {
@@ -1015,7 +821,7 @@ void custom_equip_restore_from_save() {
             for (int i = 0; i < s_count; i++) {
                 if (s_entries[i].def.kind == CE_SHIELD && s_entries[i].def.item == item) {
                     s_activeId[CE_SHIELD] = i;
-                    // Ensure valid backing shield in dComIfGs so Link can block and guard
+
                     if (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e) {
                         u8 backing = dItemNo_WOOD_SHIELD_e;
                         if (dComIfGs_isItemFirstBit(dItemNo_HYLIA_SHIELD_e)) backing = dItemNo_HYLIA_SHIELD_e;
@@ -1028,7 +834,6 @@ void custom_equip_restore_from_save() {
         }
     }
 
-    // 2. Sword
     if (s_activeId[CE_SWORD] < 0) {
         u8 item = 0;
         if (g_saveSvc != nullptr && g_modCtx != nullptr) {
@@ -1057,7 +862,6 @@ void custom_equip_restore_from_save() {
         }
     }
 
-    // 3. Tunic
     if (s_activeId[CE_TUNIC] < 0) {
         u8 item = 0;
         if (g_saveSvc != nullptr && g_modCtx != nullptr) {
@@ -1081,7 +885,6 @@ void custom_equip_restore_from_save() {
     }
 }
 
-// -------------------------------------------------------------------------
 void custom_equip_reset_registry() {
     for (int i = 0; i < s_count; i++) {
         Entry& e = s_entries[i];
@@ -1102,7 +905,6 @@ void custom_equip_reset_registry() {
 void custom_equip_remove(int id) {
     if (id < 0 || id >= s_count) return;
 
-    // drop per-kind active state that pointed at this slot
     const CustomEquipKind kind = s_entries[id].def.kind;
     if (s_activeId[kind] == id) {
         custom_equip_clear(kind);
@@ -1122,7 +924,6 @@ void custom_equip_remove(int id) {
     for (int i = id; i < s_count - 1; i++) s_entries[i] = s_entries[i + 1];
     s_count--;
 
-    // keep per-kind active ids consistent after the compaction
     for (int k = 0; k < 3; k++) {
         if (s_activeId[k] > id) s_activeId[k]--;
     }
@@ -1155,13 +956,13 @@ int custom_equip_register(const CustomEquipDef& def) {
                 s_entries[i].tried = false;
                 s_entries[i].tryCount = 0;
             }
-            s_entries[i].def = resolved;   // refresh
+            s_entries[i].def = resolved;
             return i;
         }
     }
     if (s_count >= kMaxDefs) return -1;
     int id = s_count++;
-    // Preserve any already-loaded icon/model for this slot id.
+
     ResourceBuffer ib = s_entries[id].iconBuf; ResTIMG* it = s_entries[id].iconTex;
     ResourceBuffer ab = s_entries[id].arcBuf;  JKRArchive* ar = s_entries[id].arc;
     bool ag = s_entries[id].arcIsGame;
@@ -1203,13 +1004,6 @@ const CustomEquipDef* custom_equip_get(int id) {
     return (id >= 0 && id < s_count) ? &s_entries[id].def : nullptr;
 }
 
-// setSwordModel() is also the game's "Link draws his sword" routine: it forces
-// mEquipItem = 0x103 and un-hides the blade shape. When we only need to rebuild
-// the sword model after a skin / backing-sword swap we must NOT change whether
-// the sword is actually in Link's hand - otherwise equipping a sword on the
-// Collection screen (sheathed on the way in) leaves Link holding it after the
-// screen closes, because resetStatusWindow()'s setSelectEquipItem(FALSE) keys
-// the blade's visibility off mEquipItem == 0x103.
 static void refresh_sword_model(daAlink_c* pl) {
     if (pl == nullptr) return;
 
@@ -1221,8 +1015,8 @@ static void refresh_sword_model(daAlink_c* pl) {
     pl->setItemMatrix(0);
 
     if (!wasDrawn) {
-        pl->offSwordModel();           // hide the blade shape + clear the BGM sword-using flag
-        pl->mEquipItem   = prevEquip;  // undo setSwordModel()'s forced "sword in hand"
+        pl->offSwordModel();
+        pl->mEquipItem   = prevEquip;
         pl->field_0x2fde = prevPending;
     }
 }
@@ -1231,9 +1025,7 @@ void custom_equip_activate(int id) {
     if (id < 0 || id >= s_count) return;
     CustomEquipKind kind = s_entries[id].def.kind;
     s_activeId[kind] = id;
-    // (Re-)equipping always gets a fresh load attempt, even if a previous try on
-    // this stage gave up (e.g. it was equipped, un-equipped, the model freed on a
-    // transition, then re-equipped).
+
     if (s_entries[id].model == nullptr) {
         s_entries[id].tried = false;
         s_entries[id].tryCount = 0;
@@ -1287,8 +1079,6 @@ bool custom_equip_active(CustomEquipKind kind) { return s_activeId[kind] >= 0; }
 
 int custom_equip_active_id(CustomEquipKind kind) { return s_activeId[kind]; }
 
-// -------------------------------------------------------------------------
-// Slot glue - the layout registers these for every custom-item slot.
 static u8 kind_row(CustomEquipKind k) { return k == CE_SWORD ? 1 : k == CE_SHIELD ? 2 : 3; }
 
 static int def_at_cell(u8 x, u8 y) {
@@ -1311,7 +1101,7 @@ static int def_at_cell(u8 x, u8 y) {
 void update_frame_highlights(dMenu_Collect2D_c* collect2D);
 
 void custom_equip_on_equip(dMenu_Collect2D_c* collect2D) {
-    if (!collect2D || collect2D->mIsWolf || s_equipDebounce > 0) return;   // onEquip can fire twice per A-press
+    if (!collect2D || collect2D->mIsWolf || s_equipDebounce > 0) return;
     daAlink_c* alink = daAlink_getAlinkActorClass();
     int id = def_at_cell(collect2D->mCursorX, collect2D->mCursorY);
     if (id < 0) return;
@@ -1322,11 +1112,9 @@ void custom_equip_on_equip(dMenu_Collect2D_c* collect2D) {
     if (kind == CE_TUNIC && alink && alink->getClothesChangeWaitTimer() != 0) return;
 
     if (s_activeId[kind] == id) {
-        // Tunics cannot be unequipped (matches vanilla TP behavior where clothes can never be unequipped)
+
         if (kind == CE_TUNIC) return;
 
-        // Already equipped -> unequip
-        // Unequip is a lib feature (always available; no consumer policy).
         s_equipDebounce = 8;
         custom_equip_clear(kind);
         if (kind == CE_SHIELD) {
@@ -1339,7 +1127,7 @@ void custom_equip_on_equip(dMenu_Collect2D_c* collect2D) {
         dMeter2Info_set2DVibration();
         update_frame_highlights(collect2D);
     } else {
-        // Equip
+
         s_equipDebounce = 8;
         custom_equip_activate(id);
         if (kind == CE_SHIELD) {
@@ -1386,14 +1174,6 @@ ResTIMG* custom_equip_icon(int id) {
     Entry& e = s_entries[id];
     if (e.iconTex != nullptr) return e.iconTex;
 
-    // Icon by exact file index from an archive. Source priority:
-    // 1. the mod's OWN package copy (res/<iconBti>, e.g. res/Layout/clctres.arc)
-    //    - guaranteed to be our file even when another mod's overlay wins the
-    //    boot-time mount,
-    // 2. the collection screen's already-mounted archive (game's copy).
-    // Lookup uses getIdxResource FIRST: the id is the 0-based table index exactly
-    // as arc tools show it (getResource() matches the per-file id attribute,
-    // which is index+1 in most arcs -> off-by-one).
     if (e.def.iconArcFileId.fileId != 0xFFFF) {
         const ResourceService* resSvc = cl_get_resource_service();
 
@@ -1445,11 +1225,10 @@ ResTIMG* custom_equip_icon(int id) {
     return e.iconTex;
 }
 
-u64 custom_equip_icon_tag(int id)  { return static_cast<u64>(0x63656900) + id; }  // 'cei' + id
-u64 custom_equip_pic_tag(int id)   { return static_cast<u64>(0x63657000) + id; }  // 'cep' + id
-u64 custom_equip_frame_tag(int id) { return static_cast<u64>(0x63656700) + id; }  // 'ceg' + id
+u64 custom_equip_icon_tag(int id)  { return static_cast<u64>(0x63656900) + id; }
+u64 custom_equip_pic_tag(int id)   { return static_cast<u64>(0x63657000) + id; }
+u64 custom_equip_frame_tag(int id) { return static_cast<u64>(0x63656700) + id; }
 
-// -------------------------------------------------------------------------
 static void on_custom_equip_save_loaded(ModContext*, uint32_t, void*) {
     s_activeId[0] = s_activeId[1] = s_activeId[2] = -1;
     s_restoredFromSave = false;
@@ -1465,10 +1244,11 @@ static void on_custom_equip_new_save(ModContext*, uint32_t, void*) {
     save_custom_equip_state(CE_TUNIC, 0);
 }
 
-// Defined further down, next to the doll-swap implementation (they need
-// retarget_face_material_anims, which itself sits below this point).
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*);
 HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*);
+HookAction on_alink_init_status_window_pre(ModContext*, void*, void*, void*);
+HookAction on_mw_execute_pre_doll_safety(ModContext*, void*, void*, void*);
+HookAction on_j3dmodel_calc_pre(ModContext*, void*, void*, void*);
 
 void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* save_svc) {
     if (save_svc != nullptr && g_modCtx != nullptr) {
@@ -1486,9 +1266,12 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     mods::hook::add_post<CeAlinkShadowDrawHook>(hook_svc, on_alink_shadow_draw_post);
     mods::hook::add_pre<CeCollect3DCreateHook>(hook_svc, on_collect_3d_create_pre);
     mods::hook::add_pre<CeCollect3DDeleteHook>(hook_svc, on_collect_3d_delete_pre);
+    mods::hook::add_pre<CeInitStatusWindowHook>(hook_svc, on_alink_init_status_window_pre);
+
+    mods::hook::add_pre<MwExecuteHook>(hook_svc, on_mw_execute_pre_doll_safety);
+    mods::hook::add_pre<J3DModelCalcHook>(hook_svc, on_j3dmodel_calc_pre);
 }
 
-// Runs once per stage change.
 static void on_stage_changed() {
     for (int i = 0; i < kMaxDefs; i++) {
         s_entries[i].iconTex = nullptr;
@@ -1500,34 +1283,6 @@ static void on_stage_changed() {
     s_originalHandModel = nullptr;
 }
 
-// Hand-rolled replacement for J3DAnmTexPattern::searchUpdateMaterialID(J3DModelData*)
-// / J3DAnmTextureSRTKey::searchUpdateMaterialID(J3DModelData*). Both are opaque
-// vanilla engine functions (declared only in this SDK, no source to audit) and both
-// crashed (2026-09-05, deep inside J3DAnimation.cpp, first via a hot-reload trace,
-// then reproduced reliably by the user just equipping the "Ordon Hero" custom
-// tunic in the collection menu / on stage load). That tunic's al_face.bmd is a
-// straight retexture of vanilla's own al_face.bmd - same material names, same
-// count, same order - so a mismatched/degenerate material table (the earlier
-// getMaterialNum()>0 guard) isn't the cause here; the vanilla routine itself
-// appears to choke on being re-targeted at all onto a freshly, independently
-// loaded J3DModelData instance for the face, something every custom-tunic face
-// swap does. Both anm classes expose everything the search needs as plain public
-// members (mUpdateMaterialName/mUpdateMaterialID/mUpdateMaterialNum - see
-// J3DAnimation.h), and J3DModelData::getMaterialName() returns a JUTNameTab with
-// getIndex(name) - so do the same by-name lookup ourselves, fully bounds-checked,
-// instead of calling into the crashing routine at all.
-// 2026-09-05, second AND third crash (both a short <unknown> frame right under
-// ModLoader::tick - no named engine frame at all, i.e. inside OUR code, not
-// vanilla's), still reproducing after adding a null check on mUpdateMaterialID
-// alone - "Ordon Hero"'s archive ships al_face.bmd but no al_face.btp/al_face.btk
-// (checked the arc's own file list), so whatever changeModelDataDirect(1) builds
-// for a->mpFaceBtp/mpFaceBtk when the face model has no dedicated anim file of
-// its own is suspect wholesale, not just its ID array - mUpdateMaterialNum could
-// just as easily be garbage, or mUpdateMaterialName's backing resource pointer
-// null, on such a make-do object. Validate the whole object before touching any
-// of it: a non-null resource behind mUpdateMaterialName (via the public
-// getResNameTable(), so this doesn't itself call into anything that could be the
-// thing that's broken) and a sane (non-zero, non-absurd) material count.
 template <typename AnmT>
 static void safe_search_update_material_id(AnmT* anm, J3DModelData* faceData) {
     if (anm == nullptr || faceData == nullptr) {
@@ -1556,18 +1311,6 @@ static void safe_search_update_material_id(AnmT* anm, J3DModelData* faceData) {
     }
 }
 
-// Re-targets Link's face material animators (mpFaceBtp/mpFaceBtk) onto
-// whichever face model is CURRENTLY assigned (a->mpLinkFaceModel) - vanilla or
-// custom - by material name, so entryTexMtxAnimator()/getMaterialAnm() index
-// this model's own material table instead of the one they were originally
-// built against. Called in EVERY swap path (custom swap, unequip restore,
-// shutdown, menu-doll swap-out) IMMEDIATELY BEFORE changeModelDataDirect(1),
-// because that is the call which enters the animators - entering with stale
-// IDs was the 2026-09-19 Wolf->Human transform crash. safe_search_update_
-// material_id's whole-object validation is what makes the pre-entry call safe
-// for tunics without dedicated face anims ("Ordon Hero"). Factored out of what
-// used to be near-identical copies so the guards below only need maintaining
-// in one place.
 static void retarget_face_material_anims(daAlink_c* a) {
     if (a == nullptr || a->mpLinkFaceModel == nullptr) {
         return;
@@ -1588,28 +1331,8 @@ static void retarget_face_material_anims(daAlink_c* a) {
     }
 }
 
-// ---- Collection-screen doll safety -----------------------------------------
-// The game's status-window code (dMenu_Collect3D_c) drives whatever models are
-// currently on the actor with vanilla-only assumptions: initStatusWindow()
-// enters the menu-heap wait-BCK and the menu's own FA btp/btk onto the body and
-// face model data, walks hardcoded vanilla joint loops, and lets
-// statusWindowExecute() calc the body model from scratch - all written for the
-// resource-owned vanilla Link skeleton. With a custom tunic those are
-// independently loaded BMDs, and a menu session can leave menu-heap references
-// inside their model data (2026-09-19: OSPanic in J3DSys::setModelDrawMtx on
-// the next world draw, and a garbage read in J3DMtxBuffer::calcWeightEnvelopeMtx
-// the moment dMenu_Collect3D_c::_create -> statusWindowExecute calcs the custom
-// body). So: when the doll session starts, put the vanilla models back on the
-// actor; while it lasts, custom_equip_apply() is gated off (s_dollSwapActive);
-// when it ends, the flag clears and the regular per-frame poll re-applies the
-// custom tunic through the normal, fully tested swap path. Outside the menu
-// nothing changes - the world always shows the custom gear; only the menu's
-// Link doll shows vanilla equipment.
 static bool s_dollSwapActive = false;
 
-// Watchdog: if the doll session ended without its _delete hook firing (menu
-// torn down by some other path), drop the gate as soon as the collection
-// screen is gone so the poll can re-apply the custom tunic.
 static void doll_session_watchdog() {
     if (s_dollSwapActive && s_currentCollect2D == nullptr) {
         s_dollSwapActive = false;
@@ -1619,21 +1342,42 @@ static void doll_session_watchdog() {
 static void custom_equip_menu_doll_begin() {
     s_dollSwapActive = false;
     daAlink_c* a = player();
-    if (a == nullptr || is_wolf(a)) return;
-    Entry* tunicEntry = active_entry(CE_TUNIC);
-    if (tunicEntry == nullptr || tunicEntry->model == nullptr) return;
-    // Only meaningful when the custom tunic is actually on the actor and the
-    // vanilla set it replaced is still captured.
-    if (a->mpLinkModel != tunicEntry->model) return;
-    if (s_originalLinkModel == nullptr || s_originalLinkModel == tunicEntry->model) return;
+    if (a == nullptr) { log_collect_info("[doll] abort: no player"); return; }
+    if (is_wolf(a)) { log_collect_info("[doll] abort: is_wolf"); return; }
+
+    if (s_originalLinkModel == nullptr) {
+        log_collect_info("[doll] abort: no captured vanilla model (nothing custom equipped)");
+        return;
+    }
+    if (a->mpLinkModel == s_originalLinkModel) {
+        log_collect_info("[doll] abort: mpLinkModel already vanilla");
+        return;
+    }
+
+    if (J3DModelData* vanillaData = s_originalLinkModel->getModelData()) {
+        if (J3DModelData* customData = a->mpLinkModel->getModelData()) {
+            log_collect_info("[doll] model compare: vanilla joints=%u shapes=%u drawMtx=%u | "
+                             "custom joints=%u shapes=%u drawMtx=%u",
+                             vanillaData->getJointNum(), vanillaData->getShapeNum(), vanillaData->getDrawMtxNum(),
+                             customData->getJointNum(), customData->getShapeNum(), customData->getDrawMtxNum());
+        }
+    }
     if (a->mpLinkModel == nullptr || a->mpLinkHatModel == nullptr ||
         a->mpLinkFaceModel == nullptr || a->mpLinkHandModel == nullptr) {
+        log_collect_info("[doll] abort: actor sub-model null (body=%p hat=%p face=%p hand=%p)",
+                         (void*)a->mpLinkModel, (void*)a->mpLinkHatModel,
+                         (void*)a->mpLinkFaceModel, (void*)a->mpLinkHandModel);
         return;
     }
     if (s_originalLinkModel == nullptr || s_originalHatModel == nullptr ||
         s_originalFaceModel == nullptr || s_originalHandModel == nullptr) {
+        log_collect_info("[doll] abort: original sub-model null (body=%p hat=%p face=%p hand=%p)",
+                         (void*)s_originalLinkModel, (void*)s_originalHatModel,
+                         (void*)s_originalFaceModel, (void*)s_originalHandModel);
         return;
     }
+    log_collect_info("[doll] begin: swapping doll to vanilla models (body=%p->%p)",
+                     (void*)a->mpLinkModel, (void*)s_originalLinkModel);
 
     a->mpLinkModel     = s_originalLinkModel;
     a->mpLinkHatModel  = s_originalHatModel;
@@ -1659,30 +1403,70 @@ static void custom_equip_menu_doll_begin() {
     }
 
     s_dollSwapActive = true;
+    log_collect_info("[doll] begin: swap done, s_dollSwapActive=true");
 }
 
 static void custom_equip_menu_doll_end() {
-    // Re-applying the custom tunic is left to the regular per-frame poll
-    // (custom_equip_apply's swap branch), which owns the position watchdog and
-    // all the edge cases - this only re-opens the gate.
+
     s_dollSwapActive = false;
 }
 
 HookAction on_collect_3d_create_pre(ModContext*, void*, void*, void*) {
+    log_collect_info("[doll] HOOK FIRED: on_collect_3d_create_pre");
     if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
     return HOOK_CONTINUE;
 }
 
 HookAction on_collect_3d_delete_pre(ModContext*, void*, void*, void*) {
+    log_collect_info("[doll] HOOK FIRED: on_collect_3d_delete_pre");
     custom_equip_menu_doll_end();
+    return HOOK_CONTINUE;
+}
+
+HookAction on_alink_init_status_window_pre(ModContext*, void*, void*, void*) {
+    log_collect_info("[doll] HOOK FIRED: on_alink_init_status_window_pre");
+    if (is_collection_menu_enabled()) custom_equip_menu_doll_begin();
+    return HOOK_CONTINUE;
+}
+
+HookAction on_mw_execute_pre_doll_safety(ModContext*, void*, void*, void*) {
+    return HOOK_CONTINUE;
+#if 0
+    if (!is_collection_menu_enabled()) return HOOK_CONTINUE;
+
+    if (!dComIfGp_isPauseFlag()) return HOOK_CONTINUE;
+    daAlink_c* a = player();
+
+    if (a != nullptr && !s_dollSwapActive && s_originalLinkModel != nullptr &&
+        a->mpLinkModel != s_originalLinkModel) {
+        log_collect_info("[doll] HOOK FIRED: on_mw_execute_pre_doll_safety (tunic on actor, swapping)");
+        custom_equip_menu_doll_begin();
+    }
+    return HOOK_CONTINUE;
+#endif
+}
+
+HookAction on_j3dmodel_calc_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* a = player();
+    if (a == nullptr || !a->checkStatusWindowDraw()) return HOOK_CONTINUE;
+
+    J3DModel* model = args ? mods::arg<J3DModel*>(args, 0) : nullptr;
+    if (model == nullptr) return HOOK_CONTINUE;
+
+    const bool isActorModel = model == a->mpLinkModel || model == a->mpLinkFaceModel ||
+                              model == a->mpLinkHatModel || model == a->mpLinkHandModel;
+    const bool isVanillaModel = model == s_originalLinkModel || model == s_originalFaceModel ||
+                                model == s_originalHatModel || model == s_originalHandModel;
+    if (isActorModel && !isVanillaModel) {
+
+    }
     return HOOK_CONTINUE;
 }
 
 static void custom_equip_apply(daAlink_c* a, bool duringRebuild = false);
 
 void custom_equip_update() {
-    // Saturate rather than wrap - this only needs to distinguish "still
-    // early after a fresh reload" from "well past it", not count forever.
+
     if (s_framesSinceUpdateStart < kModelLoadReloadSettleFrames) s_framesSinceUpdateStart++;
 
     if (s_equipDebounce > 0) s_equipDebounce--;
@@ -1697,21 +1481,6 @@ void custom_equip_update() {
 
     doll_session_watchdog();
 
-    // Self-heal dropped equip state. The save blob is the durable record of what
-    // the player wants equipped (custom_equip_activate() writes the item id,
-    // custom_equip_clear() writes 0 on every intentional unequip), so a blob
-    // entry while s_activeId says "nothing equipped" means the runtime state was
-    // lost somewhere OUTSIDE the equip flow (observed 2026-09-19: equip the
-    // Reinforced Shield -> transform Wolf -> transform back -> open the
-    // collection menu -> the Hylian ring shows as the equipped one -> closing
-    // the menu leaves no shield on the back). Whatever the clearer is, restore
-    // from the blob as soon as gameplay allows (this runs during pause menus too
-    // - mod_update doesn't stop for them). Unequips never fight this: they write
-    // 0 to the blob first, so the restore sees nothing wanted. The pending latch
-    // retries for a few frames when is_gameplay_ready() is still false on the
-    // frame the loss happened, and also caps the damage when the blob names an
-    // entry that no longer exists: one restore attempt, then give up instead of
-    // retry-spamming forever.
     for (int k = 0; k < 3; k++) {
         if (s_prevEquipWasActive[k] && s_activeId[k] < 0) {
             s_healPending = true;
@@ -1731,8 +1500,6 @@ void custom_equip_update() {
         }
     }
 
-    // Models/archives live on the game heap, which is torn down on an area load -
-    // rebuild them on a stage change (same reason visible_equipment invalidates).
     const char* stage = dComIfGp_getStartStageName();
     if (s_cachedStage[0] == '\0') {
         if (stage != nullptr) {
@@ -1745,7 +1512,6 @@ void custom_equip_update() {
         on_stage_changed();
     }
 
-    // Wait until stage and Link actor are completely finished loading and initializing!
     if (!is_gameplay_ready()) {
         return;
     }
@@ -1757,24 +1523,13 @@ void custom_equip_update() {
         if (a != nullptr) {
             cXyz p = a->current.pos;
 
-            // Active fix: only while s_tunicPosClampFrames is armed (right after OUR
-            // tunic swap - see comment at its declaration), revert any per-frame jump
-            // far outside the normal 1-10 unit walk-animation range. Confirmed via A/B
-            // log against vanilla clothes that the normal steady creep never exceeds
-            // ~10 units/frame, while the root-motion swap glitch produces one-time
-            // jumps of 700-1100+ units - kTunicPosClampThreshold sits safely between
-            // the two, so this can't clip the legitimate shared walk-in animation.
             if (s_tunicPosClampFrames > 0) {
                 const f32 dx = p.x - s_tunicPosWatchLast.x;
                 const f32 dy = p.y - s_tunicPosWatchLast.y;
                 const f32 dz = p.z - s_tunicPosWatchLast.z;
                 const bool jumpDetectedThisFrame = dx * dx + dy * dy + dz * dz > kTunicPosClampThreshold * kTunicPosClampThreshold;
                 if (jumpDetectedThisFrame) {
-                    // Same root-motion glitch corrupts current.angle right alongside
-                    // current.pos (a walk animation's root joint bakes both translation
-                    // and facing) - revert both together instead of just position, or
-                    // Link ends up standing in the right spot but facing the wrong way
-                    // (and the camera, which orients off his facing, follows him into it).
+
                     a->current.pos = s_tunicPosWatchLast;
                     a->current.angle = s_tunicAngleWatchLast;
                     a->shape_angle = s_tunicShapeAngleWatchLast;
@@ -1782,7 +1537,6 @@ void custom_equip_update() {
                     a->speedF = 0.0f;
                     p = s_tunicPosWatchLast;
 
-                    // Calculate target camera position behind Link facing in Link's look direction
                     const f32 sinYaw = cM_ssin(a->shape_angle.y);
                     const f32 cosYaw = cM_scos(a->shape_angle.y);
 
@@ -1799,7 +1553,6 @@ void custom_equip_update() {
                     cXyz targetCenter = a->current.pos;
                     targetCenter.y += 130.0f;
 
-                    // Eye is behind Link (opposite of look direction)
                     cXyz targetEye = targetCenter;
                     targetEye.x -= sinYaw * dist;
                     targetEye.z -= cosYaw * dist;
@@ -1832,7 +1585,7 @@ void custom_equip_update() {
                     camAngle.z != s_tunicCamAngleWatchLast.z) {
                     s_tunicCamAngleWatchLast = camAngle;
                 }
-                // Keep the eye/center revert-target fresh from legitimate movement ONLY when clamp window is done
+
                 if (s_tunicPosClampFrames == 0) {
                     if (dCamera_c* dcam = dCam_getBody()) {
                         s_tunicCamEyeWatchLast = dcam->Eye();
@@ -1848,16 +1601,6 @@ void custom_equip_update() {
     }
 }
 
-// Restore the equipped custom gear onto Link: (re)build the models and swap the
-// custom tunic onto his body/hat/face/hands. Split out so it can also run the
-// instant the new-stage Link finishes creating (custom_equip_on_alink_created) -
-// before his first drawn frame - instead of a few frames later from the poll,
-// which is what let the Kokiri base model flash through on fade-in.
-// duringRebuild: called straight from the changeLink POST hook, which JUST built
-// Link's fresh human models - swap even while checkWolf()/checkMetamorphose() is
-// still set (the Wolf->Human morph then morphs OUR model in, exactly like the
-// working Human->Wolf direction). The per-frame poll passes false -> normal
-// "don't touch a wolf" guard.
 static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
     if (!s_restoredFromSave && is_gameplay_ready()) {
         custom_equip_restore_from_save();
@@ -1871,7 +1614,6 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
         }
     }
 
-    // Dynamic model swap for custom tunics (replaces Link's body, hat, face, hands)
     Entry* tunicEntry = active_entry(CE_TUNIC);
     if (tunicEntry != nullptr && tunicEntry->model != nullptr) {
         if (dComIfGs_getSelectEquipClothes() != tunicEntry->def.baseClothes) {
@@ -1879,40 +1621,14 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
             dComIfGs_setSelectEquipClothes(tunicEntry->def.baseClothes);
         }
     }
-    // While the collection doll session is active (see s_dollSwapActive), the
-    // actor carries the vanilla models on purpose - don't swap the custom set
-    // back in, not even on duringRebuild (a mid-menu changeLink rebuilds the
-    // vanilla set and must leave it vanilla). The poll re-applies right after
-    // the menu closes.
+
     if (a && !s_dollSwapActive && (duringRebuild || !is_wolf(a))) {
         if (tunicEntry && tunicEntry->model) {
             if (a->mpLinkModel != tunicEntry->model) {
-                // 2026-09-05: three straight fix attempts around face-animator
-                // retargeting (getMaterialNum guard, hand-rolled search, single-
-                // call-site revert) all left the SAME short "<unknown> under
-                // ModLoader::tick" crash equipping "Ordon Hero" unchanged - the
-                // real faulting line is still unidentified. Log every step so the
-                // NEXT report pins it down by the last line printed, instead of
-                // guessing again.
-                //
-                // 2026-09-12: confirmed by log comparison against the vanilla-tunic
-                // path that changeLink() itself places Link correctly (identical PRE/
-                // POST position for both paths) - the Z drift only appears AFTER this
-                // swap runs, custom-tunic-only. A custom body .bmd exported by a
-                // modding tool can carry a non-zero baked root-joint translation (the
-                // original object's DCC-tool origin), and a->changeModelDataDirect(1)
-                // below re-derives Link's placement from the newly assigned body
-                // model's own transform - so a body model with such a baked offset
-                // drags Link's world position along with it. Bracket the whole swap in
-                // the same save/restore-position pattern already used around
-                // changeLink() (collection_equip.cpp) so whichever step causes it, it
-                // can't leave Link somewhere else than where changeLink() (correctly)
-                // already put him.
+
                 const cXyz savedSwapPos = a->current.pos;
                 const s16  savedSwapAngleY = a->current.angle.y;
 
-                // Start the post-swap position watchdog (see s_tunicPosWatchFrames
-                // comment) - 300 frames (~5s at 60fps) of coverage past the swap.
                 s_tunicPosWatchFrames = 300;
                 s_tunicPosWatchLast = savedSwapPos;
                 s_tunicAngleWatchLast = a->current.angle;
@@ -1925,9 +1641,7 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     s_tunicCamEyeWatchLast = cam0->view.lookat.eye;
                     s_tunicCamCenterWatchLast = cam0->view.lookat.center;
                 }
-                // Arm the active anomalous-jump clamp for a handful of frames right
-                // after THIS swap - the root-motion glitch only ever showed up in the
-                // first 1-2 frames post-swap, this just gives it margin.
+
                 s_tunicPosClampFrames = 10;
 
                 if (s_originalLinkModel == nullptr) {
@@ -1945,47 +1659,26 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     s_origShape_06f0 = a->field_0x06f0;
                 }
 
-                // 1. Swap Body
                 a->mpLinkModel = tunicEntry->model;
                 a->mpLinkModel->setUserArea((uintptr_t)a);
 
-                // 2. Swap Hat
                 if (tunicEntry->hatModel != nullptr) {
                     a->mpLinkHatModel = tunicEntry->hatModel;
                     a->mpLinkHatModel->setUserArea((uintptr_t)a);
                 }
 
-                // 3. Swap Face
                 if (tunicEntry->faceModel != nullptr) {
                     a->mpLinkFaceModel = tunicEntry->faceModel;
                 }
 
-                // 4. Swap Hands
                 if (tunicEntry->handModel != nullptr) {
                     a->mpLinkHandModel = tunicEntry->handModel;
                 }
 
-                // 4b. Re-map mpFaceBtp/mpFaceBtk onto the face model we JUST
-                // assigned, BEFORE changeModelDataDirect(1) enters them. Their
-                // mUpdateMaterialID arrays still hold indices resolved against
-                // whichever face data was current when they were last entered -
-                // on the Wolf->Human transform that is the wolf model's material
-                // table (~40 materials) - and entryTexMtxAnimator() feeds those
-                // raw IDs to getMaterialNodePointer(), so any index past the
-                // custom face's material count is a wild-pointer read. That was
-                // the 2026-09-19 crash (J3DMaterial::getMaterialAnm via
-                // changeLink POST -> changeModelDataDirect) with "Ordon Hero"
-                // equipped. This used to exist as a pre-changeModelDataDirect
-                // call and was reverted when "Ordon Hero" (no al_face.btp/btk of
-                // its own) crashed inside it - safe_search_update_material_id's
-                // whole-object validation now carries that case.
                 retarget_face_material_anims(a);
 
-                // 5. Connect callbacks and animators
                 a->changeModelDataDirect(1);
 
-                // 5b. Sync old frame root joint translation to the new model's animation
-                // transform so transAnimeProc doesn't calculate a huge phantom delta.
                 if (a->field_0x2060 != nullptr && a->field_0x1f20 != nullptr && a->field_0x1f20->getAnm(0) != nullptr) {
                     J3DTransformInfo ti;
                     a->field_0x1f20->getAnm(0)->getTransform(0, &ti);
@@ -1995,7 +1688,6 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     a->field_0x2060->initOldFrameMorf(0.0f, 0, 35);
                 }
 
-                // 6. Body material shapes
                 if (a->field_0x064C != nullptr) {
                     if (a->field_0x064C->getMaterialNum() > 16) {
                         a->field_0x064C->getMaterialNodePointer(16)->getShape()->hide();
@@ -2012,7 +1704,6 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     a->field_0x06d4 = a->field_0x06dc;
                 }
 
-                // 7. Hand material shapes
                 if (a->mpLinkHandModel != nullptr && a->mpLinkHandModel->getModelData() != nullptr) {
                     J3DModelData* handData = a->mpLinkHandModel->getModelData();
                     u16 numMats = handData->getMaterialNum();
@@ -2021,14 +1712,6 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     }
                 }
 
-                // 8. Eye LOD fix (mEyeHL1 + eye/highlight texture maxLOD). Deliberately
-                // does NOT touch a->mpFaceBtp/a->mpFaceBtk anymore - see the
-                // retarget_face_material_anims comment above for why. This part
-                // (unchanged since before this session's face-retargeting work) never
-                // was the crash: the 2026-09-05 diagnostic that isolated the crash to
-                // "step 8" skipped this whole block wholesale, and removing only the
-                // retarget_face_material_anims() call (below) already fixed it on its
-                // own - this half is safe to keep.
                 if (a->mpLinkFaceModel != nullptr && a->mpLinkFaceModel->getModelData() != nullptr) {
                     J3DModelData* faceData = a->mpLinkFaceModel->getModelData();
                     a->mEyeHL1.remove();
@@ -2055,19 +1738,6 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     a->current.angle.y = savedSwapAngleY;
                 }
 
-                // A/B log comparison (vanilla vs custom tunic, same shop entry) showed
-                // Link's position keeps creeping in -Z for ~5s straight after this swap,
-                // ONLY on the custom-tunic path - X/Y untouched, no deceleration toward a
-                // fixed target. That shape (a steady per-frame delta, not a one-time snap)
-                // is what fopAc_ac_c::speed/speedF looks like: the actor's own per-frame
-                // velocity, which vanilla's move code adds to current.pos every tick and
-                // is expected to be zeroed once Link is idle/standing. If the swap (body
-                // model replacement + changeModelDataDirect) leaves a stale non-zero
-                // speed from whatever Link was doing right before changeLink() fired,
-                // nothing here ever clears it. Log it before zeroing so the next report
-                // confirms it was actually non-zero (i.e. this was the real cause, not a
-                // guess) - if it's already (0,0,0) here the theory is wrong and this is a
-                // no-op.
                 if (a->speed.x != 0.0f || a->speed.y != 0.0f || a->speed.z != 0.0f || a->speedF != 0.0f) {
                     a->speed.x = a->speed.y = a->speed.z = 0.0f;
                     a->speedF = 0.0f;
@@ -2090,11 +1760,7 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
 
                 a->mpLinkModel->setUserArea((uintptr_t)a);
                 if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
-                // Re-map the face animators onto the restored vanilla face
-                // BEFORE the entry pass - same stale-ID hazard as the
-                // custom-swap path above, in reverse: they were last resolved
-                // against the custom face, and the vanilla face's material
-                // count is what entryTexMtxAnimator() must index within.
+
                 retarget_face_material_anims(a);
                 a->changeModelDataDirect(1);
 
@@ -2111,16 +1777,10 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
     }
 }
 
-// Set from the changeWolf POST (true) / changeLink POST (false) hooks - i.e. the
-// moment daAlink_c::mpLinkModel actually becomes the wolf / human model.
 void custom_equip_set_link_model_wolf(bool isWolf) {
     s_linkModelIsWolf = isWolf;
 }
 
-// Called from the changeLink PRE hook, just before Link's human models are
-// rebuilt (create / clothes change / Wolf->Human). The captured base models are
-// about to be freed - drop the refs so the POST re-captures the fresh set and the
-// unequip-restore path can never write a dangling pointer.
 void custom_equip_before_link_rebuild() {
     s_originalLinkModel = nullptr;
     s_originalHatModel  = nullptr;
@@ -2129,23 +1789,10 @@ void custom_equip_before_link_rebuild() {
     s_hasLastBaseMtx[0] = s_hasLastBaseMtx[1] = s_hasLastBaseMtx[2] = false;
 }
 
-// Called from the changeLink / create POST hook - the instant Link's human models
-// are (re)built, before his first drawn frame. Re-applies the custom tunic/gear
-// swap so no plain base model is ever rendered (fade-in, un-transform, clothes
-// swap).
 void custom_equip_on_alink_created(daAlink_c* a) {
-    // NOT gated on is_wolf: changeLink() only ever (re)builds Link's HUMAN form,
-    // and running here mid Wolf->Human morph is exactly what makes the custom
-    // model morph in instead of popping at the very end.
+
     if (a == nullptr) return;
 
-    // Diagnostic: (re-)arm the position watchdog on EVERY changeLink() completion,
-    // regardless of whether anything custom is equipped - this gives a same-stage,
-    // vanilla-vs-custom-tunic comparison with identical instrumentation, to check
-    // whether the post-swap Z drift already reported (see s_tunicPosWatchFrames)
-    // is unique to the custom-tunic path or also happens on a plain vanilla-clothes
-    // changeLink() (e.g. a normal scripted "walk from the door to the counter"
-    // shop-entry animation would drift Z on BOTH paths and wouldn't be a bug at all).
     s_tunicPosWatchFrames = 300;
     s_tunicPosWatchLast = a->current.pos;
     s_tunicAngleWatchLast = a->current.angle;
@@ -2159,29 +1806,16 @@ void custom_equip_on_alink_created(daAlink_c* a) {
         s_tunicCamCenterWatchLast = cam0->view.lookat.center;
     }
 
-    // Everything custom_equip_apply() touches on the actor must already exist.
     if (a->mpLinkModel == nullptr || a->mpLinkHatModel == nullptr ||
         a->mpLinkFaceModel == nullptr || a->mpLinkHandModel == nullptr) return;
     if (a->field_0x2180[0] == nullptr || a->field_0x2180[1] == nullptr) return;
-    // Nothing equipped -> nothing to do (and don't want to run restore here).
+
     if (s_activeId[CE_SWORD] < 0 && s_activeId[CE_SHIELD] < 0 && s_activeId[CE_TUNIC] < 0) return;
-    custom_equip_apply(a, /*duringRebuild=*/true);
+    custom_equip_apply(a, true);
 }
 
 void custom_equip_shutdown() {
-    // Unconditionally detach mEyeHL1 from whatever it's currently entered against
-    // BEFORE anything below unmounts a custom tunic's archive. It used to only
-    // happen inside the `a->mpLinkModel != s_originalLinkModel` branch just below -
-    // if that check was ever false at shutdown time (model already restored by
-    // some other path, e.g. a stage change that ran first) the whole restore
-    // block, remove() included, was skipped, but the archive-unmount loop further
-    // down ran regardless. mEyeHL1.m_timg then kept pointing into the texture data
-    // of an archive we'd just freed - a dangling pointer that only actually
-    // faulted later, in the vanilla engine's own dEyeHL_mng_c::remove() (via
-    // ~dEyeHL_c() on the actor's own destruction), reported by the user as a crash
-    // on a mod reload / save load while a custom tunic was equipped. remove() is
-    // safe to call redundantly (dEyeHL_mng_c::remove is a no-op once m_timg is
-    // already null - see d_eye_hl.cpp), so doing it here first is free insurance.
+
     if (daAlink_c* a0 = player()) {
         a0->mEyeHL1.remove();
     }
@@ -2203,8 +1837,7 @@ void custom_equip_shutdown() {
             a->field_0x06f0    = s_origShape_06f0;
             a->mpLinkModel->setUserArea((uintptr_t)a);
             if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
-            // Same ordering as the unequip-restore path above: re-map the face
-            // animators onto the vanilla face BEFORE entering them.
+
             retarget_face_material_anims(a);
             a->changeModelDataDirect(1);
 
@@ -2219,23 +1852,11 @@ void custom_equip_shutdown() {
         s_originalHandModel = nullptr;
     }
 
-    // Models + archives are on the persistent root heap. Only unmount an entry
-    // whose model is NOT still assigned to the live Link actor (the restore block
-    // above handles the normal case; this guards the narrow window right after a
-    // transition where s_original* was nulled but not yet re-captured). A still-
-    // referenced archive is left mounted (a bounded root-heap leak) rather than
-    // freeing BMD data out from under a drawing model.
     daAlink_c* pl = player();
     const ResourceService* res = cl_get_resource_service();
     for (int i = 0; i < kMaxDefs; i++) {
         Entry& e = s_entries[i];
-        // NOTE: sword/shield/sheath models are NOT assigned to the actor (they
-        // are drawn via the shadow/draw hooks reading s_entries), but the BMD
-        // they were parsed from lives in e.arcBuf - so an entry whose models
-        // could still be referenced by an in-flight hook or shadow drawlist must
-        // keep the archive + buffer alive. Checking only the tunic slots here
-        // freed the sword archive out from under a still-equipped entry once the
-        // host started reclaiming unfreed resource buffers at detach.
+
         bool inUse = pl != nullptr &&
             ((e.model     != nullptr && (pl->mpLinkModel == e.model ||
                                          pl->mSwordModel == e.model ||
@@ -2245,7 +1866,7 @@ void custom_equip_shutdown() {
              (e.faceModel != nullptr && pl->mpLinkFaceModel == e.faceModel) ||
              (e.handModel != nullptr && pl->mpLinkHandModel == e.handModel));
         if (res != nullptr && g_modCtx != nullptr) {
-            res->free(g_modCtx, &e.iconBuf);   // menu-only, never held by a world model
+            res->free(g_modCtx, &e.iconBuf);
         }
         if (!inUse) {
             if (e.arc != nullptr && !e.arcIsGame) JKRUnmountArchive(e.arc);
@@ -2254,8 +1875,7 @@ void custom_equip_shutdown() {
             if (res != nullptr && g_modCtx != nullptr) res->free(g_modCtx, &e.iconArcBuf);
             s_entries[i] = Entry{};
         } else {
-            // Keep arc mounted + arcBuf alive (model still points into them);
-            // just drop the icon handle.
+
             e.iconBuf = ResourceBuffer{};
             e.iconTex = nullptr;
         }

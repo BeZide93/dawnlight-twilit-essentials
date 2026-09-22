@@ -3,12 +3,6 @@
 
 #include "f_pc/f_pc_profile_lst.h"
 
-
-// NOTE: this hook installs with MOD_ERROR on this build (getItemTag() is too
-// small a function for the detour mechanism - confirmed via diagnostic logging
-// during investigation) - the logic below never actually runs. Left in place,
-// unmodified, in case a future engine build makes it hookable again; the real
-// fix path is on_pointer_wait_replace below, which no longer depends on this.
 HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
     if (!is_collection_menu_enabled() || !args || !ret) return HOOK_CONTINUE;
     int i_tag1 = mods::arg<int>(args, 1);
@@ -20,11 +14,6 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
         return HOOK_SKIP_ORIGINAL;
     }
 
-    // Mod-added slots resolve to the pane tag recorded in their SlotSpec - a
-    // custom slot owns its cell COMPLETELY, including the vanilla starter
-    // cells: when the starter gear is off, auto-fill places a custom sword at
-    // (3,0), and its unlocked() gate (not the starter gate below) decides
-    // whether the cell - and therefore its mouse hover - exists.
     if (const SlotSpec* slot = slot_at(i_tag1, i_tag2)) {
         if (!is_collect_item_unlocked(i_tag1, i_tag2) || collection_page_active()) {
             *(u64*)ret = 0;
@@ -34,10 +23,6 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
         return HOOK_SKIP_ORIGINAL;
     }
 
-    // Wooden-sword (3,0) and ordon-clothes (3,2) slots don't exist without the
-    // starter-equip claim; the Ordon Shield (3,1) also goes unless "keep ordon
-    // shield" holds it (greyed - still has a pane). Only reached for cells no
-    // custom slot has claimed.
     if (i_tag1 == 3) {
         if ((i_tag2 == 0 || i_tag2 == 2) && !(cl_column_claimed(1, 1) || cl_column_claimed(3, 1))) {
             *(u64*)ret = 0;
@@ -49,8 +34,6 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
         }
     }
 
-    // Cells with x < 3 in the upper equip grid (rows 0..2) are unused in vanilla TP
-    // when no starter/custom slot is registered there.
     if (i_tag2 < 3 && i_tag1 < 3) {
         *(u64*)ret = 0;
         return HOOK_SKIP_ORIGINAL;
@@ -126,13 +109,11 @@ HookAction on_cursor_pos_set_pre(ModContext*, void* args, void*, void*) {
     u8 curX = collect2D->mCursorX;
     u8 curY = collect2D->mCursorY;
 
-    // Scale all panes
     for (u8 y = 0; y < 6; y++) {
         for (u8 x = 0; x < 7; x++) {
             J2DPane* pane = get_target_pane(collect2D, x, y);
             if (pane) {
-                // (6,0) only skips the item scale while a PAGE owns the heart -
-                // without a page it is a normal selectable grid item.
+
                 bool skipScale = (x == 0 && y == 0) ||
                                  (x == 6 && y == 0 && !slot_at(6, 0) && collection_page_claims_cell(6, 0));
                 if (!skipScale) {
@@ -191,15 +172,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
     u8 curY = collect2D->mCursorY;
 
     const SlotSpec* curSlot = slot_at(curX, curY);
-    // Hijack stick nav ONLY in rows that contain registered slots: vanilla
-    // cursorMove() skips mod cells (their getItemTag() entries don't exist),
-    // so those rows need the custom walk. Every other cell - pure vanilla
-    // rows, the whole lower grid, wolf form - runs vanilla cursorMove() with
-    // UNCONSUMED stick state: reading mpStick->check*Trigger() here latches
-    // their repeat-delay state and starves the vanilla navigation running
-    // afterwards (mobile report: "menu inputs don't consistently register",
-    // lower items unreachable; Android is always widescreen and has no PC
-    // pointer early-out in wait_proc, so cursorMove runs on every frame).
+
     bool hijackNav = cl_vanilla_layout_hidden() || curSlot != nullptr || slot_in_row(curY) != nullptr;
     bool inEquipGrid = !collect2D->mIsWolf && hijackNav &&
                        ((curX >= 3 && curX <= 6 && curY <= 2) || (curX == 6 && curY == 0) ||
@@ -211,8 +184,6 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
         u8 targetY = curY;
         bool moved = false;
 
-        // One trigger read per direction (checkDown/UpTrigger mutate repeat-timer
-        // state). dir: 0=left 1=right 2=up 3=down, -1=nothing.
         int dir = -1;
         if (collect2D->mpStick->checkRightTrigger()) {
             dir = 1;
@@ -226,16 +197,15 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
             else if (v == -1) dir = 2;
         }
 
-        // Auto-managed mod slots declare their own neighbours in the SlotSpec.
         SlotCell nav = (dir >= 0) ? slot_nav_target(curX, curY, dir) : SlotCell{};
 
         if (dir < 0) {
-            // nothing
+
         } else if (slot_cell_set(nav)) {
             targetX = nav.x;
             targetY = nav.y;
             moved = true;
-        } else if (dir == 1) {   // right
+        } else if (dir == 1) {
             for (int tx = curX + 1; tx <= 6; tx++) {
                 if (collect2D->field_0x22d[tx][curY] != 0) {
                     targetX = tx;
@@ -243,7 +213,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                     break;
                 }
             }
-        } else if (dir == 0) {   // left
+        } else if (dir == 0) {
             for (int tx = curX - 1; tx >= 3; tx--) {
                 if (collect2D->field_0x22d[tx][curY] != 0) {
                     targetX = tx;
@@ -252,9 +222,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                 }
             }
             if (!moved && !cl_vanilla_layout_hidden()) {
-                // Drop into the vanilla lower grid (insects / fish / ...).
-                // Validate the target with the game's getItemTag() -
-                // field_0x22d is not maintained for these cells.
+
                 for (int ty = (curY == 0) ? 3 : 4; ty <= 4 && !moved; ty++) {
                     if (collect2D->getItemTag(2, ty, true)) {
                         targetX = 2;
@@ -263,9 +231,8 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                     }
                 }
             }
-        } else {                 // up (2) / down (3)
-            // Pick the slot in the next row that's visually closest, so vertical
-            // nav still lines up when a row is shifted (starter-equip slot off).
+        } else {
+
             const bool goingDown = (dir == 3);
             J2DPane* fromPane = get_target_pane(collect2D, curX, curY);
             f32 fromX = fromPane ? fromPane->getTranslateX() : 0.0f;
@@ -297,13 +264,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
                 }
             }
             if (!moved && goingDown && !cl_vanilla_layout_hidden()) {
-                // Row 2 → lower grid: mirror vanilla cursorMove() EXACTLY by
-                // walking its candidate table through the game's own
-                // getItemTag(). field_0x22d is NOT maintained for the lower
-                // grid cells - a scan over it found nothing and swallowed the
-                // whole press ("row 3 slot 1 can't reach Save"). If no lower
-                // cell is valid, vanilla lands on the save/options row: same
-                // here.
+
                 static const u8 kDownX[8] = {3, 2, 3, 1, 2, 0, 1, 0};
                 static const u8 kDownY[8] = {3, 3, 4, 3, 4, 3, 4, 4};
                 for (int i = 0; i < 8 && !moved; i++) {
@@ -336,23 +297,11 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
             return HOOK_SKIP_ORIGINAL;
         }
         if (dir >= 0) {
-            // A direction was pressed but this grid has nowhere to go. Swallow
-            // it deliberately: falling through to vanilla cursorMove() lets it
-            // re-read the stick triggers this hook already consumed above
-            // (checkTrigger()/check*Trigger() mutate the repeat-timer state),
-            // which eats the input anyway AND desyncs the repeat timers - the
-            // source of the "menu inputs don't consistently register" reports.
+
             return HOOK_SKIP_ORIGINAL;
         }
     } else if (curY == 3 && collect2D->mpStick->checkUpTrigger()) {
-        // UP from the vanilla lower grid (wallet / poe souls / bugs / letters /
-        // skills row) must re-enter the equip grid at the nearest VISIBLE cell.
-        // Vanilla cursorMove()'s hardcoded row-3 remap table consults only its
-        // static tag table, which still lists cells this mod replaced or hid -
-        // the cursor then sits on an invisible pane (reads as "a tone plays but
-        // nothing moves"), and the next press appears to skip a whole row.
-        // Rows are scanned top-down (tunics before shields before swords) so
-        // the closest row wins, nearest column within it.
+
         int bestX = -1, bestY = -1;
         J2DPane* fromPane = get_target_pane(collect2D, curX, curY);
         f32 fromX = fromPane ? fromPane->getTranslateX() : 0.0f;
@@ -384,13 +333,6 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-// The mouse-hover scan (dMenu_Collect2D_c::pointerWait) walks cells in row-major
-// order and stops at the FIRST whose pane hit-box (bounds + 8px) contains the
-// cursor. heart_n and kamen_n both carry huge .blo bounds from their vanilla
-// (Heart Container / Mirror of Twilight) layout, and the mod parks them off
-// the visible grid on the main page - but their oversized hit-boxes still
-// shadow Hylian Shield (5,1) and Magic Armor (6,2). Shrink both hit-boxes to
-// off-screen for the duration of the scan, then put them back.
 static JGeometry::TBox2<f32> s_heartBoundsSave;
 static bool s_heartBoundsSaved = false;
 static JGeometry::TBox2<f32> s_kamenBoundsSave;
@@ -451,9 +393,7 @@ HookAction on_pointer_wait_pre(ModContext*, void* args, void*, void*) {
     if (J2DPane* heart = pw_heart(args)) {
         s_heartBoundsSave = heart->mBounds;
         s_heartBoundsSaved = true;
-        // Only while a PAGE owns the heart is it parked off the grid. Without a
-        // page it is a normal selectable grid item at (6,0) - keep its real
-        // hit-box so the cursor/mouse can reach it.
+
         if (collection_page_claims_cell(6, 0)) {
             if (!collection_page_active()) {
                 heart->mBounds.set(-99999.0f, -99999.0f, -99990.0f, -99990.0f);
@@ -471,11 +411,6 @@ HookAction on_pointer_wait_pre(ModContext*, void* args, void*, void*) {
         }
     }
 
-    // modelbgn (the 3D Mirror-of-Twilight backdrop plate) has the same problem as
-    // heart_n/kamen_n: huge vanilla .blo bounds, slid off-screen every frame by
-    // collection_page_apply() but never bounds-neutralized, so its oversized
-    // hit-box still shadowed the shield/clothes rows (whose Y sits closest to
-    // modelbgn's own Y) even though it's invisible on the main page.
     if (J2DPane* modelbgn = pw_modelbgn(args)) {
         s_modelbgnBoundsSave = modelbgn->mBounds;
         s_modelbgnBoundsSaved = true;
@@ -517,50 +452,15 @@ void on_pointer_wait_post(ModContext*, void* args, void*, void*) {
     }
 }
 
-// dusk::menu_pointer::hit_pane lives in dusklight/src/dusk/ (engine-internal,
-// not part of the public mod ABI collection-lib links against) - confirmed by a
-// direct LNK2019 unresolved-external when called as a normal C++ call. Resolved
-// instead via HookService::resolve() at init time (collection_lib.cpp), which
-// does a symbol-table lookup only - no detour/patch attempt, so it can't fail
-// the way GetItemTagHook's install() did. Mangled name pins the (CPaneMgr*,
-// float) overload specifically (hit_pane also has a J2DPane* overload; the
-// unqualified name is ambiguous and would resolve MOD_CONFLICT).
 bool (*g_hitPaneFn)(CPaneMgr*, f32) = nullptr;
 const char* const kHitPaneMangledName = "?hit_pane@menu_pointer@dusk@@YA_NPEAVCPaneMgr@@M@Z";
 
-// TargetId turned out to be a plain `using TargetId = u16;` alias (no distinct
-// enum type - mangles identically to a raw unsigned short param). Registers
-// which cell the pointer is over; called before the click check below.
 void (*g_setHoverTargetFn)(u16) = nullptr;
 const char* const kSetHoverTargetMangledName = "?set_hover_target@menu_pointer@dusk@@YAXG@Z";
 
-// peek_click() checks for a pending click without consuming it or requiring a
-// prior set_hover_target() call to validate against - used instead of
-// consume_click() so a click registers even the one frame set_hover_target
-// hasn't caught up yet. Edge-detected ourselves (see activate() below) since
-// it has no per-target consumption of its own.
 bool (*g_peekClickFn)() = nullptr;
 const char* const kPeekClickMangledName = "?peek_click@menu_pointer@dusk@@YA_NXZ";
 
-// getItemTag() cannot be hooked on this build (GetItemTagHook installs with
-// MOD_ERROR - confirmed via diagnostic logging - almost certainly because the
-// compiled function is too small for the detour mechanism). Every custom-slot
-// override in on_get_item_tag_pre is therefore silently inert: vanilla's own
-// getItemTag() (and its static tag table) is what actually governs pointerWait()
-// for every cell, on every build. It has no entry for Hylian Shield (5,1),
-// Reinforced Shield (6,1) or Magic Armor (6,2), so vanilla pointerWait() never
-// finds them - not a bounds bug, not a geometry bug, confirmed exhaustively.
-//
-// Fix: replace pointerWait() wholesale. Run the REAL vanilla implementation
-// first via g_orig - untouched behaviour (sound, click activation, everything)
-// for the ~39 cells that already work correctly. Only if vanilla found nothing
-// this frame do we fall back to testing our 3 known-good panes directly with
-// hit_pane() (geometry independently verified correct via HOVER_DIAG) and, on a
-// hit, place the cursor exactly as pointerWait() would. consume_click() takes
-// no parameters (no enum-encoding to guess, unlike begin_context/set_hover_target,
-// which this fallback still avoids), so it's resolved and called the same safe
-// way as hit_pane to drive click-to-equip through pointerActivateCurrent() -
-// matching what real pointerWait() does for every other cell.
 void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
     dMenu_Collect2D_c* self = args ? mods::arg<dMenu_Collect2D_c*>(args, 0) : nullptr;
     bool result = false;
@@ -571,10 +471,7 @@ void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
 
         if (!result && g_hitPaneFn) {
             auto activate = [&](u8 x, u8 y) {
-                // set_hover_target BEFORE the click check - consume_click() (per
-                // dusklight's "Refine menu_pointer click events" change) validates
-                // the click landed on the currently-registered target, so without
-                // this call it has nothing of ours to validate against.
+
                 if (g_setHoverTargetFn) {
                     g_setHoverTargetFn(static_cast<u16>(x + y * 7));
                 }
@@ -585,10 +482,7 @@ void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
                     self->cursorPosSet();
                     self->setItemNameString(self->mCursorX, self->mCursorY);
                 }
-                // peek_click() has no target concept, so a held-down click would
-                // re-report true every frame - track our own edge (not-clicked ->
-                // clicked) so a single click activates exactly once, matching
-                // vanilla's button-press semantics.
+
                 static bool s_wasClicked = false;
                 bool isClicked = g_peekClickFn && g_peekClickFn();
                 if (isClicked && !s_wasClicked) {
@@ -598,13 +492,6 @@ void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
                 s_wasClicked = isClicked;
             };
 
-            // Every autoLayout (custom) slot has the exact same problem as the 2
-            // hardcoded vanilla cells below - vanilla's own tag table has no
-            // entry for any cell whose content depends on our mod (x<3 hidden
-            // columns AND a 4th shield/tunic column both read back as "empty"
-            // from vanilla's perspective). Iterate the registry instead of a
-            // fixed cell list so a future custom item (see the 7th-slot fix)
-            // is covered automatically.
             bool handled = false;
             for (int i = 0; i < slot_count() && !handled; i++) {
                 const SlotSpec* s = slot_get(i);
@@ -616,8 +503,6 @@ void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
                 handled = true;
             }
 
-            // Hylian Shield (5,1) / Magic Armor (6,2): pure vanilla cells with no
-            // SlotSpec of their own, so the loop above can't find them.
             if (!handled) {
                 static const struct { u8 x, y; } kVanillaFallback[] = { {5, 1}, {6, 2} };
                 for (const auto& c : kVanillaFallback) {
@@ -632,7 +517,6 @@ void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*) {
     if (retval) *(bool*)retval = result;
 }
 
-
 HookAction on_set_item_name_string_pre(ModContext*, void* args, void*, void*) {
     if (!is_collection_menu_enabled() || !args) return HOOK_CONTINUE;
     dMenu_Collect2D_c* collect2D = mods::arg<dMenu_Collect2D_c*>(args, 0);
@@ -640,9 +524,6 @@ HookAction on_set_item_name_string_pre(ModContext*, void* args, void*, void*) {
     u8 y = mods::arg<u8>(args, 2);
     if (!collect2D || !collect2D->mpScreen) return HOOK_CONTINUE;
 
-    // While ANY page is the target the item grid is slid out/invisible - name
-    // strings for its cells would only flicker (the cursor can still wander
-    // the hidden cells after a drop). Force every setter to Null.
     if (collection_page_on_page()) {
         collect2D->setItemNameStringNull();
         return HOOK_SKIP_ORIGINAL;
@@ -660,37 +541,36 @@ HookAction on_set_item_name_string_pre(ModContext*, void* args, void*, void*) {
             collect2D->mItemNameString = slot_desc_id(slot);
         } else if (y == 0) {
             if (x == 3) {
-                collect2D->field_0x180 = 0x1a4; // Wooden Sword
+                collect2D->field_0x180 = 0x1a4;
                 collect2D->mItemNameString = 0x2a4;
             } else if (x == 4 && cl_item23_swapped(1)) {
-                // Relocated native Master Sword pane (item2/3-swapped row) -
-                // same native message ids as the x==5 case below.
-                collect2D->field_0x180 = dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) ? 0x1ae : 0x18e; // Master Sword
+
+                collect2D->field_0x180 = dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) ? 0x1ae : 0x18e;
                 collect2D->mItemNameString = collect2D->field_0x180 + 0x100;
             } else if (x == 5) {
-                collect2D->field_0x180 = dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) ? 0x1ae : 0x18e; // Master Sword
+                collect2D->field_0x180 = dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) ? 0x1ae : 0x18e;
                 collect2D->mItemNameString = collect2D->field_0x180 + 0x100;
             } else if (x == 6) {
-                collect2D->field_0x180 = 0x186; // Heart Container
+                collect2D->field_0x180 = 0x186;
                 collect2D->mItemNameString = 0x286;
             }
         } else if (y == 1) {
             if (x == 3) {
-                collect2D->field_0x180 = 0x18f; // Wooden Shield
+                collect2D->field_0x180 = 0x18f;
                 collect2D->mItemNameString = 0x28f;
             } else if (x == 5) {
-                collect2D->field_0x180 = 0x191; // Hylian Shield
+                collect2D->field_0x180 = 0x191;
                 collect2D->mItemNameString = 0x291;
             }
         } else if (y == 2) {
             if (x == 4) {
-                collect2D->field_0x180 = 0x194; // Kokiri Clothes
+                collect2D->field_0x180 = 0x194;
                 collect2D->mItemNameString = 0x294;
             } else if (x == 5) {
-                collect2D->field_0x180 = 0x196; // Zora Armor
+                collect2D->field_0x180 = 0x196;
                 collect2D->mItemNameString = 0x296;
             } else if (x == 6) {
-                collect2D->field_0x180 = 0x195; // Magic Armor
+                collect2D->field_0x180 = 0x195;
                 collect2D->mItemNameString = 0x295;
             }
         }
@@ -753,5 +633,3 @@ HookAction on_get_string_local_pre(ModContext*, void* args, void* ret, void*) {
     }
     return HOOK_CONTINUE;
 }
-
-

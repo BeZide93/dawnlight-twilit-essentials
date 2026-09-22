@@ -11,12 +11,10 @@ J2DScreen* s_capturedScreen = nullptr;
 dMenu_Collect2D_c* s_currentCollect2D = nullptr;
 bool s_needReloadCollect = false;
 
-// Blank-layout mode (see collection_common.hpp).
 static bool s_vanillaLayoutHidden = false;
 void cl_set_vanilla_layout_hidden(bool hidden) { s_vanillaLayoutHidden = hidden; }
 bool cl_vanilla_layout_hidden() { return s_vanillaLayoutHidden; }
 
-// Removed cells (via collectionlib_remove_slot / cl_remove_cell).
 static CollectionSlot s_removedCells[16];
 static int s_removedCellCount = 0;
 
@@ -36,7 +34,6 @@ bool cl_cell_removed(u8 row, u8 item) {
     return false;
 }
 
-// Item-2/item-3 column swap (sword row 1 / shield row 2 only, index row-1).
 static bool s_item23Swapped[2] = { false, false };
 void cl_set_item23_swapped(u8 row, bool swapped) {
     if (row < 1 || row > 2) return;
@@ -69,36 +66,18 @@ void log_collect_info(const char* fmt, ...) {
     g_logSvc->info(g_modCtx, buf);
 }
 
-// Connectors (tunagi)
 J2DPicture* s_picTunagiKen2 = nullptr;
 J2DPicture* s_picTunagiTate2 = nullptr;
 J2DPicture* s_picTunagiFuku3 = nullptr;
 
-// Dynamic connectors between adjacent custom slots (up to 6 pairs supported).
 J2DPicture* s_customConnectors[6]         = {};
 int         s_customConnectorCount        = 0;
-J2DPane*    s_customConnectorParent[3]    = {};   // [row-1]: parent pane for row 1/2/3
-J2DPicture* s_customConnectorTemplate[3]  = {};   // [row-1]: tunagi01/03/06 source pane
+J2DPane*    s_customConnectorParent[3]    = {};
+J2DPicture* s_customConnectorTemplate[3]  = {};
 
-
-// Sized for every addSlot()-built pane: item1/2/3 overrides across all three
-// rows (up to 9) plus auto-placed extras (up to 4 more per row) can add up
-// fast - slot_registry_add() drops anything past the end SILENTLY (the pane
-// still gets built, just never positioned/shown by layout_managed_slots,
-// which only walks this array - the symptom is a "phantom" icon stuck at its
-// raw construction position instead of its intended grid slot). Keep this
-// comfortably above whatever the consumer currently registers.
 static SlotSpec s_slotRegistry[32];
 static int      s_slotRegistryCount = 0;
 
-// Last texture actually pushed to each slot's icon picture via changeTexture(),
-// indexed the same as s_slotRegistry. layout_managed_slots() runs every frame
-// and used to call changeTexture(s->texOverride) unconditionally each time,
-// even though texOverride is normally the same pointer for a slot's whole
-// screen-build lifetime - that reinitializes the GPU texture object every
-// single frame for no reason (visible as constant initTexObj log spam) and
-// wastes GPU upload work. Tracked separately from SlotSpec (rather than a
-// field on it) so callers holding a const SlotSpec* don't need a const_cast.
 static const ResTIMG* s_slotAppliedTex[32] = {};
 
 void slot_registry_clear() {
@@ -123,23 +102,15 @@ void slot_set_applied_tex(int i, const ResTIMG* tex) {
 }
 
 SlotCell grid_cell(u8 row, u8 item) {
-    // Natural cell: rows 1..3 -> y 0..2, items 1..4 -> x 3..6.
     if (row >= 1 && row <= 3 && item >= 1 && item <= 4) {
         return SlotCell{ static_cast<u8>(2 + item), static_cast<u8>(row - 1) };
     }
-    // Item 5 (custom expansion for each row):
-    // row 1, item 5 -> { 2, 0 }
-    // row 2, item 5 -> { 2, 1 }
-    // row 3, item 5 -> { 2, 2 }
     if (row >= 1 && row <= 3 && item == 5) {
         return SlotCell{ 2, static_cast<u8>(row - 1) };
     }
-    // Item 6:
     if (row >= 1 && row <= 3 && item == 6) {
         return SlotCell{ 1, static_cast<u8>(row - 1) };
     }
-    // Item 7: the last free hidden column (x=0). Beyond this, the row is full -
-    // return "no cell" rather than silently colliding every further item onto x=0.
     if (row >= 1 && row <= 3 && item == 7) {
         return SlotCell{ 0, static_cast<u8>(row - 1) };
     }
@@ -160,30 +131,20 @@ const SlotSpec* slot_at(u8 x, u8 y) {
 }
 
 SlotCell slot_nav_target(u8 x, u8 y, int dir) {
-    // 0=left 1=right 2=up 3=down; the reverse of each is dir^1. nav targets are
-    // human {row,item} - resolve them the same way addSlot resolves a slot.
     for (int i = 0; i < s_slotRegistryCount; i++) {
         const SlotSpec& s = s_slotRegistry[i];
         if (!s.autoLayout.on) continue;
         const GridPos nbr[4] = { s.autoLayout.navLeft, s.autoLayout.navRight,
                                  s.autoLayout.navUp,   s.autoLayout.navDown };
-        // Forward: standing on this slot, press `dir` -> its declared target.
         if (s.x == x && s.y == y && grid_pos_set(nbr[dir])) {
             return grid_cell(nbr[dir].row, nbr[dir].item);
         }
-        // Reverse: standing on the slot's `dir^1` neighbour, press `dir` -> this slot.
         const GridPos& rev = nbr[dir ^ 1];
         if (grid_pos_set(rev)) {
             SlotCell rc = grid_cell(rev.row, rev.item);
             if (rc.x == x && rc.y == y) {
-                // Horizontal navigation (e.g. Magic Armor -> Ordon Hero, Hylian Shield -> Reinforced Shield)
                 if (dir == 0 || dir == 1) return SlotCell{ s.x, s.y };
-
-                // Vertical navigation between custom slots (e.g. DEMOdd <-> Ordon Hero)
                 if (slot_at(x, y) != nullptr) return SlotCell{ s.x, s.y };
-
-                // Vertical navigation from vanilla slot that has no vanilla neighbour in this direction
-                // (e.g. Magic Armor at row 3 item 4 pressing UP to Reinforced Shield at row 2 item 4)
                 if (dir == 2 && rev.item > 3) return SlotCell{ s.x, s.y };
             }
         }
@@ -198,8 +159,6 @@ const SlotSpec* slot_in_row(u8 y) {
     return nullptr;
 }
 
-// Synthetic id base for a registry entry that uses literal strings. 0xE000+ is
-// well clear of the collection menu's real message ids (0x186..0x2a4).
 static u16 slot_synth_base(const SlotSpec* s) {
     return static_cast<u16>(0xE000 + (s - s_slotRegistry) * 2);
 }
@@ -224,8 +183,6 @@ const SlotSpec* slot_by_msgid(u32 msgID) {
 
 ResourceBuffer s_ordonClothesBtiBuf = RESOURCE_BUFFER_INIT;
 
-// Load a packaged .bti (path relative to res/) and return it as a ResTIMG*,
-// copied onto the game heap so it outlives the resource buffer. Result cached.
 static ResTIMG* load_collection_bti(const char* resPath, ResourceBuffer* buf, ResTIMG** cache) {
     if (*cache != nullptr) return *cache;
 

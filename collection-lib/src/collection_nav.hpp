@@ -2,10 +2,8 @@
 
 #include "collection_lib/collection_common.hpp"
 
-// Target pane lookup for grid navigation and scaling
 J2DPane* get_target_pane(dMenu_Collect2D_c* collect2D, u8 x, u8 y);
 
-// Menu hooks
 DEFINE_HOOK(&dMenu_Collect2D_c::getItemTag, GetItemTagHook);
 HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*);
 
@@ -20,8 +18,6 @@ HookAction on_pointer_wait_pre(ModContext*, void* args, void*, void*);
 void on_pointer_wait_post(ModContext*, void* args, void*, void*);
 void on_pointer_wait_replace(ModContext*, void* args, void* retval, void*);
 
-// Resolved once at init (collection_lib.cpp) via HookService::resolve() - see
-// collection_nav.cpp for why this can't be a normal linked call.
 extern bool (*g_hitPaneFn)(CPaneMgr*, f32);
 extern const char* const kHitPaneMangledName;
 extern void (*g_setHoverTargetFn)(u16);
@@ -37,4 +33,3 @@ HookAction on_get_string_kanji_pre(ModContext*, void* args, void*, void*);
 
 DEFINE_HOOK(&dMsgStringBase_c::getStringLocal, MsgStringGetStringLocalHook);
 HookAction on_get_string_local_pre(ModContext*, void* args, void* ret, void*);
-

@@ -12,14 +12,8 @@ HookAction on_wait_proc_pre(ModContext*, void* args, void*, void*) {
     dMenu_Collect2D_c* collect2D = mods::arg<dMenu_Collect2D_c*>(args, 0);
     if (!collect2D || !collect2D->mpScreen) return HOOK_CONTINUE;
 
-    // Make sure a kept-but-burned Ordon shield is back in the inventory before
-    // the player can select its slot, so the equip takes the normal "already
-    // owned" path.
-
     apply_collect_shifts(collect2D);
 
-    // Second-page R/L toggle. While the grid isn't fully on the main page, freeze
-    // all normal collection input (cursor, equip, mouse) - only R/L page through.
     collection_page_handle_input(collect2D);
     if (collection_page_p2_focused()) {
         return HOOK_SKIP_ORIGINAL;
@@ -56,8 +50,6 @@ HookAction on_wait_proc_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-
-
 void on_wait_proc_post(ModContext*, void* args, void*, void*) {
     if (!is_collection_menu_enabled() || !args) return;
     dMenu_Collect2D_c* collect2D = mods::arg<dMenu_Collect2D_c*>(args, 0);
@@ -71,9 +63,9 @@ void on_wait_proc_post(ModContext*, void* args, void*, void*) {
             if (collect2D->mIsWolf) {
                 collect2D->setAButtonString(0);
             } else if (is_collect_item_equipped(curX, curY)) {
-                collect2D->setAButtonString((true && curY != 2) ? 0x437 : 0);  // "Unequip"
+                collect2D->setAButtonString((true && curY != 2) ? 0x437 : 0);
             } else {
-                collect2D->setAButtonString(0x436);  // "Equip"
+                collect2D->setAButtonString(0x436);
             }
             return;
         }
@@ -84,18 +76,15 @@ void on_wait_proc_post(ModContext*, void* args, void*, void*) {
             collect2D->setAButtonString(0);
         } else if (is_collect_item_equipped(curX, curY)) {
             if (true && (curY == 0 || curY == 1)) {
-                collect2D->setAButtonString(0x437); // "Unequip"
+                collect2D->setAButtonString(0x437);
             } else {
                 collect2D->setAButtonString(0);
             }
         } else {
-            collect2D->setAButtonString(0x436); // "Equip"
+            collect2D->setAButtonString(0x436);
         }
     }
 
-    // The game's own waitProc re-shows the vanilla cell panes it considers
-    // unlocked - re-apply the blank layout AFTER it, so the hidden state is what
-    // actually gets rendered this frame.
     cl_apply_blank_layout(collect2D);
 }
 
@@ -141,10 +130,6 @@ HookAction on_change_sword_pre(ModContext*, void* args, void*, void*) {
     u8 curX = collect2D->mCursorX;
     u8 curY = collect2D->mCursorY;
 
-    // Picking a real sword slot drops any custom sword skin. Only when one is
-    // actually active though - custom_equip_clear() rebuilds the sword model,
-    // and doing that for a plain vanilla pick used to leave Link holding a
-    // sword that was sheathed when the Collection screen opened.
     bool wasCustomSword = custom_equip_active(CE_SWORD);
     if (wasCustomSword && curX >= 3 && curX <= 5 && curY == 0) custom_equip_clear(CE_SWORD);
 
@@ -167,9 +152,6 @@ HookAction on_change_sword_pre(ModContext*, void* args, void*, void*) {
         }
     } else if (curX == 4) {
         if (is_collect_item_unlocked(4, 0)) {
-            // Relocated native Master Sword pane when the row is item2/3-
-            // swapped (cl_item23_swapped) - equip Master/Light Sword instead
-            // of Ordon Sword, matching what's actually drawn at this column.
             if (cl_item23_swapped(1)) {
                 u8 targetSword = dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) ? dItemNo_LIGHT_SWORD_e : dItemNo_MASTER_SWORD_e;
                 bool isMasterEquipped = (dComIfGs_getSelectEquipSword() == targetSword || dComIfGs_getSelectEquipSword() == dItemNo_MASTER_SWORD_e || dComIfGs_getSelectEquipSword() == dItemNo_LIGHT_SWORD_e);
@@ -227,9 +209,6 @@ HookAction on_change_shield_pre(ModContext*, void* args, void*, void*) {
     u8 curX = collect2D->mCursorX;
     u8 curY = collect2D->mCursorY;
 
-    // Picking one of the real shield slots drops any custom shield skin (those
-    // slots equip through custom_equip_on_equip, never here). Gated on the shield
-    // columns so a spurious changeShield() call can't clear it.
     bool wasCustomShield = custom_equip_active(CE_SHIELD);
     if (curX >= 3 && curX <= 5 && curY == 1) custom_equip_clear(CE_SHIELD);
 
@@ -268,9 +247,6 @@ HookAction on_meter2_info_set_shield_pre(ModContext*, void* args, void*, void*) 
     if (!true || !args) return HOOK_CONTINUE;
     u8 itemId = mods::arg<u8>(args, 0);
     bool offItemBit = mods::arg<bool>(args, 1);
-    // The wood/Ordon shield only ever burns while it is the equipped shield, so
-    // this catches the burn: swallow the "clear the owned bit" part, keep the
-    // item, just let it get unequipped like vanilla.
     if (false) {
         dMeter2Info_setShield(itemId, false);
         return HOOK_SKIP_ORIGINAL;
@@ -278,14 +254,6 @@ HookAction on_meter2_info_set_shield_pre(ModContext*, void* args, void*, void*) 
     return HOOK_CONTINUE;
 }
 
-// Message-flow "Get Check" (query022) = "does the player own item <param>?".
-// The Ordon shop gates selling the Wooden Shield (dItemNo_SHIELD_e) on NOT
-// owning the Ordon Shield (dItemNo_WOOD_SHIELD_e) - they're treated as the same
-// wooden shield. With "keep Ordon Shield" on, the Ordon Shield never leaves the
-// player's inventory, so that gate would block the sale forever. Report "not
-// owned" for the Ordon Shield specifically, and only while the player does own
-// the Ordon Shield but is missing the shop's Wooden Shield - the exact case the
-// option is meant to allow.
 HookAction on_msg_flow_get_check_pre(ModContext*, void* args, void* retval, void*) {
     if (!true || !args) return HOOK_CONTINUE;
     mesg_flow_node_branch* node = mods::arg<mesg_flow_node_branch*>(args, 1);
@@ -294,17 +262,11 @@ HookAction on_msg_flow_get_check_pre(ModContext*, void* args, void* retval, void
     if (prm0 == dItemNo_WOOD_SHIELD_e &&
         dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) &&
         !dComIfGs_isItemFirstBit(dItemNo_SHIELD_e)) {
-        if (retval) *static_cast<u16*>(retval) = 1;   // 1 == "not owned" -> sale proceeds
+        if (retval) *static_cast<u16*>(retval) = 1;
         return HOOK_SKIP_ORIGINAL;
     }
     return HOOK_CONTINUE;
 }
-
-// "Keep Ordon Shield" also means: if the shield was already burned away before
-// the option was turned on (or lost through any path the hook above missed),
-// hand it back. Safe to call every frame - it only re-grants the owned bit when
-// the permanent "once collected" record says the player earned it.
-
 
 struct VanillaClothEntry {
     u8 x;
@@ -376,56 +338,30 @@ void on_da_alink_create_post(ModContext*, void*, void*, void*) {
     s_inAlinkCreate = false;
 }
 
-// daAlink_c::changeLink() rebuilds Link's HUMAN body/hat/face/hand models. It runs
-// on initial create, on a clothes change, and on the Wolf->Human transform - i.e.
-// every moment the custom tunic swap needs to be (re-)applied. Doing it here, in
-// the same call that builds the vanilla models, means no plain base model is ever
-// drawn (fade-in, un-transform, clothes swap).
-// Position save/restore: the changeLink rebuild can reset Link's position
-// offset during area transitions. Save before, restore after.
 static cXyz s_savedLinkPos;
 static s16 s_savedLinkAngleY = 0;
 
 HookAction on_da_alink_change_link_pre(ModContext*, void* args, void*, void*) {
-    // Save Link's position BEFORE the changeLink rebuild.
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink != nullptr) {
         s_savedLinkPos = alink->current.pos;
         s_savedLinkAngleY = alink->current.angle.y;
     }
-    // The custom tunic is grafted onto a specific vanilla clothes model - force
-    // that base so changeLink() builds the right skeleton + sub-models.
     if (custom_equip_active(CE_TUNIC) && !s_inAlinkCreate) {
         const CustomEquipDef* td = custom_equip_get(custom_equip_active_id(CE_TUNIC));
         if (td != nullptr && dComIfGs_getSelectEquipClothes() != td->baseClothes) {
             dComIfGs_setSelectEquipClothes(td->baseClothes);
         }
     }
-    // The old captured base models are about to be freed - forget them so the
-    // POST re-captures the fresh ones (otherwise the "unequip -> restore" path
-    // could later write a dangling pointer into mpLinkModel).
     custom_equip_before_link_rebuild();
     return HOOK_CONTINUE;
 }
 
-// Above this, a PRE->POST jump in current.pos is changeLink()'s own internal
-// skeleton/offset reset (what the restore exists to undo) - a few units at
-// most. On some stage transitions that DON'T go through a full daAlink_c::create()
-// (s_inAlinkCreate stays false), our forced base-clothes fix-up below can trigger
-// this same changeLink() call WHILE the room-control code is still mid-placement,
-// i.e. before it has written Link's real spawn-point position for the new area.
-// Restoring unconditionally in that case overwrites the real spawn position with
-// the stale pre-transition one, landing Link "somewhere else" after certain
-// transitions with a custom tunic equipped (PRE captured the wrong value to begin
-// with - it was already wrong before our restore ever ran). A same-room skeleton
-// offset and a cross-room teleport differ by orders of magnitude, so treat any
-// large jump as an intentional reposition and leave it alone.
 constexpr f32 kMaxSaneRestoreDistSq = 300.0f * 300.0f;
 
 void on_da_alink_change_link_post(ModContext*, void* args, void*, void*) {
-    custom_equip_set_link_model_wolf(false);   // mpLinkModel is now a human model
+    custom_equip_set_link_model_wolf(false);
 
-    // Restore Link's position AFTER the model rebuild.
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink != nullptr) {
         if (s_savedLinkPos.x != 0.0f || s_savedLinkPos.z != 0.0f) {
@@ -444,7 +380,7 @@ void on_da_alink_change_link_post(ModContext*, void* args, void*, void*) {
 }
 
 void on_da_alink_change_wolf_post(ModContext*, void*, void*, void*) {
-    custom_equip_set_link_model_wolf(true);    // mpLinkModel is now the wolf model
+    custom_equip_set_link_model_wolf(true);
 }
 
 HookAction on_set_select_equip_clothes_pre(ModContext*, void* args, void*, void*) {
