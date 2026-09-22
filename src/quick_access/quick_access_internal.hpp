@@ -26,7 +26,7 @@ enum QuickAccessAppearance {
     QA_APPEARANCE_STRIP = 1,
 };
 
-static const int QA_TAP_FRAMES = 5;
+static const int QA_TAP_FRAMES = 8;
 
 extern bool s_menuOpen;
 extern bool s_editMode;
