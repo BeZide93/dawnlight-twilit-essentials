@@ -135,9 +135,7 @@ bool boss_rush_save_apply_preset(bool i_refreshLink) {
         }
     }
 
-    custom_equip_clear(CE_SWORD);
-    custom_equip_clear(CE_SHIELD);
-    custom_equip_clear(CE_TUNIC);
+    custom_equip_set_suppressed(true);
 
     return true;
 }

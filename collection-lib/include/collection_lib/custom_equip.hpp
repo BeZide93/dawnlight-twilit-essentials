@@ -37,7 +37,11 @@ int  custom_equip_register(const CustomEquipDef& def);
 int  custom_equip_count();
 const CustomEquipDef* custom_equip_get(int id);
 
+void custom_equip_set_suppressed(bool suppressed);
+bool custom_equip_is_suppressed();
 void custom_equip_activate(int id);
+void custom_equip_deactivate(CustomEquipKind kind);
+void custom_equip_deactivate_all();
 void custom_equip_clear(CustomEquipKind kind);
 bool custom_equip_active(CustomEquipKind kind);
 int  custom_equip_active_id(CustomEquipKind kind);

@@ -645,7 +645,10 @@ void load_model(Entry& e) {
     e.tryCount = 0;
 }
 
+static bool s_customEquipSuppressed = false;
+
 Entry* active_entry(CustomEquipKind kind) {
+    if (s_customEquipSuppressed) return nullptr;
     int id = s_activeId[kind];
     return (id >= 0 && id < s_count) ? &s_entries[id] : nullptr;
 }
@@ -902,6 +905,8 @@ HookAction on_set_water_drop_color_pre(ModContext*, void* args, void*, void*) {
 
 }
 
+static void retarget_face_material_anims(daAlink_c* a);
+
 struct CustomEquipSaveBlob {
     u8 shieldItem = 0;
     u8 swordItem  = 0;
@@ -942,6 +947,7 @@ static int s_framesSinceUpdateStart = 0;
 constexpr int kModelLoadReloadSettleFrames = 1;
 
 void custom_equip_restore_from_save() {
+    if (s_customEquipSuppressed) return;
     if (!is_gameplay_ready()) return;
 
     if (s_count == 0) {
@@ -1218,9 +1224,82 @@ void custom_equip_clear(CustomEquipKind kind) {
     }
 }
 
-bool custom_equip_active(CustomEquipKind kind) { return s_activeId[kind] >= 0; }
+void custom_equip_deactivate(CustomEquipKind kind) {
+    s_activeId[kind] = -1;
 
-int custom_equip_active_id(CustomEquipKind kind) { return s_activeId[kind]; }
+    daAlink_c* pl = player();
+    if (pl && is_gameplay_ready()) {
+        if (kind == CE_SWORD) {
+            refresh_sword_model(pl);
+        } else if (kind == CE_SHIELD) {
+            pl->setShieldModel();
+            pl->setItemMatrix(0);
+        }
+    }
+
+    if (kind == CE_SWORD) {
+        dMeter2_c* meter = g_meter2_info.getMeterClass();
+        dMeter2Draw_c* draw = (meter != nullptr) ? meter->getMeterDrawPtr() : nullptr;
+        if (draw != nullptr) {
+            draw->changeTextureItemB(dComIfGs_getSelectEquipSword());
+        }
+    }
+}
+
+void custom_equip_set_suppressed(bool suppressed) {
+    s_customEquipSuppressed = suppressed;
+    if (suppressed) {
+        daAlink_c* pl = player();
+        if (pl && is_gameplay_ready()) {
+            if (s_originalLinkModel != nullptr && pl->mpLinkModel != s_originalLinkModel) {
+                pl->mpLinkModel     = s_originalLinkModel;
+                pl->mpLinkHatModel  = s_originalHatModel;
+                pl->mpLinkFaceModel = s_originalFaceModel;
+                pl->mpLinkHandModel = s_originalHandModel;
+                pl->field_0x06d0    = s_origShape_06d0;
+                pl->field_0x06d4    = s_origShape_06d4;
+                pl->field_0x06d8    = s_origShape_06d8;
+                pl->field_0x06dc    = s_origShape_06dc;
+                pl->field_0x06e0    = s_origShape_06e0;
+                pl->field_0x06e8    = s_origShape_06e8;
+                pl->field_0x06ec    = s_origShape_06ec;
+                pl->field_0x06f0    = s_origShape_06f0;
+
+                pl->mpLinkModel->setUserArea((uintptr_t)pl);
+                if (pl->mpLinkHatModel) pl->mpLinkHatModel->setUserArea((uintptr_t)pl);
+
+                retarget_face_material_anims(pl);
+                pl->changeModelDataDirect(1);
+
+                pl->mEyeHL1.remove();
+                if (pl->mpLinkFaceModel != nullptr && pl->mpLinkFaceModel->getModelData() != nullptr) {
+                    pl->mEyeHL1.entry(pl->mpLinkFaceModel->getModelData(), "highlight02");
+                }
+                s_originalLinkModel = nullptr;
+                s_originalHatModel  = nullptr;
+                s_originalFaceModel = nullptr;
+                s_originalHandModel = nullptr;
+            }
+            pl->setShieldModel();
+            pl->setItemMatrix(0);
+            refresh_sword_model(pl);
+        }
+    }
+}
+
+bool custom_equip_is_suppressed() {
+    return s_customEquipSuppressed;
+}
+
+bool custom_equip_active(CustomEquipKind kind) {
+    if (s_customEquipSuppressed) return false;
+    return s_activeId[kind] >= 0;
+}
+
+int custom_equip_active_id(CustomEquipKind kind) {
+    if (s_customEquipSuppressed) return -1;
+    return s_activeId[kind];
+}
 
 static u8 kind_row(CustomEquipKind k) { return k == CE_SWORD ? 1 : k == CE_SHIELD ? 2 : 3; }
 
@@ -1308,6 +1387,7 @@ bool custom_equip_is_unlocked(u8 x, u8 y) {
 }
 
 bool custom_equip_is_equipped(u8 x, u8 y) {
+    if (s_customEquipSuppressed) return false;
     int id = def_at_cell(x, y);
     return id >= 0 && s_activeId[s_entries[id].def.kind] == id;
 }
@@ -1692,6 +1772,11 @@ void custom_equip_update() {
         s_restoredFromSave = false;
         s_prevEquipWasActive[0] = s_prevEquipWasActive[1] = s_prevEquipWasActive[2] = false;
         s_dollSwapActive = false;
+        return;
+    }
+
+    if (s_customEquipSuppressed) {
+        s_healPending = false;
         return;
     }
 

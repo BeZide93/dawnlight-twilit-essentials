@@ -1088,6 +1088,7 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
 }
 
 static void apply_boss_rush_loadout(bool i_refreshLink = true) {
+    custom_equip_set_suppressed(true);
     boss_rush_save_apply_preset(i_refreshLink);
 }
 
@@ -3878,6 +3879,7 @@ static void start_boss_rush_entry_warp() {
     }
 
     prepare_boss_rush_state();
+    custom_equip_set_suppressed(true);
 
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
 
@@ -3909,6 +3911,7 @@ static HookAction on_dungeon_return_warp_pre(ModContext*, void*, void*, void*) {
     s_dungeonClearWarpPending = false;
     s_dungeonClearWarpFrames  = 0;
 
+    custom_equip_set_suppressed(true);
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
 
     s_chamberEquipsPending = true;
@@ -3944,6 +3947,7 @@ static HookAction on_skip_portal_obj_warp_pre(ModContext*, void*, void*, void*) 
         human_warp_cinematic_end();
     }
 
+    custom_equip_set_suppressed(true);
     dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
 
     s_chamberEquipsPending = true;
@@ -4084,10 +4088,8 @@ static void install_boss_rush_exit_save() {
     dComIfGp_setSelectEquipSword(dComIfGs_getSelectEquipSword());
     dComIfGp_setSelectEquipShield(dComIfGs_getSelectEquipShield());
 
-    custom_equip_clear(CE_SWORD);
-    custom_equip_clear(CE_SHIELD);
-    custom_equip_clear(CE_TUNIC);
-
+    custom_equip_set_suppressed(false);
+    custom_equip_restore_from_save();
 }
 
 static void update_boss_rush_exit_save_reload() {
@@ -4276,9 +4278,7 @@ static void close_boss_rush_session() {
     boss_rush_texts_reset_fade();
     boss_rush_master_sword_reset_fade();
 
-    custom_equip_clear(CE_SWORD);
-    custom_equip_clear(CE_SHIELD);
-    custom_equip_clear(CE_TUNIC);
+    custom_equip_set_suppressed(false);
 }
 
 void exit_boss_rush() {
