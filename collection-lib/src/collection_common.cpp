@@ -201,12 +201,14 @@ static ResTIMG* load_collection_bti(const char* resPath, ResourceBuffer* buf, Re
             memcpy(persistentBuf, buf->data, buf->size);
             ResTIMG* img = reinterpret_cast<ResTIMG*>(persistentBuf);
             img->alphaEnabled = 1;
+            img = tex_replacements_apply(resPath, img);
             *cache = img;
             return img;
         }
     }
     ResTIMG* img = reinterpret_cast<ResTIMG*>(buf->data);
     img->alphaEnabled = 1;
+    img = tex_replacements_apply(resPath, img);
     *cache = img;
     return img;
 }

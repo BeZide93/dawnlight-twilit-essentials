@@ -229,6 +229,10 @@ public:
     }
 };
 
+// Returns the user's texture_replacements/<name>.png override for the given
+// bundled texture path, or `fallback` when no override exists.
+ResTIMG* tex_replacements_apply(const char* res_path, ResTIMG* fallback);
+
 ResTIMG* get_ordon_clothes_texture();
 ResTIMG* get_ordon_hero_texture();
 ResTIMG* get_reinforced_shield_texture();

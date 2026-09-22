@@ -63,6 +63,9 @@ A collection of quality-of-life improvements, combat tweaks, and visual enhancem
 * Option to keep the Ordon Shield in the Collection even after it burnt. If this is turned off, you will always find an Ordon Shield in the treasure chest in Link's House. It comes back there whenever it breaks.
 * With the starter gear option on, you can also buy an Ordon Shield in Sera's shop for 150 rupees.
 * A second page holds the Heart Containers and the Fused Shadow. Switch pages with L and R.
+* **Custom textures**: drop a PNG into `<Dusklight data folder>/texture_replacements/` to override the
+  mod's collection icons — `ordon_clothes.png` for the Ordon Clothes, `ordon_clothes_linkle.png` for the
+  Linkle variant. Both should have 768x768 as resolution.
 
 <p align="center">
   <img src="images/collectionmenu.png" alt="Collection Menu Enhancements" width="85%" />

@@ -3,6 +3,7 @@
 #include "d/d_meter2_draw.h"
 
 #include "collection_common.cpp"
+#include "tex_replacements.cpp"
 #include "custom_equip.cpp"
 #include "collection_page.cpp"
 #include "collection_layout.cpp"
