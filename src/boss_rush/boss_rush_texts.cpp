@@ -212,6 +212,10 @@ void draw_boss_rush_fight_timer() {
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Puppet Zelda") == 0 ||
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Beast Ganon") == 0 ||
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Horseback Ganon") == 0));
+    // Only in the horseback fight the resting timer rows sit where Epona
+    // gallops across the screen, so raise both of them above the horse.
+    const bool isHorsebackFight = (tIdx >= 0 && static_cast<size_t>(tIdx) < g_bossGalleryCount &&
+        std::strcmp(g_bossGalleryTable[tIdx].displayName, "Horseback Ganon") == 0);
     const bool allPhasesTarget = boss_rush_timer_all_phases_active() ||
                                  (!g_configBossRushSeparateGanon && isGanonPhase);
     u32 bestCs = 0;
@@ -226,7 +230,8 @@ void draw_boss_rush_fight_timer() {
     }
     hasBest = hasBest && !showingResult;
     boss_rush_timer_v2_draw(showingResult ? resultCs : cs, showingResult, isRecord,
-                            hasBest, hasBest ? bestCs : 0);
+                            hasBest, hasBest ? bestCs : 0,
+                            isHorsebackFight ? -60.0f : 0.0f);
 }
 
 void draw_boss_rush_debug_coords(daAlink_c*) {

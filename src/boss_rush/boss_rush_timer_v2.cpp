@@ -288,8 +288,10 @@ void prune_getin_extras(J2DPane* pane, J2DPane** keep, int keepCount,
 }
 
 void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
-                             bool hasBest, unsigned int bestCs) {
+                             bool hasBest, unsigned int bestCs, float yShift) {
     if (!ensure_screen()) return;
+
+    const f32 posY = kTimerPosY + yShift;
 
     const auto now = std::chrono::steady_clock::now();
     if (!s_haveLastCall ||
@@ -312,11 +314,11 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
 
     if (s_timePane != nullptr) {
         if (s_timeShown) {
-            s_timePane->paneTrans(kTimerPosX, kTimerPosY + s_transY);
+            s_timePane->paneTrans(kTimerPosX, posY + s_transY);
             s_timePane->getPanePtr()->scale(kTimerSizeX, kTimerSizeY);
             s_timePane->setAlphaRate(kParentAlpha * kTimerAlpha);
         } else {
-            s_timePane->paneTrans(kTimerPosX - kSlideInDistX, kTimerPosY + s_transY);
+            s_timePane->paneTrans(kTimerPosX - kSlideInDistX, posY + s_transY);
             s_timePane->getPanePtr()->scale(kTimerSizeX, kTimerSizeY);
             s_timePane->setAlphaRate(0.0f);
         }
@@ -332,7 +334,7 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
             if (s_timePane != nullptr && s_animeFrame <= kSlideInFrames) {
                 const f32 t = ease_quad(kSlideInFrames, s_animeFrame);
                 s_timePane->paneTrans(kTimerPosX + (1.0f - t) * -kSlideInDistX,
-                                      kTimerPosY + s_transY);
+                                      posY + s_transY);
                 s_timePane->getPanePtr()->scale(kTimerSizeX, kTimerSizeY);
                 s_timePane->setAlphaRate(kParentAlpha * (t * kTimerAlpha));
                 if (s_animeFrame == kSlideInFrames) {
@@ -383,7 +385,7 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
                 s_rowMeasured = true;
             }
 
-            s_timePane->paneTrans(kTimerPosX, kTimerPosY + s_transY);
+            s_timePane->paneTrans(kTimerPosX, posY + s_transY);
             s_timePane->getPanePtr()->scale(kTimerSizeX * pulse, kTimerSizeY * pulse);
             Mtx m;
             const Vec tl = s_timePane->getGlobalVtx(first, &m, 0, false, 0);
@@ -391,7 +393,7 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
             const f32 dx = s_rowCentreX - (tl.x + br.x) * 0.5f;
             const f32 dy = s_rowCentreY - (tl.y + br.y) * 0.5f;
             s_timePane->paneTrans(kTimerPosX + dx / pulse,
-                                  kTimerPosY + s_transY + dy / pulse);
+                                  posY + s_transY + dy / pulse);
         }
     } else if (s_recordBeatActive) {
         s_recordBeatActive = false;
@@ -420,7 +422,7 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
     graf_ctx->setup2D();
 
     f32 scaleAnchorX = kTimerPosX;
-    f32 scaleAnchorY = kTimerPosY;
+    f32 scaleAnchorY = posY;
     {
         J2DPane* first = s_digits[DIGIT_MIN_TENS][0];
         J2DPane* last  = s_digits[DIGIT_CS_ONES][0];
@@ -475,17 +477,17 @@ void boss_rush_timer_v2_draw(unsigned int cs, bool showingResult, bool isRecord,
 
             const f32 sc = 0.8f;
             s_timePane->getPanePtr()->scale(kTimerSizeX * sc, kTimerSizeY * sc);
-            s_timePane->paneTrans(kTimerPosX, kTimerPosY + s_transY + down);
+            s_timePane->paneTrans(kTimerPosX, posY + s_transY + down);
             const Vec t2 = s_timePane->getGlobalVtx(first, &m, 0, false, 0);
             const Vec b2 = s_timePane->getGlobalVtx(last, &m, 3, false, 0);
             const f32 dx = rowCx - (t2.x + b2.x) * 0.5f;
             const f32 dy = (b1.y + 6.0f + (b2.y - t2.y) * 0.5f) - (t2.y + b2.y) * 0.5f;
-            s_timePane->paneTrans(kTimerPosX + dx / sc, kTimerPosY + s_transY + down + dy / sc);
+            s_timePane->paneTrans(kTimerPosX + dx / sc, posY + s_transY + down + dy / sc);
 
             s_screen->draw(0.0f, 0.0f, graf_ctx);
 
             s_timePane->getPanePtr()->scale(kTimerSizeX, kTimerSizeY);
-            s_timePane->paneTrans(kTimerPosX, kTimerPosY + s_transY);
+            s_timePane->paneTrans(kTimerPosX, posY + s_transY);
             for (int i = 0; i < DIGIT_COUNT; i++) {
                 for (int j = 0; j < 2; j++) {
                     if (s_digits[i][j] != nullptr) {
