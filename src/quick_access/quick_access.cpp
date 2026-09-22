@@ -1828,7 +1828,7 @@ static void wolf_quick_access_input(interface_of_controller_pad& pad) {
 }
 
 static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
         close_menu();
         s_menuAlpha = 0.0f;
         return;
