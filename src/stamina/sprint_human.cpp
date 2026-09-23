@@ -7,7 +7,11 @@
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
+#include "f_op/f_op_camera_mng.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "SSystem/SComponent/c_math.h"
+
+#include <cmath>
 
 bool g_configStaminaSprint     = false;
 bool g_configStaminaSrcSprint  = true;
@@ -135,6 +139,52 @@ static void sprint_run_post(ModContext*, void* args, void*, void*) {
     }
 }
 
+static u32 s_sprintWindEmitter = 0;
+
+static void stop_sprint_wind_effect() {
+    if (s_sprintWindEmitter == 0) return;
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(s_sprintWindEmitter);
+    if (emitter != nullptr) {
+        emitter->stopDrawParticle();
+    }
+    s_sprintWindEmitter = 0;
+}
+
+static void update_sprint_wind_effect(daAlink_c* link) {
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    if (camera == nullptr) {
+        stop_sprint_wind_effect();
+        return;
+    }
+    cXyz* eye_p = fopCamM_GetEye_p(camera);
+
+    const s16 rel = link->shape_angle.y - fopCamM_GetAngleY(camera);
+    const f32 t1 = (200.0f * std::abs(cM_ssin(rel))) + (700.0f * std::abs(cM_scos(rel)));
+    const f32 t0 = t1 * cM_scos(fopCamM_GetAngleX(camera));
+
+    cXyz pos;
+    pos.x = eye_p->x + (t0 * cM_ssin(fopCamM_GetAngleY(camera)));
+    pos.y = eye_p->y + (t1 * cM_ssin(-fopCamM_GetAngleX(camera)));
+    pos.z = eye_p->z + (t0 * cM_scos(fopCamM_GetAngleY(camera)));
+
+    csXyz angle(0, link->shape_angle.y, 0);
+
+    if (s_sprintWindEmitter != 0) {
+        JPABaseEmitter* existing = dComIfGp_particle_getEmitter(s_sprintWindEmitter);
+        if (existing == nullptr || existing->isEnableDeleteEmitter()) {
+            s_sprintWindEmitter = 0;
+        }
+    }
+
+    f32 speedRatio = 2.0f * (link->speedF / link->mMaxSpeed);
+    if (speedRatio > 1.0f) speedRatio = 1.0f;
+    const u8 alpha = static_cast<u8>(255.0f * speedRatio);
+
+    s_sprintWindEmitter = dComIfGp_particle_set(s_sprintWindEmitter, 0x8657, &pos, &link->tevStr,
+                                                &angle, nullptr, alpha, nullptr, -1,
+                                                nullptr, nullptr, nullptr);
+}
+
 void update_sprint_human() {
     ++s_frameCounter;
 
@@ -157,12 +207,19 @@ void update_sprint_human() {
 
     if (!g_configStaminaSprint || !stamina_impl::in_gameplay()) {
         s_holdFrames = 0;
+        stop_sprint_wind_effect();
         return;
     }
     if (controls_binding_held(CTRL_BIND_SPRINT)) {
         if (s_holdFrames < 0xFF) s_holdFrames++;
     } else {
         s_holdFrames = 0;
+    }
+
+    if (s_sprintLatched && link != nullptr && !link->checkHorseRide()) {
+        update_sprint_wind_effect(link);
+    } else {
+        stop_sprint_wind_effect();
     }
 }
 
@@ -233,4 +290,5 @@ void shutdown_sprint_human() {
     s_sprintLatched = s_sprintBoost = s_sprintEngage = false;
     s_sprintRollPending = false;
     s_holdFrames = 0;
+    stop_sprint_wind_effect();
 }

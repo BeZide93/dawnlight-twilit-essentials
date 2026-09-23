@@ -7,6 +7,10 @@
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
+#include "f_op/f_op_camera_mng.h"
+#include "SSystem/SComponent/c_math.h"
+
+#include <cmath>
 
 bool g_configStaminaWolfSprint = false;
 float g_configStaminaWolfSprintSpeed = 1.1f;
@@ -24,6 +28,52 @@ static int  s_burstTimer     = 0;
 static bool s_wasSprinting   = false;
 static int  s_sprintRunFrames = 0;
 static bool s_tongueOut      = false;
+
+static u32 s_sprintWindEmitter = 0;
+
+static void stop_sprint_wind_effect() {
+    if (s_sprintWindEmitter == 0) return;
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(s_sprintWindEmitter);
+    if (emitter != nullptr) {
+        emitter->stopDrawParticle();
+    }
+    s_sprintWindEmitter = 0;
+}
+
+static void update_sprint_wind_effect(daAlink_c* link) {
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    if (camera == nullptr) {
+        stop_sprint_wind_effect();
+        return;
+    }
+    cXyz* eye_p = fopCamM_GetEye_p(camera);
+
+    const s16 rel = link->shape_angle.y - fopCamM_GetAngleY(camera);
+    const f32 t1 = (200.0f * std::abs(cM_ssin(rel))) + (700.0f * std::abs(cM_scos(rel)));
+    const f32 t0 = t1 * cM_scos(fopCamM_GetAngleX(camera));
+
+    cXyz pos;
+    pos.x = eye_p->x + (t0 * cM_ssin(fopCamM_GetAngleY(camera)));
+    pos.y = eye_p->y + (t1 * cM_ssin(-fopCamM_GetAngleX(camera)));
+    pos.z = eye_p->z + (t0 * cM_scos(fopCamM_GetAngleY(camera)));
+
+    csXyz angle(0, link->shape_angle.y, 0);
+
+    if (s_sprintWindEmitter != 0) {
+        JPABaseEmitter* existing = dComIfGp_particle_getEmitter(s_sprintWindEmitter);
+        if (existing == nullptr || existing->isEnableDeleteEmitter()) {
+            s_sprintWindEmitter = 0;
+        }
+    }
+
+    f32 speedRatio = 2.0f * (link->speedF / link->mMaxSpeed);
+    if (speedRatio > 1.0f) speedRatio = 1.0f;
+    const u8 alpha = static_cast<u8>(255.0f * speedRatio);
+
+    s_sprintWindEmitter = dComIfGp_particle_set(s_sprintWindEmitter, 0x8657, &pos, &link->tevStr,
+                                                &angle, nullptr, alpha, nullptr, -1,
+                                                nullptr, nullptr, nullptr);
+}
 
 static HookAction tongue_face_pre(ModContext*, void* args, void*, void*) {
     if (!g_configStaminaEnabled || !stamina_impl::is_empty() || !args) return HOOK_CONTINUE;
@@ -100,6 +150,7 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
         }
         s_wasSprinting = false;
         s_sprintRunFrames = 0;
+        stop_sprint_wind_effect();
         if (link && link->mpHIO && g_configStaminaEnabled && stamina_impl::is_empty()) {
             link->mMaxSpeed = link->mpHIO->mWolf.mWlMoveNoP.m.mMaxSpeed * stamina_impl::kExhaustedSpeedMul;
         }
@@ -108,6 +159,7 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
     const bool wasSprinting = s_wasSprinting;
     s_wasSprinting = true;
     s_sprintRunFrames++;
+    update_sprint_wind_effect(link);
     link->onNoResetFlg1(daPy_py_c::FLG1_DASH_MODE);
     top_up_dash_duration(link);
     apply_dash_speed(link);
@@ -152,4 +204,5 @@ void shutdown_sprint_wolf() {
     s_wasSprinting = false;
     s_sprintRunFrames = 0;
     s_tongueOut = false;
+    stop_sprint_wind_effect();
 }
