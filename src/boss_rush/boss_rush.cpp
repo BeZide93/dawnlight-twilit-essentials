@@ -2820,9 +2820,7 @@ static void update_stallord_phase_transition_skip() {
         daAlink_c* link = daAlink_getAlinkActorClass();
         camera_process_class* cam = boss_rush_get_active_player_camera();
         if (link != nullptr && cam != nullptr) {
-            const s16 ang = cM_deg2s(356.0f);
-            link->current.angle.y = ang;
-            link->shape_angle.y = ang;
+            const s16 ang = link->shape_angle.y;
             const cXyz& lp = link->current.pos;
             const f32 fx = cM_ssin(ang), fz = cM_scos(ang);
             cXyz center(lp.x + fx * 200.0f, lp.y + 100.0f, lp.z + fz * 200.0f);
