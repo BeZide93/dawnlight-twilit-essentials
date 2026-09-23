@@ -55,6 +55,8 @@
 #include "mods/svc/stage.h"
 #include "mods/svc/gfx.h"
 #include "mods/svc/camera.h"
+#include "mods/svc/http.h"
+#include "mods/svc/http.hpp"
 
 #include "d/actor/d_a_title.h"
 #include "d/actor/d_a_alink.h"
@@ -76,7 +78,9 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <string_view>
+#include <vector>
 
 static constexpr float kHudAutoFadeIdleSeconds = 8.0f;
 static constexpr float kHudAutoFadeFadeSeconds = 0.75f;
@@ -210,6 +214,7 @@ IMPORT_OPTIONAL_SERVICE(ActorService, svc_actor);
 IMPORT_OPTIONAL_SERVICE(ItemService, svc_item);
 IMPORT_OPTIONAL_SERVICE(StageService, svc_stage);
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
+IMPORT_OPTIONAL_SERVICE(HttpService, svc_http);
 
 extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_header_record,
@@ -227,6 +232,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_item,
     &mod_meta_import_svc_stage,
     &mod_meta_import_svc_gfx,
+    &mod_meta_import_svc_http,
 };
 
 static constexpr float kFreeCamSlowFactor = 0.35f;
@@ -1884,6 +1890,184 @@ static void on_open_discord_channel(ModContext*, void*) {
 #endif
 }
 
+static const char* const kIssuesJsonUrl = "https://te.fimmel.dev/issues.json";
+
+namespace known_issues {
+
+struct Entry {
+    std::string tag;
+    std::string title;
+    std::string description;
+};
+
+// Finds `"key": "value"` inside a JSON object substring and unescapes the string value.
+static bool extract_string_field(std::string_view object, std::string_view key, std::string* out) {
+    const std::string needle = "\"" + std::string(key) + "\"";
+    size_t pos = object.find(needle);
+    if (pos == std::string_view::npos) return false;
+    pos = object.find(':', pos + needle.size());
+    if (pos == std::string_view::npos) return false;
+    pos = object.find('"', pos);
+    if (pos == std::string_view::npos) return false;
+    ++pos;
+    std::string value;
+    for (; pos < object.size(); ++pos) {
+        const char c = object[pos];
+        if (c == '"') {
+            *out = std::move(value);
+            return true;
+        }
+        if (c == '\\' && pos + 1 < object.size()) {
+            ++pos;
+            switch (object[pos]) {
+                case 'n': value += '\n'; break;
+                case 't': value += '\t'; break;
+                default: value += object[pos]; break;
+            }
+            continue;
+        }
+        value += c;
+    }
+    return false;
+}
+
+// Splits the top-level `{...}` objects out of a JSON array body.
+static std::vector<std::string_view> split_objects(std::string_view array) {
+    std::vector<std::string_view> result;
+    int depth = 0;
+    bool inString = false;
+    size_t start = std::string_view::npos;
+    for (size_t i = 0; i < array.size(); ++i) {
+        const char c = array[i];
+        if (inString) {
+            if (c == '\\') { ++i; continue; }
+            if (c == '"') inString = false;
+            continue;
+        }
+        if (c == '"') { inString = true; continue; }
+        if (c == '{') {
+            if (depth == 0) start = i;
+            ++depth;
+        } else if (c == '}') {
+            if (--depth == 0 && start != std::string_view::npos) {
+                result.push_back(array.substr(start, i - start + 1));
+                start = std::string_view::npos;
+            }
+        }
+    }
+    return result;
+}
+
+static std::vector<Entry> parse(std::string_view json) {
+    std::vector<Entry> issues;
+    const size_t key = json.find("\"issues\"");
+    if (key == std::string_view::npos) return issues;
+    const size_t arrayStart = json.find('[', key);
+    if (arrayStart == std::string_view::npos) return issues;
+
+    int depth = 0;
+    bool inString = false;
+    size_t arrayEnd = std::string_view::npos;
+    for (size_t i = arrayStart; i < json.size(); ++i) {
+        const char c = json[i];
+        if (inString) {
+            if (c == '\\') { ++i; continue; }
+            if (c == '"') inString = false;
+            continue;
+        }
+        if (c == '"') { inString = true; continue; }
+        if (c == '[') {
+            ++depth;
+        } else if (c == ']') {
+            if (--depth == 0) { arrayEnd = i; break; }
+        }
+    }
+    if (arrayEnd == std::string_view::npos) return issues;
+
+    for (std::string_view obj : split_objects(json.substr(arrayStart + 1, arrayEnd - arrayStart - 1))) {
+        Entry entry;
+        extract_string_field(obj, "tag", &entry.tag);
+        extract_string_field(obj, "title", &entry.title);
+        extract_string_field(obj, "description", &entry.description);
+        if (!entry.title.empty()) issues.push_back(std::move(entry));
+    }
+    return issues;
+}
+
+static std::string escape_rml(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '&': out += "&amp;"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+static std::string build_rml(const std::vector<Entry>& issues) {
+    if (issues.empty()) {
+        return "<span style=\"color: #8a94a6;\">No known issues right now.</span>";
+    }
+    std::string rml;
+    for (const Entry& issue : issues) {
+        const char* tagColor = issue.tag == "Spoiler" ? "#c98bd9"
+            : issue.tag == "Bug" ? "#e05a5a"
+            : "#e0b458";
+        rml += "<p><span style=\"color: ";
+        rml += tagColor;
+        rml += "; font-weight: bold;\">[";
+        rml += escape_rml(issue.tag);
+        rml += "]</span>&nbsp;<span style=\"font-weight: bold;\">";
+        rml += escape_rml(issue.title);
+        rml += "</span><br/><span style=\"color: #a8bcd4;\">";
+        rml += escape_rml(issue.description);
+        rml += "</span></p>";
+    }
+    return rml;
+}
+
+static UiElementHandle s_listElem = 0;
+static std::string s_rml = "<span style=\"color: #8a94a6;\">Loading known issues...</span>";
+static bool s_fetchInFlight = false;
+
+static void apply_rml() {
+    if (svc_ui && s_listElem != 0) {
+        svc_ui->elem_set_rml(mod_ctx, s_listElem, s_rml.c_str());
+    }
+}
+
+static void on_response(mods::http::Response response) {
+    s_fetchInFlight = false;
+    if (!response.ok()) {
+        s_rml = "<span style=\"color: #c97a7a;\">Could not load known issues.</span>";
+    } else {
+        const std::string_view body(reinterpret_cast<const char*>(response.body.data()), response.body.size());
+        s_rml = build_rml(parse(body));
+    }
+    apply_rml();
+}
+
+static void fetch() {
+    if (s_fetchInFlight) return;
+    if (svc_http == nullptr) {
+        s_rml = "<span style=\"color: #8a94a6;\">Known issues are unavailable in this build.</span>";
+        apply_rml();
+        return;
+    }
+    s_fetchInFlight = true;
+    mods::http::Request request;
+    request.url = kIssuesJsonUrl;
+    request.totalTimeoutMs = 8000;
+    auto pending = mods::http::request(request, on_response);
+    pending.detach();
+}
+
+}  // namespace known_issues
+
 static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
 
@@ -1908,6 +2092,10 @@ static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, M
         ctrlDiscord.on_pressed = on_open_discord_channel;
         svc_ui->pane_add_control(mod_ctx, panel, &ctrlDiscord, nullptr);
     }
+
+    svc_ui->pane_add_section(mod_ctx, panel, "Known Issues");
+    svc_ui->pane_add_rml(mod_ctx, panel, known_issues::s_rml.c_str(), &known_issues::s_listElem);
+    known_issues::fetch();
 
     return MOD_OK;
 }
