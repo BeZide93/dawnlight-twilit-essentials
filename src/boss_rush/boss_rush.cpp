@@ -2860,11 +2860,31 @@ static void update_argorok_phase_transition_skip() {
     static u32  s_argorokGen = ~0u;
     static bool s_p2Done = false;
     static int  s_fadeFrames = 0;
+    static bool s_groundValid = false;
+    static cXyz s_groundPos;
+    static s16  s_groundYAngle = 0;
 
     if (instant_fight_rearm(s_argorokGen)) {
         s_p2Done = false;
         s_fadeFrames = 0;
+        s_groundValid = false;
         mDoGph_gInf_c::offFade();
+
+        // A retry keeps the room loaded, so the phase-2 storm would persist;
+        // restore the clear phase-1 sky.
+        dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+        if (kankyo != nullptr) {
+            kankyo->wether = 0;
+            kankyo->mColpatWeather = 0;
+            kankyo->wether_pat0 = 0;
+            kankyo->wether_pat1 = 0;
+            kankyo->pat_ratio = 0.0f;
+            kankyo->mColpatCurrGather = 0;
+            kankyo->mColpatPrevGather = 0;
+            kankyo->mColPatBlendGather = 0.0f;
+            kankyo->raincnt = 0;
+            kankyo->base_raincnt = 0;
+        }
     }
 
     if (s_p2Done) return;
@@ -2886,6 +2906,12 @@ static void update_argorok_phase_transition_skip() {
     if (dr == nullptr) return;
     const daB_DR_c* d = reinterpret_cast<const daB_DR_c*>(dr);
     if (d->mpModelMorf == nullptr) return;
+
+    if (link->mLinkAcch.ChkGroundHit()) {
+        s_groundPos = link->current.pos;
+        s_groundYAngle = link->shape_angle.y;
+        s_groundValid = true;
+    }
 
     if (bbi::argorok_in_phase2_cutscene(dr)) {
         if (s_fadeFrames == 0) {
@@ -2935,6 +2961,22 @@ static void update_argorok_phase_transition_skip() {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
             link->cancelOriginalDemo();
+            // The tail-hang demo state would keep Link glued to Argorok after
+            // the skip; put him back on the arena floor where he last stood.
+            if (s_groundValid) {
+                link->current.pos = s_groundPos;
+                link->old.pos = s_groundPos;
+                link->shape_angle.y = s_groundYAngle;
+                link->current.angle.y = s_groundYAngle;
+            }
+            link->speed.set(0.0f, 0.0f, 0.0f);
+            link->speedF = 0.0f;
+            link->procWaitInit();
+            if (link->mEquipItem != 0x103) {
+                link->swordEquip(TRUE);
+                link->setSwordModel();
+            }
+            link->mLinkAcch.CrrPos(dComIfG_Bgsp());
         }
         dComIfGp_event_reset();
 
