@@ -45,6 +45,7 @@ extern const SaveService* svc_save;
 #include "d/d_demo.h"
 #include "d/actor/d_a_door_shutter.h"
 #include "d/actor/d_a_door_bossL1.h"
+#include "d/actor/d_a_obj_lv4EdShutter.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_obj_gb.h"
 #include "d/actor/d_a_e_md.h"
@@ -2502,6 +2503,23 @@ static void update_deathsword_instant_fight() {
     if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount ||
         std::strcmp(g_bossGalleryTable[t].displayName, "Death Sword") != 0) {
         return;
+    }
+
+    static bool s_rewardDoorShut = false;
+    static u32 s_rewardDoorGen = ~0u;
+    if (instant_fight_rearm(s_rewardDoorGen)) {
+        s_rewardDoorShut = false;
+    }
+    if (!s_rewardDoorShut && !s_returningToChamber) {
+        fopAc_ac_c* shutterAc = fopAcM_SearchByName(fpcNm_Obj_Lv4EdShutter_e);
+        if (shutterAc != nullptr) {
+            daLv4EdShutter_c* shutter = static_cast<daLv4EdShutter_c*>(shutterAc);
+            dComIfGs_offSwitch(shutter->mZenmetuSw, fopAcM_GetRoomNo(shutterAc));
+            dComIfGs_offSwitch(shutter->mOpenSw, fopAcM_GetRoomNo(shutterAc));
+            dComIfGs_offSwitch(shutter->mCloseSw, fopAcM_GetRoomNo(shutterAc));
+            shutter->init_modeClose();
+            s_rewardDoorShut = true;
+        }
     }
 
     cDmr_SkipInfo = 1;
