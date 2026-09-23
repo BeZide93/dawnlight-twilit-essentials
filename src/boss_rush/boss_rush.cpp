@@ -46,6 +46,7 @@ extern const SaveService* svc_save;
 #include "d/actor/d_a_door_shutter.h"
 #include "d/actor/d_a_door_bossL1.h"
 #include "d/actor/d_a_midna.h"
+#include "d/actor/d_a_obj_gb.h"
 #include "d/actor/d_a_e_md.h"
 #include "d/actor/d_a_e_vt.h"
 #include "d/actor/d_a_obj_lv4sand.h"
@@ -1117,8 +1118,37 @@ void boss_rush_debug_log(const char* fmt, ...) {
 static int s_recordReturnFrames = -1;
 static const char* s_recordReturnReason = nullptr;
 
+static bool s_puppetZeldaWallsTracked = false;
+
+static void* pz_force_gb_judge(void* actor, void*) {
+    if (fopAcM_GetProfName(actor) != fpcNm_OBJ_GB_e) {
+        return nullptr;
+    }
+    obj_gb_class* gb = static_cast<obj_gb_class*>(actor);
+    dComIfGs_onSwitch(gb->mSw1, fopAcM_GetRoomNo(gb));
+    dComIfGs_offSwitch(gb->mSw2, fopAcM_GetRoomNo(gb));
+    return nullptr;
+}
+
+static void puppet_zelda_walls_keep() {
+    if (!s_puppetZeldaWallsTracked) {
+        return;
+    }
+    fopAcIt_Judge(pz_force_gb_judge, nullptr);
+}
+
+static void puppet_zelda_walls_end_track() {
+    s_puppetZeldaWallsTracked = false;
+}
+
+static void puppet_zelda_walls_begin_track() {
+    s_puppetZeldaWallsTracked = true;
+    puppet_zelda_walls_keep();
+}
+
 void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
                                   const char* reason) {
+    puppet_zelda_walls_end_track();
     if (s_rushRunActive) {
         s_rushRunActive = false;
         boss_rush_timer_end_chain_run();
@@ -4230,6 +4260,8 @@ static void close_boss_rush_session() {
 
     rush_debug_logf("[rush] close_boss_rush_session: closing session on reset / return to title");
 
+    puppet_zelda_walls_end_track();
+
     s_bossRushModeActive = false;
     s_exitingBossRush = false;
     s_activeFightIndex = -1;
@@ -4905,6 +4937,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (is_boss_rush_active()) {
         refresh_boss_rush_midna_flow();
         update_boss_rush_midna(log_svc, mod_ctx);
+        puppet_zelda_walls_keep();
     }
 
     update_boss_rush_exit_save_reload();
@@ -5023,6 +5056,11 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
             if (s_activeFightIndex >= 0 && s_activeFightIndex < static_cast<int>(g_bossGalleryCount)) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];
+
+                if (std::strcmp(boss.displayName, "Puppet Zelda") == 0 ||
+                    std::strcmp(boss.displayName, "Beast Ganon") == 0 || isGanonGauntlet) {
+                    puppet_zelda_walls_begin_track();
+                }
 
                 clear_boss_dungeon_clear_flags(boss.stage);
                 g_dComIfG_gameInfo.info.getMemory().getBit().onStageBossDemo();
