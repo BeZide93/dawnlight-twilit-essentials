@@ -456,7 +456,11 @@ static bool discover_midna_flow_topology() {
     }
 
     const auto* bmg = static_cast<const uint8_t*>(msgObject->getMsgDtPtrLocal());
-    if (bmg == nullptr || bmg == s_bossRushMidnaTopology.resource) {
+    if (bmg == nullptr) {
+        return false;
+    }
+    const bool needHorseCapture = is_boss_rush_midna_simple_bmg() && s_bossRushMidnaHorseResource != bmg;
+    if (bmg == s_bossRushMidnaTopology.resource && !needHorseCapture) {
         return false;
     }
 
