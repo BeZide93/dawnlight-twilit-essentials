@@ -56,6 +56,7 @@ bool g_configVisibleEquipMirrorBow = true;
 bool g_configVisibleEquipShowBow = true;
 bool g_configVisibleEquipShowLantern = true;
 bool g_configVisibleEquipQuiverOnBelt = true;
+int g_configVisibleEquipQuiverType = 0;
 
 static J3DModel *s_customBowModel = nullptr;
 static J3DModel *s_customQuiverModel = nullptr;
@@ -471,11 +472,16 @@ static u8* loadPristineBmdFromDvd(const char *dvdPath, const char *resName, s16 
 }
 
 static void loadQuiverModel(const LogService *log_svc, ModContext *mod_ctx) {
-  u8 arrowMax = dComIfGs_getArrowMax();
-  int targetQuiverType = (arrowMax >= 100) ? 3 : ((arrowMax >= 60) ? 2 : 1);
+  int targetQuiverType;
+  if (g_configVisibleEquipQuiverType >= 1 && g_configVisibleEquipQuiverType <= 3) {
+    targetQuiverType = g_configVisibleEquipQuiverType;
+  } else {
+    u8 arrowMax = dComIfGs_getArrowMax();
+    targetQuiverType = (arrowMax >= 100) ? 3 : ((arrowMax >= 60) ? 2 : 1);
+  }
   const char *quiverArcName =
-      (arrowMax >= 100) ? "O_gD_quL3"
-                        : ((arrowMax >= 60) ? "O_gD_quL2" : "O_gD_quL1");
+      (targetQuiverType == 3) ? "O_gD_quL3"
+                              : ((targetQuiverType == 2) ? "O_gD_quL2" : "O_gD_quL1");
 
   if (s_loadedQuiverType != targetQuiverType) {
     s_customQuiverModel = nullptr;

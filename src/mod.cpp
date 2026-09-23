@@ -402,6 +402,7 @@ static ConfigVarHandle s_varVisibleEquipMirrorBow = 0;
 static ConfigVarHandle s_varVisibleEquipShowBow = 0;
 static ConfigVarHandle s_varVisibleEquipShowLantern = 0;
 static ConfigVarHandle s_varVisibleEquipQuiverOnBelt = 0;
+static ConfigVarHandle s_varVisibleEquipQuiverType = 0;
 static ConfigVarHandle s_varDamageNumbers = 0;
 static ConfigVarHandle s_varCustomZButton = 0;
 static ConfigVarHandle s_varQuickAccess = 0;
@@ -949,6 +950,12 @@ static void on_visible_equip_show_lantern_changed(ModContext*, ConfigVarHandle, 
 static void on_visible_equip_quiver_on_belt_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configVisibleEquipQuiverOnBelt = value->bool_value;
+    }
+}
+
+static void on_visible_equip_quiver_type_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configVisibleEquipQuiverType = static_cast<int>(value->int_value);
     }
 }
 
@@ -1505,6 +1512,13 @@ static ModResult tab_visuals(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_toggle(left, "Quiver on left belt", s_varVisibleEquipQuiverOnBelt,
         "<p>Moves the quiver from the back to the left hip.</p>",
         is_visible_equip_sub_disabled);
+    static const char* const kVisibleEquipQuiverTypes[] = {
+        "Default (by arrow capacity)", "Quiver", "Big Quiver", "Giant Quiver" };
+    ui_add_select(left, "Quiver model", s_varVisibleEquipQuiverType,
+        "<p>Chooses which quiver is shown on Link. <b>Default</b> picks it based on your "
+        "max arrow capacity, like in the vanilla game. The other options always show the "
+        "selected quiver, regardless of your arrow capacity.</p>",
+        kVisibleEquipQuiverTypes, 4, is_visible_equip_sub_disabled);
     return MOD_OK;
 }
 
@@ -2130,6 +2144,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descEquipQuiverBelt, &s_varVisibleEquipQuiverOnBelt) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varVisibleEquipQuiverOnBelt, &g_configVisibleEquipQuiverOnBelt);
             svc_config->subscribe(mod_ctx, s_varVisibleEquipQuiverOnBelt, on_visible_equip_quiver_on_belt_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descEquipQuiverType = CONFIG_VAR_DESC_INIT;
+        descEquipQuiverType.name = "visibleEquipmentQuiverType";
+        descEquipQuiverType.type = CONFIG_VAR_INT;
+        descEquipQuiverType.default_int = 0;
+        if (svc_config->register_var(mod_ctx, &descEquipQuiverType, &s_varVisibleEquipQuiverType) == MOD_OK) {
+            int64_t quiverType = 0;
+            svc_config->get_int(mod_ctx, s_varVisibleEquipQuiverType, &quiverType);
+            g_configVisibleEquipQuiverType = static_cast<int>(quiverType);
+            svc_config->subscribe(mod_ctx, s_varVisibleEquipQuiverType, on_visible_equip_quiver_type_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descZ = CONFIG_VAR_DESC_INIT;
