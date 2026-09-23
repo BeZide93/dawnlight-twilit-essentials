@@ -16,15 +16,6 @@ DEFINE_HOOK(&dMeter2_c::moveButtonXY, MoveButtonXYHook);
 DEFINE_HOOK(&dMeter2_c::_execute, Meter2ExecuteHook);
 DEFINE_HOOK(&dMeter2Draw_c::setAlphaButtonChange, SetAlphaButtonChangeHook);
 
-static bool z_hud_faded(dMeter2Draw_c* draw) {
-    if (draw == nullptr) return false;
-    J2DScreen* screen = draw->getMainScreenPtr();
-    if (screen == nullptr) return false;
-    if (dMeter2Info_getWindowStatus() == 2) return false;
-    J2DPane* cont = screen->search(MULTI_CHAR('cont_n'));
-    return cont != nullptr && (!cont->isVisible() || cont->getAlpha() == 0);
-}
-
 void update_z_item_texture(dMeter2Draw_c* draw) {
     if (draw == nullptr) {
         if (g_meter2_info.getMeterClass() != nullptr) {
@@ -619,14 +610,6 @@ void on_set_button_icon_midona_alpha_post(ModContext*, void* args, void*, void*)
     }
 
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
-    if (draw != nullptr && (z_hud_faded(draw) || dMeter2Info_getWindowStatus() != 0)) {
-        // The "Midna wants to talk" listen-sparkle (field_0x738) refills every
-        // 18 frames while the emphasis state is stuck; kill the timer after
-        // each engine refill so the green pulse can never draw in menus or
-        // across HUD fades.
-        draw->field_0x738 = 0.0f;
-    }
-
     if (draw != nullptr) {
         J2DScreen* screen = draw->getMainScreenPtr();
         if (screen != nullptr && !is_pause_menu_open(draw) && !isWolfPlayer()) {
