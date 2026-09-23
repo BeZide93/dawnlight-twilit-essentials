@@ -33,6 +33,7 @@
 #include "stamina/sprint_human.hpp"
 #include "stamina/sprint_wolf.hpp"
 #include "stamina/sprint_swim.hpp"
+#include "epona/epona.hpp"
 #include "collection_menu/collection_menu.hpp"
 #include "collection_menu/collection_menu_shield.hpp"
 #include "controls/controls.hpp"
@@ -495,6 +496,7 @@ static bool s_staminaInitialized = false;
 static bool s_puppetZeldaPatternInitialized = false;
 static bool s_collectionMenuInitialized = false;
 static bool s_collectionMenuChestInitialized = false;
+static bool s_eponaInitialized = false;
 
 static void on_collection_starter_equip_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
@@ -1040,6 +1042,10 @@ static bool is_bottles_sub_disabled(ModContext*, void*) {
     return !g_configBottlesQuickAccessEnabled;
 }
 
+static bool is_epona_sub_disabled(ModContext*, void*) {
+    return !g_configEponaEnabled;
+}
+
 static ModResult build_visible_equip_dialog(ModContext* ctx, UiElementHandle pane, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
 
@@ -1276,26 +1282,48 @@ static void ui_add_number(UiElementHandle pane, const char* label, ConfigVarHand
     svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
 }
 
+static void ui_add_percent(UiElementHandle pane, const char* label, ConfigVarHandle var,
+                           const char* help_rml, int min, int max, int step,
+                           UiPredicateFn disabled = nullptr) {
+    if (!svc_ui || var == 0) return;
+    UiControlDesc c = UI_CONTROL_DESC_INIT;
+    c.kind = UI_CONTROL_NUMBER;
+    c.label = label;
+    c.help_rml = help_rml;
+    c.binding = UI_BINDING_CONFIG_VAR;
+    c.config_var = var;
+    c.min = min;
+    c.max = max;
+    c.step = step;
+    c.suffix = "%";
+    c.is_disabled = disabled;
+    svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
+}
+
+static ModResult qol_tab_update(ModContext*, void*, ModError*) {
+    update_epona_status_text();
+    return MOD_OK;
+}
+
 static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandle left,
                                      UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>Quality of life options.</p>", nullptr);
 
-    static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
-
-    svc_ui->pane_add_section(mod_ctx, left, "Cutscenes");
-    ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
-        "<p>Skips skippable cutscenes automatically.</p>");
-#if 0
-    ui_add_toggle(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
-        "<p>Plays unskippable cutscenes at 4x speed.</p>");
-#endif
-
-    svc_ui->pane_add_section(mod_ctx, left, "Scene Transitions");
-    ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
-        "<p><b>Fast</b> speeds up room, door and map transitions. "
-        "<b>Vanilla</b> keeps the normal speed.</p>",
-        kSceneTransitionModes, 2);
+    svc_ui->pane_add_section(mod_ctx, left, "Epona");
+    ui_add_toggle(left, "Enabled", g_varEponaEnabled,
+        "<p>Enables the Epona tweaks below.</p>");
+    ui_add_percent(left, "Turn speed", g_varEponaTurnRatePct,
+        "<p>Steering sharpness. 100% is vanilla.</p>", 100, 300, 5, is_epona_sub_disabled);
+    ui_add_percent(left, "Top speed", g_varEponaTopSpeedPct,
+        "<p>Gallop top speed. 100% is vanilla.</p>", 100, 200, 5, is_epona_sub_disabled);
+    ui_add_toggle(left, "Unlimited spurs", g_varEponaUnlimitedSpurs,
+        "<p>The whip pool stays at 6/6 while riding.</p>", is_epona_sub_disabled);
+    ui_add_toggle(left, "Auto-gallop", g_varEponaAutoGallop,
+        "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
+        is_epona_sub_disabled);
+    g_eponaStatusText = 0;
+    svc_ui->pane_add_text(mod_ctx, left, "", &g_eponaStatusText);
 
     svc_ui->pane_add_section(mod_ctx, left, "Warping");
     ui_add_toggle(left, "Warp as human", s_varGeneralHumanWarp,
@@ -1463,6 +1491,17 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
                              UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>General options.</p>", nullptr);
+    ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
+        "<p>Skips skippable cutscenes automatically.</p>");
+#if 0
+    ui_add_toggle(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
+        "<p>Plays unskippable cutscenes at 4x speed.</p>");
+#endif
+    static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
+    ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
+        "<p><b>Fast</b> speeds up room, door and map transitions. "
+        "<b>Vanilla</b> keeps the normal speed.</p>",
+        kSceneTransitionModes, 2);
     /*ui_add_toggle(left, "Two-handed sword carry (test)", s_varGeneralDominionSword,
         "<p>Link holds his drawn sword with both hands.</p>");*/
     ui_add_toggle(left, "Horse camera: no auto-recenter", s_varHorseCamNoRecenter,
@@ -1760,7 +1799,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
         "into the Boss Rush chamber.</p>");
 
-#if 1
+#if 0
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;
@@ -1853,7 +1892,7 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
 
 static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "General",   tab_general,   nullptr, nullptr },
-    { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, nullptr, nullptr },
+    { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, qol_tab_update, nullptr },
     { sizeof(UiTabDesc), "Combat",    tab_combat,    nullptr, nullptr },
     { sizeof(UiTabDesc), "Visuals",   tab_visuals,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quick Access", tab_quick_access, nullptr, nullptr },
@@ -2859,6 +2898,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_stamina_bar_config(svc_config, mod_ctx);
         init_boss_bar_config(svc_config, mod_ctx);
         init_boss_rush_timer_pos_config(svc_config, mod_ctx);
+        init_epona_config(svc_config, mod_ctx);
     }
 
 
@@ -2926,6 +2966,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("collection_menu", s_collectionMenuInitialized);
     s_collectionMenuChestInitialized = init_collection_menu_chest(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("collection_menu_shield", s_collectionMenuChestInitialized);
+    s_eponaInitialized = init_epona(svc_hook, svc_ui, error) == MOD_OK;
+    log_init_result("epona", s_eponaInitialized);
 
     s_titleModActive = true;
     return MOD_OK;
@@ -3003,6 +3045,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("stamina", shutdown_stamina);
     run_shutdown_step("collection_menu", shutdown_collection_menu);
     run_shutdown_step("collection_menu_chest", shutdown_collection_menu_chest);
+    run_shutdown_step("epona", shutdown_epona);
     return MOD_OK;
 }
 

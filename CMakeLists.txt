@@ -49,6 +49,7 @@ add_mod(twilit_essentials
             src/general/damage_vignette.cpp
             src/general/oxygen_vignette.cpp
             src/general/sprint_fov_kick.cpp
+            src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp
             src/boss_bar/boss_bar.cpp
             src/boss_rush/boss_rush.cpp
