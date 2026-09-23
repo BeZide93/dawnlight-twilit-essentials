@@ -505,12 +505,11 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
         return HOOK_CONTINUE;
     }
 
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine()) {
-        return HOOK_CONTINUE;
-    }
-
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
 
+    // Boss Rush owns the Midna availability in its Ganon fights (Puppet
+    // Zelda / Beast Ganon / Ganondorf); this must run regardless of the
+    // custom Z button setting, or the call and the HUD die in those fights.
     if (is_boss_rush_ganon_fight()) {
         dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
         dComIfGs_onEventBit(dSv_event_flag_c::M_067);
@@ -520,6 +519,10 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
             draw->field_0x724 = 1.0f;
             draw->mButtonZAlpha = 1.0f;
         }
+    }
+
+    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine()) {
+        return HOOK_CONTINUE;
     }
 
     u32& param0 = mods::arg_ref<u32>(args, 1);

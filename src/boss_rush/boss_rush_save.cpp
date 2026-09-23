@@ -59,6 +59,22 @@ bool accept_preset_image(const void* data, size_t size, const char* source) {
 void load_preset() {
     s_presetAvailable = false;
 
+    // The bundle preset wins over a data_dir export: the bundle carries the
+    // full mid-game state (transform unlocked, Midna availability bits) that
+    // the boss rush fights are built around, while a stale data_dir export
+    // can be an early-game save without any of it (no wolf spawns, no Midna).
+    const ResourceService* res_svc = get_resource_service();
+    if (res_svc != nullptr && s_modCtx != nullptr) {
+        ResourceBuffer buf = RESOURCE_BUFFER_INIT;
+        if (res_svc->load(s_modCtx, kResPresetPath, &buf) == MOD_OK) {
+            if (accept_preset_image(buf.data, buf.size, "mod bundle res/")) {
+                res_svc->free(s_modCtx, &buf);
+                return;
+            }
+            res_svc->free(s_modCtx, &buf);
+        }
+    }
+
     if (svc_host != nullptr && s_modCtx != nullptr) {
         const char* dir = nullptr;
         if (svc_host->data_dir(s_modCtx, &dir) == MOD_OK && dir != nullptr) {
@@ -69,19 +85,8 @@ void load_preset() {
                 static u8 s_fileBuf[sizeof(PresetHeader) + sizeof(dSv_save_c)];
                 const size_t n = std::fread(s_fileBuf, 1, sizeof(s_fileBuf), f);
                 std::fclose(f);
-                if (accept_preset_image(s_fileBuf, n, "data_dir")) {
-                    return;
-                }
+                accept_preset_image(s_fileBuf, n, "data_dir");
             }
-        }
-    }
-
-    const ResourceService* res_svc = get_resource_service();
-    if (res_svc != nullptr && s_modCtx != nullptr) {
-        ResourceBuffer buf = RESOURCE_BUFFER_INIT;
-        if (res_svc->load(s_modCtx, kResPresetPath, &buf) == MOD_OK) {
-            accept_preset_image(buf.data, buf.size, "mod bundle res/");
-            res_svc->free(s_modCtx, &buf);
         }
     }
 }

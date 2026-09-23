@@ -4447,6 +4447,14 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         if (link != nullptr && link->checkMidnaRide()) {
             link->offMidnaRide();
         }
+    } else {
+        // The chamber holds the Midna availability bits on (HUD flicker fix);
+        // fights expect the fresh-save state, so drop them again on the way
+        // out. With 0x0540/M_067 still set the engine assumes Midna is
+        // already riding and never mounts her on the wolf.
+        dComIfGs_offEventBit(dSv_event_flag_c::M_067);
+        dComIfGs_offEventBit(0x0540);
+        dComIfGs_onEventBit(dSv_event_flag_c::F_0800);
     }
 
     s_pendingFightIndex = static_cast<int>(i);
