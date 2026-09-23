@@ -826,6 +826,27 @@ static void update_beastganon_instant_fight(bool gameFrameTick) {
     }
 }
 
+// Calling Midna already freezes Beast Ganon correctly: talking to her runs
+// as a proper engine event, and dComIfGp_event_moveApproval() suspends every
+// actor that isn't part of that event (see f_op_actor.cpp's execute
+// dispatch). A plain wolf<->human transformation is not an engine event, so
+// that suspension never kicks in and Beast Ganon keeps acting while the
+// player can't. Skip its own execute() outright for the duration instead -
+// unlike toggling fopAcStts_NOEXEC_e, this leaves it fully drawn in place.
+DEFINE_HOOK(&daB_MGN_c::execute, BossRushBeastGanonTransformFreezeHook);
+
+static HookAction on_beastganon_execute_pre(ModContext*, void*, void* retval, void*) {
+    if (!s_bossRushModeActive || retval == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr || !link->checkMetamorphose()) {
+        return HOOK_CONTINUE;
+    }
+    *static_cast<int*>(retval) = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 
 
 DEFINE_HOOK(&cc_at_check, BossRushBeastGanonArrowHook);
@@ -5668,6 +5689,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_pre<BossRushDoorOpenHook>(hook_svc, on_door_open_pre);
         mods::hook::add_pre<DarkhammerArmorExecuteHook>(hook_svc, on_darkhammer_armor_execute_pre);
         mods::hook::add_pre<BossRushBeastGanonArrowHook>(hook_svc, on_beastganon_arrow_hit_pre);
+        mods::hook::add_pre<BossRushBeastGanonTransformFreezeHook>(hook_svc, on_beastganon_execute_pre);
         mods::hook::add_pre<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_pre);
         mods::hook::add_post<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_post);
 
