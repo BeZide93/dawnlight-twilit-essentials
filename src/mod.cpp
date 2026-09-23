@@ -120,8 +120,8 @@ static void draw_debug_label(const char* text, f32 x, f32 y, f32 charW, f32 char
 static void draw_debug_coords_overlay() {
     const f32 boxX = 16.0f;
     const f32 boxY = 130.0f;
-    const f32 boxW = 210.0f;
-    const f32 boxH = 42.0f;
+    const f32 boxW = 310.0f;
+    const f32 boxH = 60.0f;
     J2DFillBox(boxX, boxY, boxW, boxH, JUtility::TColor(12, 16, 24, 190));
     J2DFillBox(boxX, boxY, 3.0f, boxH, JUtility::TColor(240, 195, 75, 250));
 
@@ -144,6 +144,15 @@ static void draw_debug_coords_overlay() {
     std::snprintf(buf, sizeof(buf), "Lyr: %d", layer);
     draw_debug_label(buf, textX, curY, charW, charH,
                      JUtility::TColor(180, 255, 190, 255), JUtility::TColor(130, 220, 150, 255));
+    curY += lineH;
+
+    const fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    if (player) {
+        const cXyz& pos = player->current.pos;
+        std::snprintf(buf, sizeof(buf), "Pos: %.1f, %.1f, %.1f", pos.x, pos.y, pos.z);
+        draw_debug_label(buf, textX, curY, charW, charH,
+                         JUtility::TColor(255, 220, 180, 255), JUtility::TColor(220, 170, 120, 255));
+    }
 
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port) port->setup2D();

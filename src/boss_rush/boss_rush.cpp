@@ -46,6 +46,7 @@ extern const SaveService* svc_save;
 #include "d/actor/d_a_door_shutter.h"
 #include "d/actor/d_a_door_bossL1.h"
 #include "d/actor/d_a_obj_lv4EdShutter.h"
+#include "d/actor/d_a_obj_lv4PoGate.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_obj_gb.h"
 #include "d/actor/d_a_e_md.h"
@@ -2659,6 +2660,32 @@ static void update_stallord_instant_fight() {
     }
     if (s_done) return;
 
+    static constexpr f32 kPoeGateDownY = 1800.0f;
+    if (!s_returningToChamber) {
+        fopAc_ac_c* bdoorAc = fopAcM_SearchByName(fpcNm_L1BOSS_DOOR_e);
+        if (bdoorAc != nullptr) {
+            daBdoorL1_c* bdoor = static_cast<daBdoorL1_c*>(bdoorAc);
+            if (bdoor->field_0x588 != nullptr && bdoor->mAction != daBdoorL1_c::ACTION_WAIT) {
+                bdoor->closeInit();
+                bdoor->field_0x588->setFrame(bdoor->field_0x588->getEndFrame());
+                bdoor->calcMtx();
+                bdoor->setAction(daBdoorL1_c::ACTION_WAIT);
+                rush_debug_logf("[ds-door] stallord boss door closed");
+            }
+        }
+        fopAc_ac_c* gateAc = fopAcM_SearchByName(fpcNm_Obj_Lv4PoGate_e);
+        if (gateAc != nullptr) {
+            daLv4PoGate_c* gate = static_cast<daLv4PoGate_c*>(gateAc);
+            dComIfGs_offSwitch(gate->mSw, fopAcM_GetRoomNo(gateAc));
+            if (gate->mMoveValue != 0.0f || gate->current.pos.y != kPoeGateDownY ||
+                gate->mMode != daLv4PoGate_c::MODE_WAIT_e) {
+                gate->mMoveValue = 0.0f;
+                gate->current.pos.y = kPoeGateDownY;
+                gate->init_modeWait();
+            }
+        }
+    }
+
     for (int z = 0; z < dSv_info_c::ZONE_MAX; ++z) {
         dSv_zone_c& zone = g_dComIfG_gameInfo.info.getZone(z);
         if (zone.getRoomNo() == 50 || zone.getRoomNo() == -1) {
@@ -2888,20 +2915,22 @@ static void update_argorok_phase_transition_skip() {
         s_groundValid = false;
         mDoGph_gInf_c::offFade();
 
-        // A retry keeps the room loaded, so the phase-2 storm would persist;
-        // restore the clear phase-1 sky.
-        dScnKy_env_light_c* kankyo = dKy_getEnvlight();
-        if (kankyo != nullptr) {
-            kankyo->wether = 0;
-            kankyo->mColpatWeather = 0;
-            kankyo->wether_pat0 = 0;
-            kankyo->wether_pat1 = 0;
-            kankyo->pat_ratio = 0.0f;
-            kankyo->mColpatCurrGather = 0;
-            kankyo->mColpatPrevGather = 0;
-            kankyo->mColPatBlendGather = 0.0f;
-            kankyo->raincnt = 0;
-            kankyo->base_raincnt = 0;
+        const int argoTarget = boss_rush_target_index();
+        if (argoTarget >= 0 && static_cast<size_t>(argoTarget) < g_bossGalleryCount &&
+            std::strcmp(g_bossGalleryTable[argoTarget].displayName, "Argorok") == 0) {
+            dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+            if (kankyo != nullptr) {
+                kankyo->wether = 0;
+                kankyo->mColpatWeather = 0;
+                kankyo->wether_pat0 = 0;
+                kankyo->wether_pat1 = 0;
+                kankyo->pat_ratio = 0.0f;
+                kankyo->mColpatCurrGather = 0;
+                kankyo->mColpatPrevGather = 0;
+                kankyo->mColPatBlendGather = 0.0f;
+                kankyo->raincnt = 0;
+                kankyo->base_raincnt = 0;
+            }
         }
     }
 
