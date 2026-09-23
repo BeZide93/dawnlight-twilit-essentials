@@ -76,6 +76,7 @@
 #include "JSystem/JUtility/TColor.h"
 #include "JSystem/JUtility/JUTFont.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -1897,8 +1898,35 @@ namespace known_issues {
 struct Entry {
     std::string tag;
     std::string title;
-    std::string description;
+    std::vector<std::string> descriptionLines;
 };
+
+// Reads a single JSON string literal starting at `pos` (which must point at the
+// opening quote) and unescapes it. Returns the index just past the closing
+// quote, or npos on failure.
+static size_t read_json_string(std::string_view text, size_t pos, std::string* out) {
+    if (pos >= text.size() || text[pos] != '"') return std::string_view::npos;
+    ++pos;
+    std::string value;
+    for (; pos < text.size(); ++pos) {
+        const char c = text[pos];
+        if (c == '"') {
+            *out = std::move(value);
+            return pos + 1;
+        }
+        if (c == '\\' && pos + 1 < text.size()) {
+            ++pos;
+            switch (text[pos]) {
+                case 'n': value += '\n'; break;
+                case 't': value += '\t'; break;
+                default: value += text[pos]; break;
+            }
+            continue;
+        }
+        value += c;
+    }
+    return std::string_view::npos;
+}
 
 // Finds `"key": "value"` inside a JSON object substring and unescapes the string value.
 static bool extract_string_field(std::string_view object, std::string_view key, std::string* out) {
@@ -1909,26 +1937,45 @@ static bool extract_string_field(std::string_view object, std::string_view key, 
     if (pos == std::string_view::npos) return false;
     pos = object.find('"', pos);
     if (pos == std::string_view::npos) return false;
+    return read_json_string(object, pos, out) != std::string_view::npos;
+}
+
+// Reads `"description"`, accepting either a plain string (one line) or an
+// array of strings (one paragraph per element), matching the website's
+// KnownIssue.description: string | string[].
+static bool extract_description_field(std::string_view object, std::vector<std::string>* out) {
+    const std::string needle = "\"description\"";
+    size_t pos = object.find(needle);
+    if (pos == std::string_view::npos) return false;
+    pos = object.find(':', pos + needle.size());
+    if (pos == std::string_view::npos) return false;
     ++pos;
-    std::string value;
-    for (; pos < object.size(); ++pos) {
-        const char c = object[pos];
-        if (c == '"') {
-            *out = std::move(value);
-            return true;
-        }
-        if (c == '\\' && pos + 1 < object.size()) {
-            ++pos;
-            switch (object[pos]) {
-                case 'n': value += '\n'; break;
-                case 't': value += '\t'; break;
-                default: value += object[pos]; break;
-            }
-            continue;
-        }
-        value += c;
+    while (pos < object.size() && std::isspace(static_cast<unsigned char>(object[pos]))) ++pos;
+    if (pos >= object.size()) return false;
+
+    if (object[pos] == '"') {
+        std::string line;
+        if (read_json_string(object, pos, &line) == std::string_view::npos) return false;
+        out->push_back(std::move(line));
+        return true;
     }
-    return false;
+
+    if (object[pos] != '[') return false;
+    ++pos;
+    while (pos < object.size()) {
+        while (pos < object.size() &&
+               (std::isspace(static_cast<unsigned char>(object[pos])) || object[pos] == ',')) {
+            ++pos;
+        }
+        if (pos >= object.size() || object[pos] == ']') break;
+        if (object[pos] != '"') break;
+        std::string line;
+        const size_t next = read_json_string(object, pos, &line);
+        if (next == std::string_view::npos) break;
+        out->push_back(std::move(line));
+        pos = next;
+    }
+    return !out->empty();
 }
 
 // Splits the top-level `{...}` objects out of a JSON array body.
@@ -1988,7 +2035,7 @@ static std::vector<Entry> parse(std::string_view json) {
         Entry entry;
         extract_string_field(obj, "tag", &entry.tag);
         extract_string_field(obj, "title", &entry.title);
-        extract_string_field(obj, "description", &entry.description);
+        extract_description_field(obj, &entry.descriptionLines);
         if (!entry.title.empty()) issues.push_back(std::move(entry));
     }
     return issues;
@@ -2024,7 +2071,11 @@ static std::string build_rml(const std::vector<Entry>& issues) {
         rml += "]</span>&nbsp;<span style=\"font-weight: bold;\">";
         rml += escape_rml(issue.title);
         rml += "</span><br/><span style=\"color: #a8bcd4;\">";
-        rml += escape_rml(issue.description);
+        for (size_t i = 0; i < issue.descriptionLines.size(); ++i) {
+            if (i != 0) rml += "<br/>";
+            rml += "\xe2\x80\x93 ";
+            rml += escape_rml(issue.descriptionLines[i]);
+        }
         rml += "</span></p>";
     }
     return rml;
