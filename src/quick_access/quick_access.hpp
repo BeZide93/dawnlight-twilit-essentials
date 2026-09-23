@@ -22,3 +22,5 @@ bool quick_access_boots_on_quick_access();
 bool quick_access_keep_boots_equipped(daAlink_c* link);
 bool quick_access_keep_bomb_equipped(daAlink_c* link);
 bool quick_access_keep_lantern_equipped(daAlink_c* link);
+void qa_mark_held_item(unsigned char itemNo);
+bool qa_is_held_item(int itemNo);

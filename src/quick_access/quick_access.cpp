@@ -67,6 +67,38 @@ static u8 s_customItems[QA_QUICK_SLOTS] = {
 };
 static u8 s_assignedItem = QA_ITEM_NONE;
 
+static u8 s_qaHeldItem = QA_ITEM_NONE;
+static int s_qaHeldGrace = 0;
+
+void qa_mark_held_item(u8 itemNo) {
+    if (itemNo == QA_ITEM_NONE) {
+        return;
+    }
+    s_qaHeldItem = itemNo;
+    s_qaHeldGrace = 90;
+}
+
+bool qa_is_held_item(int itemNo) {
+    return g_configQuickAccessEnabled && s_qaHeldItem != QA_ITEM_NONE && s_qaHeldGrace > 0 &&
+           itemNo == static_cast<int>(s_qaHeldItem);
+}
+
+static void qa_tick_held_item(daAlink_c* link) {
+    if (s_qaHeldItem == QA_ITEM_NONE) {
+        return;
+    }
+    if (link != nullptr && link->mEquipItem == s_qaHeldItem) {
+        s_qaHeldGrace = 30;
+        return;
+    }
+    if (s_qaHeldGrace > 0) {
+        --s_qaHeldGrace;
+    }
+    if (s_qaHeldGrace <= 0) {
+        s_qaHeldItem = QA_ITEM_NONE;
+    }
+}
+
 static SaveObserverHandle s_saveObserver = 0;
 static const char* kQuickAccessBlobName = "quickAccessItemsV1";
 
@@ -994,8 +1026,10 @@ static void qa_toggle_boots_underwater(daAlink_c* link, bool equipped) {
     if (procType != 0) {
         z_mobile_hb_lock(link, true);
         link->changeItemTriggerKeepProc(2, procType);
+        qa_mark_held_item(dItemNo_HVY_BOOTS_e);
     } else {
         link->setHeavyBoots(equipped ? 0 : 1);
+        qa_mark_held_item(dItemNo_HVY_BOOTS_e);
     }
     s_qaBootsEquipAllowed = false;
     g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
@@ -1034,6 +1068,7 @@ static void execute_iron_boots() {
         s_qaBootsGraceFrames = 45;
         s_qaBootsEquipAllowed = true;
         link->procBootsEquipInit();
+        qa_mark_held_item(dItemNo_HVY_BOOTS_e);
         play_ok_se();
         return;
     }
@@ -1042,6 +1077,7 @@ static void execute_iron_boots() {
     s_qaBootsGraceFrames = 45;
     s_qaBootsEquipAllowed = true;
     link->procBootsEquipInit();
+    qa_mark_held_item(dItemNo_HVY_BOOTS_e);
     play_ok_se();
 }
 
@@ -1065,6 +1101,7 @@ static void execute_horse_call() {
     int proc_type = alink->checkNewItemChange(2);
     if (proc_type != 0) {
         alink->changeItemTriggerKeepProc(2, proc_type);
+        qa_mark_held_item(dItemNo_HORSE_FLUTE_e);
         play_ok_se();
     } else {
         play_error_se();
@@ -1104,6 +1141,7 @@ static void execute_lantern() {
     int proc_type = link->checkNewItemChange(2);
     if (proc_type != 0) {
         link->changeItemTriggerKeepProc(2, proc_type);
+        qa_mark_held_item(dItemNo_KANTERA_e);
         play_ok_se();
     } else {
         play_error_se();
@@ -1138,6 +1176,7 @@ static void execute_fishing_rod() {
     int proc_type = link->checkNewItemChange(2);
     if (proc_type != 0) {
         link->changeItemTriggerKeepProc(2, proc_type);
+        qa_mark_held_item(rodItem);
         play_ok_se();
     } else {
         play_error_se();
@@ -1327,8 +1366,11 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     if (link == nullptr || link->checkWolf()) {
         s_qaLanternLit = false;
         s_qaBootsDesired = false;
+        qa_tick_held_item(link);
         return;
     }
+
+    qa_tick_held_item(link);
 
     if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
         if (s_qaBootsGraceFrames > 0) {
@@ -1422,6 +1464,7 @@ static void execute_generic_item(u8 itemNo) {
     int proc_type = link->checkNewItemChange(2);
     if (proc_type != 0) {
         link->changeItemTriggerKeepProc(2, proc_type);
+        qa_mark_held_item(itemNo);
         play_ok_se();
     } else {
         play_error_se();
@@ -1590,6 +1633,7 @@ static void qa_enter_item_aim(u8 itemNo) {
     if (proc_type != 0) {
         link->changeItemTriggerKeepProc(2, proc_type);
     }
+    qa_mark_held_item(itemNo);
     s_aimItem = itemNo;
     play_ok_se();
 }
@@ -1605,6 +1649,7 @@ static void qa_run_item_repress(daAlink_c* link, u8 itemNo) {
     link->mSelectItemId = 2;
     const int action = link->checkItemActionInitStart();
     g_dComIfG_gameInfo.play.setSelectItem(2, oldGpItem);
+    qa_mark_held_item(itemNo);
     if (action == -1) {
         play_error_se();
     } else {
