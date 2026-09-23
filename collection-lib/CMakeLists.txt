@@ -22,6 +22,12 @@ add_library(collection_lib STATIC
         src/collection_lib.cpp
 )
 
+# The static library is linked into the mod's shared module. On Linux the
+# objects must be position independent or the final shared-object link fails
+# with R_X86_64_TPOFF32/ABS32 relocations (stb_image's thread-local failure
+# reason in a non-PIC object).
+set_target_properties(collection_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(collection_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # dusklight_mod_api: SDK service headers. dusklight_game_abi_headers: the game's
 # public include dirs + compile definitions. Deliberately NOT
