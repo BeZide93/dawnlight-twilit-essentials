@@ -1169,6 +1169,7 @@ static void puppet_zelda_walls_begin_track() {
 
 void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
                                   const char* reason) {
+    rush_debug_logf("[hb-dbg] return_to_boss_rush_chamber reason=%s", reason ? reason : "?");
     puppet_zelda_walls_end_track();
     if (s_rushRunActive) {
         s_rushRunActive = false;
@@ -1190,7 +1191,13 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     boss_rush_timer_reset_run();
     boss_rush_timer_end_all_phases();
 
-    mDoGph_gInf_c::offFade();
+    // Don't clear an already-held black screen here - a caller (e.g. the
+    // Horseback Ganon defeat sequence) may have faded to black deliberately
+    // before calling in; clearing it right before the stage warp briefly
+    // reveals whatever scene is still rendering underneath.
+    if (!boss_rush_screen_is_fully_black()) {
+        mDoGph_gInf_c::offFade();
+    }
     Z2GetAudioMgr()->subBgmStop();
     if (reason == nullptr || std::strcmp(reason, "Died") != 0) {
         Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
@@ -1577,6 +1584,7 @@ static int  s_gndStableFrames = 0;
 static bool s_needInPlaceFade = false;
 
 static void trigger_ganon_ground_duel() {
+    rush_debug_logf("[hb-dbg] trigger_ganon_ground_duel");
     const int gndIdx = gauntlet_next_phase_index("Horseback Ganon");
     if (gndIdx >= 0) {
         s_activeFightIndex = gndIdx;
@@ -1625,10 +1633,19 @@ static void update_ganon_ground_duel() {
     if (zelda != nullptr) {
         fopAcM_delete(zelda);
     }
+    // Hide the horse instead of deleting it: Ganondorf's own final-death
+    // demo camera (demo_camera() in d_a_b_gnd.cpp, case 62) unconditionally
+    // calls dComIfGp_getHorseActor()->setHorsePosAndAngle(...) with no null
+    // check, assuming the horse actor always still exists. Deleting it here
+    // left that call dereferencing a stale pointer and crashed on the final
+    // ground-duel kill.
     fopAc_ac_c* horse = reinterpret_cast<fopAc_ac_c*>(dComIfGp_getHorseActor());
     if (horse != nullptr) {
-        fopAcM_delete(horse);
-        dComIfGp_setHorseActor(nullptr);
+        cXyz awayPos(0.0f, -5000.0f, 0.0f);
+        horse->current.pos = awayPos;
+        horse->old.pos = awayPos;
+        horse->speed.set(0.0f, 0.0f, 0.0f);
+        horse->speedF = 0.0f;
     }
 
     cXyz arenaCenter(0.0f, 1100.0f, 0.0f);
@@ -2989,10 +3006,23 @@ static void update_horsebackganon_instant_fight() {
         }
     }
 
-    camera_process_class* cam = boss_rush_get_active_player_camera();
-    if (cam != nullptr) {
-        cam->mCamera.QuickStart();
-        cam->mCamera.SetTrimSize(0);
+    // Once Ganondorf is defeated (ACTION_HEND) his own b_gnd_h_end() drives a
+    // fall-off-horse animation through mDemoCamMode (30 -> 32 -> 34), which
+    // needs its own camera control. Forcing QuickStart()/SetTrimSize(0) every
+    // frame here fights that and keeps the normal gameplay camera up,
+    // hiding the animation entirely - stop doing that once he's down.
+    bool ganondorfDown = false;
+    if (fopAc_ac_c* gnd = fopAcM_SearchByName(fpcNm_B_GND_e)) {
+        int gam, gmm, gdcm, ghorse, ghp, gkd;
+        bbi::ganondorf_read(gnd, gam, gmm, gdcm, ghorse, ghp, gkd);
+        ganondorfDown = (gam == 6);
+    }
+    if (!ganondorfDown) {
+        camera_process_class* cam = boss_rush_get_active_player_camera();
+        if (cam != nullptr) {
+            cam->mCamera.QuickStart();
+            cam->mCamera.SetTrimSize(0);
+        }
     }
 }
 
@@ -4683,6 +4713,9 @@ static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_
 
 static void advance_boss_rush_run(const LogService* log_svc, ModContext* mod_ctx,
                                   const char* reason) {
+    rush_debug_logf("[hb-dbg] advance_boss_rush_run reason=%s rushRunActive=%d pendingFight=%d returning=%d",
+                    reason ? reason : "?", (int)s_rushRunActive, s_pendingFightIndex,
+                    (int)s_returningToChamber);
     if (s_pendingFightIndex != -1 || s_returningToChamber) {
         return;
     }
@@ -5489,6 +5522,15 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             }
             return;
         }
+        if (gt >= 0 && static_cast<size_t>(gt) < g_bossGalleryCount &&
+            std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0) {
+            // Horseback Ganon (separate-Ganon mode) drives its own defeat
+            // cutscene/fade timing via s_horsebackGanonKoTimer below, based
+            // on Ganondorf's own health/action state - this generic
+            // boss-bar fade-out edge fires a bit earlier and would otherwise
+            // warp away before the cutscene finishes playing.
+            return;
+        }
         advance_boss_rush_run(log_svc, mod_ctx, "Boss defeated");
         return;
     }
@@ -5507,14 +5549,19 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
              (!g_configBossRushSeparateGanon &&
               std::strcmp(g_bossGalleryTable[gt].displayName, "Ganondorf") == 0 &&
               hbStage != nullptr && std::strcmp(hbStage, "D_MN09B") == 0)));
+
         if (isHorsebackTarget) {
             static u32 s_hbGen = ~0u;
             static int s_hbLandingFrames = 0;
+            static bool s_hbSepWaitingCutscene = false;
+            static int s_hbCutsceneWaitFrames = 0;
             if (s_hbGen != s_fightWarpGen) {
                 s_hbGen = s_fightWarpGen;
                 s_hbLandingFrames = 120;
                 s_horsebackGanonKoTimer = -1;
                 s_horsebackGanonSawHorse = false;
+                s_hbSepWaitingCutscene = false;
+                s_hbCutsceneWaitFrames = 0;
             }
             if (s_hbLandingFrames > 0) {
                 --s_hbLandingFrames;
@@ -5534,7 +5581,25 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     dComIfGp_event_reset();
                 }
 
-                boss_rush_screen_fade_out(0.055f);
+                if (!g_configBossRushSeparateGanon || s_horsebackGanonKoTimer <= 25) {
+                    boss_rush_screen_fade_out(0.055f);
+                }
+
+                if ((s_horsebackGanonKoTimer % 10) == 0) {
+                    fopAc_ac_c* gndDbg = fopAcM_SearchByName(fpcNm_B_GND_e);
+                    int gam = -1, gmm = -1, gdcm = -1, ghorse = -1, ghp = -1, gkd = -1;
+                    if (gndDbg != nullptr) {
+                        bbi::ganondorf_read(gndDbg, gam, gmm, gdcm, ghorse, ghp, gkd);
+                    }
+                    JUTFader* dbgFader = mDoGph_gInf_c::getFader();
+                    rush_debug_logf("[hb-dbg] koTimer=%d sep=%d gnd=%p gam=%d ghp=%d ghorse=%d "
+                                    "fader=%d ev=%d stage=%s",
+                                    s_horsebackGanonKoTimer, (int)g_configBossRushSeparateGanon,
+                                    gndDbg, gam, ghp, ghorse,
+                                    dbgFader ? (int)dbgFader->getStatus() : -1,
+                                    (int)dComIfGp_event_runCheck(),
+                                    dComIfGp_getStartStageName() ? dComIfGp_getStartStageName() : "?");
+                }
 
                 if (s_horsebackGanonKoTimer > 0) {
                     --s_horsebackGanonKoTimer;
@@ -5554,19 +5619,49 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     advance_boss_rush_run(log_svc, mod_ctx, "Horseback Ganon defeated");
                     return;
                 }
+            } else if (g_configBossRushSeparateGanon && s_hbSepWaitingCutscene) {
+                // Defeat already detected (mActionMode == ACTION_HEND). The
+                // fall-off-horse animation isn't an engine event - it's
+                // b_gnd_h_end()'s own mMoveMode/mDemoCamMode sub-state
+                // machine (camera mode climbs 30 -> 32 -> 34 as the horse-down
+                // and Ganondorf-down animations play), which just sits once
+                // settled waiting for external code to move on. Wait for
+                // mDemoCamMode to reach 34 before starting the short fade.
+                // Capped as a safety net in case it never gets there.
+                ++s_hbCutsceneWaitFrames;
+                fopAc_ac_c* gndWait = fopAcM_SearchByName(fpcNm_B_GND_e);
+                int wGam = -1, wMoveMode = -1, wDemoCam = -1, wHorse = -1, wHp = -1, wKd = -1;
+                if (gndWait != nullptr) {
+                    bbi::ganondorf_read(gndWait, wGam, wMoveMode, wDemoCam, wHorse, wHp, wKd);
+                }
+                if (gndWait == nullptr || wDemoCam >= 34 || s_hbCutsceneWaitFrames > 900) {
+                    rush_debug_logf("[hb-dbg] fall animation done demoCam=%d moveMode=%d frames=%d, "
+                                    "starting fade",
+                                    wDemoCam, wMoveMode, s_hbCutsceneWaitFrames);
+                    s_hbSepWaitingCutscene = false;
+                    s_hbCutsceneWaitFrames = 0;
+                    s_horsebackGanonKoTimer = 25;
+                }
             } else if (s_horsebackGanonSawHorse) {
                 fopAc_ac_c* gnd = fopAcM_SearchByName(fpcNm_B_GND_e);
                 if (gnd != nullptr) {
                     int gam, gmm, gdcm, ghorse, ghp, gkd;
                     bbi::ganondorf_read(gnd, gam, gmm, gdcm, ghorse, ghp, gkd);
                     if (gam == 6 || ghp <= 0) {
-                        s_horsebackGanonKoTimer = (!g_configBossRushSeparateGanon) ? 22 : 65;
+                        rush_debug_logf("[hb-dbg] defeat edge sep=%d gam=%d gmm=%d gdcm=%d "
+                                        "ghorse=%d ghp=%d gkd=%d",
+                                        (int)g_configBossRushSeparateGanon, gam, gmm, gdcm,
+                                        ghorse, ghp, gkd);
                         if (!g_configBossRushSeparateGanon) {
+                            s_horsebackGanonKoTimer = 22;
                             boss_rush_screen_fade_out(0.055f);
                             b_gnd_class* g = reinterpret_cast<b_gnd_class*>(gnd);
                             g->mDemoCamMode = 0;
                             gnd->eventInfo.offCondition(2);
                             dComIfGp_event_reset();
+                        } else {
+                            boss_rush_timer_notify_defeat();
+                            s_hbSepWaitingCutscene = true;
                         }
                     }
                 }
@@ -5751,6 +5846,11 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
                 sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()),
                                         dComIfGs_getMaxLife());
             }
+            // A mod reload re-inits the custom-equip module fresh, dropping
+            // its suppression flag even though the boss rush session (and
+            // the vanilla loadout it enforces) is still active - reapply it
+            // the same way a fresh chamber entry does.
+            s_pendingInitialInventory = true;
         } else if (const char* curStage = dComIfGp_getStartStageName()) {
             const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
             for (size_t i = 0; i < g_bossGalleryCount; ++i) {
