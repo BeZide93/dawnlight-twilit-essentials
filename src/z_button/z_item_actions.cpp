@@ -200,6 +200,10 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
             *static_cast<int*>(retval) = 3;
             return HOOK_SKIP_ORIGINAL;
         }
+        if (link != nullptr && qa_is_held_item(itemNo)) {
+            *static_cast<int*>(retval) = 3;
+            return HOOK_SKIP_ORIGINAL;
+        }
         return HOOK_CONTINUE;
     }
 
@@ -233,6 +237,11 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
     if (quick_access_keep_lantern_equipped(link) &&
         (itemNo == dItemNo_KANTERA_e || itemNo == dItemNo_KANTERA2_e))
     {
+        *static_cast<int*>(retval) = 3;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (qa_is_held_item(itemNo)) {
         *static_cast<int*>(retval) = 3;
         return HOOK_SKIP_ORIGINAL;
     }
