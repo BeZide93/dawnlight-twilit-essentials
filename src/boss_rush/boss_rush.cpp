@@ -1604,6 +1604,15 @@ static void trigger_ganon_ground_duel() {
 }
 
 static void update_ganon_ground_duel() {
+    if (s_needInPlaceFade) {
+        s_holdBlackFrames++;
+        if (s_holdBlackFrames == 90) {
+            boss_rush_screen_fade_in(0.06f);
+            s_needInPlaceFade = false;
+            rush_debug_logf("[ds-door] duel: black-hold cap fired, fading in");
+        }
+    }
+
     const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "D_MN09B") != 0) return;
     if (!is_boss_rush_active() || s_returningToChamber) return;
@@ -1620,11 +1629,9 @@ static void update_ganon_ground_duel() {
 
     if (instant_fight_rearm(s_duelGen)) {
         s_duelReady = false;
-        s_holdBlackFrames = 0;
         s_gbId = {};
         s_gndId = 0;
         s_gndStableFrames = 0;
-        s_needInPlaceFade = false;
     }
 
     fopAc_ac_c* fk = fopAcM_SearchByName(fpcNm_E_FK_e);
