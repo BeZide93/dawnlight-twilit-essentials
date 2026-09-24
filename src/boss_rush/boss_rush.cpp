@@ -559,6 +559,22 @@ static void boss_rush_screen_fade_in(f32 speed) {
     mDoGph_gInf_c::fadeIn(speed, g_blackColor);
 }
 
+static void boss_rush_flush_sub_bgm() {
+    Z2SeqMgr* seq = Z2GetAudioMgr();
+    if (seq == nullptr) return;
+    if (seq->mSubBgmHandle) {
+        if (seq->field_0xb8 == -1) seq->subBgmStop();
+        seq->subBgmStopInner();
+    }
+    seq->field_0xb8 = -1;
+}
+
+static void boss_rush_clear_stale_sub_bgm() {
+    Z2SeqMgr* seq = Z2GetAudioMgr();
+    if (seq == nullptr || seq->mSubBgmHandle) return;
+    seq->field_0xb8 = -1;
+}
+
 }
 
 bool boss_rush_is_fighting_here() {
@@ -1203,7 +1219,7 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     if (!boss_rush_screen_is_fully_black()) {
         mDoGph_gInf_c::offFade();
     }
-    Z2GetAudioMgr()->subBgmStop();
+    boss_rush_flush_sub_bgm();
     if (reason == nullptr || std::strcmp(reason, "Died") != 0) {
         Z2GetAudioMgr()->seStart(Z2SE_SY_WARP_FADE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     }
@@ -2905,15 +2921,19 @@ static int argorok_peahat_cam_finish(void* i_actor, void*) {
 
 static void update_argorok_phase_transition_skip() {
     static u32  s_argorokGen = ~0u;
+    static constexpr f32 kArgorokFadeSpeed = 0.15f;
+    static constexpr int kArgorokBlackHoldFrames = 10;
     static bool s_p2Done = false;
-    static int  s_fadeFrames = 0;
+    static bool s_fading = false;
+    static int  s_blackHold = 0;
     static bool s_groundValid = false;
     static cXyz s_groundPos;
     static s16  s_groundYAngle = 0;
 
     if (instant_fight_rearm(s_argorokGen)) {
         s_p2Done = false;
-        s_fadeFrames = 0;
+        s_fading = false;
+        s_blackHold = 0;
         s_groundValid = false;
         mDoGph_gInf_c::offFade();
 
@@ -2937,10 +2957,23 @@ static void update_argorok_phase_transition_skip() {
     }
 
     if (s_p2Done) return;
-    if (!boss_rush_is_fighting_here() || s_returningToChamber) return;
+    if (!boss_rush_is_fighting_here() || s_returningToChamber) {
+        s_fading = false;
+        s_blackHold = 0;
+        return;
+    }
 
     const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "D_MN07A") != 0) return;
+
+    if (s_blackHold > 0) {
+        if (--s_blackHold == 0) {
+            mDoGph_gInf_c::fadeIn(kArgorokFadeSpeed);
+            s_fading = false;
+            s_p2Done = true;
+        }
+        return;
+    }
 
     const int t = boss_rush_target_index();
     if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount ||
@@ -2962,11 +2995,15 @@ static void update_argorok_phase_transition_skip() {
         s_groundValid = true;
     }
 
-    if (bbi::argorok_in_phase2_cutscene(dr)) {
-        if (s_fadeFrames == 0) {
-            mDoGph_gInf_c::fadeOut(0.2f);
+    if (!s_fading && bbi::argorok_in_phase2_cutscene(dr)) {
+        mDoGph_gInf_c::fadeOut(kArgorokFadeSpeed);
+        s_fading = true;
+    }
+
+    if (s_fading) {
+        if (mDoGph_gInf_c::getFadeRate() < 1.0f) {
+            return;
         }
-        s_fadeFrames++;
 
         const s8 room = static_cast<s8>(fopAcM_GetRoomNo(dr));
 
@@ -3037,8 +3074,7 @@ static void update_argorok_phase_transition_skip() {
             cam->mCamera.Start();
         }
 
-        s_p2Done = true;
-        mDoGph_gInf_c::fadeIn(0.2f);
+        s_blackHold = kArgorokBlackHoldFrames;
     }
 }
 
@@ -3767,6 +3803,11 @@ static void update_phase2_demo_skip() {
             else running = blizzeta_phase2_running(boss);
         }
     }
+    if (running && boss != nullptr && s_killWatchdogFrames > 0) {
+        s_killWatchdogFrames = 1;
+        running = false;
+    }
+    if (s_pendingFightIndex != -1) running = false;
 
     if (running) {
         if (s_state == IDLE) {
@@ -3790,10 +3831,78 @@ static void update_phase2_demo_skip() {
         }
     } else if (s_state != IDLE) {
         fast_forward_set_hidden_run(false);
-        mDoGph_gInf_c::fadeIn(kPhaseFadeSpeed);
+        if (s_killWatchdogFrames > 0 || s_pendingFightIndex != -1) {
+            mDoGph_gInf_c::offFade();
+        } else {
+            mDoGph_gInf_c::fadeIn(kPhaseFadeSpeed);
+        }
         s_state = IDLE;
     }
     s_phase2Hidden = s_state != IDLE;
+}
+
+struct BossThemeGuard { const char* name; const char* stage; u32 theme; u32 altTheme; };
+static const BossThemeGuard kBossThemeGuards[] = {
+    {"Blizzeta",  "D_MN11A", Z2BGM_BOSS_SNOWWOMAN_0, Z2BGM_BOSS_SNOWWOMAN_1},
+    {"Armogohma", "D_MN06A", Z2BGM_GOMA_BTL01,       Z2BGM_GOMA_BTL02},
+    {"Zant",      "D_MN08D", Z2BGM_BOSS_ZANT,        Z2BGM_BOSS_ZANT},
+};
+
+static void update_boss_theme_guard() {
+    static constexpr int kGuardStartFrames = 45;
+    static constexpr int kGuardEndFrames = 600;
+    static const BossThemeGuard* s_guard = nullptr;
+    static int s_frames = 0;
+
+    const BossThemeGuard* g = nullptr;
+    if (is_boss_rush_active() && !s_returningToChamber && s_pendingFightIndex == -1 &&
+        boss_rush_is_fighting_here()) {
+        const int t = boss_rush_target_index();
+        const char* stage = dComIfGp_getStartStageName();
+        if (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount && stage != nullptr) {
+            for (const BossThemeGuard& e : kBossThemeGuards) {
+                if (std::strcmp(e.name, g_bossGalleryTable[t].displayName) == 0 &&
+                    std::strcmp(e.stage, stage) == 0) {
+                    g = &e;
+                    break;
+                }
+            }
+        }
+    }
+    if (g != s_guard) {
+        s_guard = g;
+        s_frames = 0;
+    }
+    if (g == nullptr) return;
+    if (++s_frames > kGuardEndFrames || s_frames < kGuardStartFrames) return;
+    if (s_phase2Hidden || dComIfGp_event_runCheck() || boss_bar_boss_defeated_now()) return;
+
+    Z2AudioMgr* a = Z2GetAudioMgr();
+    if (a == nullptr) return;
+
+    const u32 mainId = a->getMainBgmID();
+    const bool themed = mainId == g->theme || mainId == g->altTheme;
+    if (!themed) {
+        if (a->getStreamBgmID() != 0xFFFFFFFFu || a->getSubBgmID() != 0xFFFFFFFFu) return;
+        if (std::strcmp(g->name, "Zant") == 0) {
+            daB_ZANT_c* z = reinterpret_cast<daB_ZANT_c*>(fopAcM_SearchByName(fpcNm_B_ZANT_e));
+            if (z == nullptr || z->mFightPhase == daB_ZANT_c::PHASE_OP) return;
+            a->bgmStart(g->theme, 0, 0);
+            a->changeBgmStatus(z->mFightPhase);
+        } else {
+            a->bgmStart(g->theme, 0, 0);
+        }
+        return;
+    }
+
+    if (a->mSceneBgm.getDest() < 1.0f || a->mBgmPause.getDest() < 1.0f) a->unMuteSceneBgm(0);
+    if (a->mAllBgmMaster.getDest() < 1.0f) a->bgmAllUnMute(0);
+    if (!a->mFanfareHandle && a->mFanfareMute.getDest() < 1.0f) a->mFanfareMute.forceIn();
+    if (!a->mSubBgmHandle && a->mMainBgmMaster.getDest() < 1.0f) {
+        a->field_0xb8 = -1;
+        a->mMainBgmMaster.forceIn();
+    }
+    if (!a->mStreamBgmHandle && a->mStreamBgmMaster.getDest() < 1.0f) a->mStreamBgmMaster.forceIn();
 }
 
 DEFINE_HOOK(&Z2SeMgr::seStart, BossRushPhaseSeStartHook);
@@ -4718,7 +4827,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         if (!boss_rush_screen_is_fully_black()) {
             mDoGph_gInf_c::offFade();
         }
-        Z2GetAudioMgr()->subBgmStop();
+        boss_rush_flush_sub_bgm();
     }
 
     s_pendingGearSaveApply = true;
@@ -5307,6 +5416,28 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         const char* curStage = dComIfGp_getStartStageName();
         const bool atTargetStage = (curStage != nullptr && std::strcmp(curStage, expStage) == 0);
 
+        const BossGalleryEntry& pendingBoss = g_bossGalleryTable[s_pendingFightIndex];
+        if (!isGanonGauntlet && pendingBoss.fightSpawnPos != nullptr) {
+            const cXyz& spawnPos = *pendingBoss.fightSpawnPos;
+            if (!atTargetStage) {
+                dComIfGs_setRestartRoom(spawnPos, pendingBoss.fightSpawnAngle, pendingBoss.room);
+                dComIfGs_setRestartRoomParam((pendingBoss.room & 0x3F) | (0xFF << 24));
+            } else if (fopOvlpM_IsPeek()) {
+                daAlink_c* newLink = daAlink_getAlinkActorClass();
+                if (newLink != nullptr && newLink->current.pos.abs(spawnPos) > 500.0f) {
+                    rush_debug_logf("[rush] respawn link at '%s' spawn (was %.0f %.0f %.0f)",
+                                    pendingBoss.displayName, newLink->current.pos.x,
+                                    newLink->current.pos.y, newLink->current.pos.z);
+                    newLink->current.pos = spawnPos;
+                    newLink->old.pos = spawnPos;
+                    newLink->home.pos = spawnPos;
+                    newLink->shape_angle.y = pendingBoss.fightSpawnAngle;
+                    newLink->current.angle.y = pendingBoss.fightSpawnAngle;
+                    dComIfGs_setRestartRoom(spawnPos, pendingBoss.fightSpawnAngle, pendingBoss.room);
+                }
+            }
+        }
+
         const bool pendingTargetIsChamber =
             std::strcmp(g_bossGalleryTable[s_pendingFightIndex].stage, kBossRushChamberStage) == 0 &&
             g_bossGalleryTable[s_pendingFightIndex].room == kBossRushChamberRoom;
@@ -5365,6 +5496,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             if (s_activeFightIndex >= 0 && s_activeFightIndex < static_cast<int>(g_bossGalleryCount)) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];
                 const u16 runCarriedLife = dComIfGs_getLife();
+                boss_rush_clear_stale_sub_bgm();
                 Z2GetAudioMgr()->unMuteSceneBgm(0);
 
                 if (std::strcmp(boss.displayName, "Puppet Zelda") == 0 ||
@@ -5521,6 +5653,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_darknut_instant_fight();
     update_armogohma_instant_fight();
     update_zant_instant_fight();
+    update_boss_theme_guard();
     update_beastganon_instant_fight(false);
 
     if (s_activeFightIndex >= 0 && static_cast<size_t>(s_activeFightIndex) < g_bossGalleryCount &&
