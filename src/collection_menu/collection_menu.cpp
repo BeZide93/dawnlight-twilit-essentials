@@ -33,14 +33,50 @@ void sync_collection_ordon_hero_page() {
     }
 }
 
-static inline int add_vanilla_sword_slot(const CollectionVanillaSlotDef& def) {
-    return collectionlib_add_vanilla_slot(1, def);
+static bool starter_sword_unlocked() {
+    const u8 eq = custom_equip_active(CE_SWORD) ? dItemNo_NONE_e : dComIfGs_getSelectEquipSword();
+    return dComIfGs_isItemFirstBit(dItemNo_WOOD_STICK_e) || (eq == dItemNo_WOOD_STICK_e) ||
+           dComIfGs_isItemFirstBit(dItemNo_SWORD_e) || (eq == dItemNo_SWORD_e) ||
+           dComIfGs_isItemFirstBit(dItemNo_MASTER_SWORD_e) || (eq == dItemNo_MASTER_SWORD_e) ||
+           dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) || (eq == dItemNo_LIGHT_SWORD_e);
 }
-static inline int add_vanilla_shield_slot(const CollectionVanillaSlotDef& def) {
-    return collectionlib_add_vanilla_slot(2, def);
+
+static bool starter_shield_unlocked() {
+    if (g_configCollectionKeepOrdonShield) {
+        return player_has_ordon_shield();
+    }
+    const u8 eq = custom_equip_active(CE_SHIELD) ? dItemNo_NONE_e : dComIfGs_getSelectEquipShield();
+    return dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) || (eq == dItemNo_WOOD_SHIELD_e);
 }
-static inline int add_vanilla_tunic_slot(const CollectionVanillaSlotDef& def) {
-    return collectionlib_add_vanilla_slot(3, def);
+
+// Wooden Sword, Ordon Shield and Ordon Clothes in front of the native items of their rows.
+// Without a model a slot equips the vanilla item itself; without a name / icon it shows the
+// game's own.
+static void register_starter_gear() {
+    if (!g_configCollectionStarterEquip) {
+        return;
+    }
+    get_slot(1, 1).insert({
+        .kind = CE_SWORD,
+        .baseItem = dItemNo_WOOD_STICK_e,
+        .unlocked = &starter_sword_unlocked,
+    });
+    get_slot(2, 1).insert({
+        .kind = CE_SHIELD,
+        .baseItem = dItemNo_WOOD_SHIELD_e,
+        .unlocked = &starter_shield_unlocked,
+    });
+
+    const bool linkle = is_mod_installed("com.ditrey.linkle");
+    get_slot(3, 1).insert({
+        .kind = CE_TUNIC,
+        .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
+        .description = linkle
+            ? "The clothes Linkle wore at the beginning of her journey in Ordon Village."
+            : "The clothes Link wore at the beginning of his journey in Ordon Village.",
+        .iconBti = linkle ? "textures/ordon_clothes_linkle.bti" : "textures/ordon_clothes.bti",
+        .baseItem = dItemNo_WEAR_CASUAL_e,
+    });
 }
 
 void register_custom_swords() {
@@ -94,48 +130,7 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
 
     collectionlib_set_register_callback([]() {
-        if (g_configCollectionStarterEquip) {
-            add_vanilla_sword_slot({
-                .unlocked = []() {
-                    if (!g_configCollectionStarterEquip) return false;
-                    const u8 eq = custom_equip_active(CE_SWORD) ? dItemNo_NONE_e : dComIfGs_getSelectEquipSword();
-                    return dComIfGs_isItemFirstBit(dItemNo_WOOD_STICK_e) || (eq == dItemNo_WOOD_STICK_e) ||
-                           dComIfGs_isItemFirstBit(dItemNo_SWORD_e) || (eq == dItemNo_SWORD_e) ||
-                           dComIfGs_isItemFirstBit(dItemNo_MASTER_SWORD_e) || (eq == dItemNo_MASTER_SWORD_e) ||
-                           dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e) || (eq == dItemNo_LIGHT_SWORD_e);
-                },
-                .equipped = []() { return dComIfGs_getSelectEquipSword() == dItemNo_WOOD_STICK_e; },
-            });
-        }
-
-        if (g_configCollectionStarterEquip) {
-            add_vanilla_shield_slot({
-                .unlocked = []() {
-                    if (!g_configCollectionStarterEquip) return false;
-                    if (g_configCollectionKeepOrdonShield) {
-                        return dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) ||
-                            dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e);
-                    }
-                    const u8 eq = custom_equip_active(CE_SHIELD) ? dItemNo_NONE_e : dComIfGs_getSelectEquipShield();
-                    return dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) || (eq == dItemNo_WOOD_SHIELD_e);
-                },
-                .equipped = []() { return dComIfGs_getSelectEquipShield() == dItemNo_WOOD_SHIELD_e; },
-            });
-        }
-
-        if (g_configCollectionStarterEquip) {
-            const bool linkle = is_mod_installed("com.ditrey.linkle");
-            add_vanilla_tunic_slot({
-                .unlocked = []() { return g_configCollectionStarterEquip; },
-                .equipped = []() { return dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e; },
-                .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
-                .description = linkle
-                    ? "The clothes Linkle wore at the beginning of her journey in Ordon Village."
-                    : "The clothes Link wore at the beginning of his journey in Ordon Village.",
-                .icon = get_ordon_clothes_texture(),
-            });
-        }
-
+        register_starter_gear();
         register_custom_swords();
         register_custom_shields();
         register_custom_tunics();
@@ -145,6 +140,12 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
 }
 
 void update_collection_menu(const LogService*, ModContext*) {
+    // A burnt Ordon Shield loses its item bit; kept, it stays owned so its slot can equip it.
+    if (g_configCollectionStarterEquip && g_configCollectionKeepOrdonShield &&
+        dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) &&
+        !dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {
+        dComIfGs_onItemFirstBit(dItemNo_WOOD_SHIELD_e);
+    }
     collectionlib_update();
 }
 

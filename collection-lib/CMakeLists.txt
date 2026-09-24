@@ -47,9 +47,25 @@ endif ()
 # the requirement also reaches the consuming mod target.
 target_compile_features(collection_lib PUBLIC cxx_std_20)
 
+# Older Dusklight headers declare J3DTexture::initGXTexObj, which the game does not export to
+# mods, so the library defines it (collection_lib.cpp). Newer ones name it loadGXTexObj and
+# the game exports it.
+set(_cl_j3d_texture_h "${DUSKLIGHT_DIR}/libs/JSystem/include/JSystem/J3DGraphBase/J3DTexture.h")
+set(_cl_define_init_gx_tex_obj ON)
+if (EXISTS "${_cl_j3d_texture_h}")
+    file(STRINGS "${_cl_j3d_texture_h}" _cl_init_gx_tex_obj_decl REGEX "void initGXTexObj\\(")
+    if (NOT _cl_init_gx_tex_obj_decl)
+        set(_cl_define_init_gx_tex_obj OFF)
+    endif ()
+endif ()
+if (_cl_define_init_gx_tex_obj)
+    target_compile_definitions(collection_lib PRIVATE CL_DEFINE_INIT_GX_TEX_OBJ=1)
+endif ()
+
 # The library ships its engine-facing code in one unity translation unit; make
-# sure consumers do not strip its service-import records (mirrors what mods do
-# for their own metadata records).
+# sure neither the compiler nor the consumer's linker strips its metadata
+# records (service imports, hooks) - mirrors what mods do for their own.
 if (MSVC)
+    target_compile_options(collection_lib PRIVATE "/Zc:inline-")
     target_link_options(collection_lib INTERFACE "/OPT:NOREF")
 endif ()

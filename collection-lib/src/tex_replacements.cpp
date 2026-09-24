@@ -1,20 +1,16 @@
 /*
- * User texture overrides for collection-lib's own textures.
+ * User texture overrides for icons the library loads from .bti files.
  *
  * Users can drop PNG files into <Dusklight data folder>/texture_replacements/
- * to override the mod's built-in collection textures, e.g.:
+ * to override a slot icon shipped in a mod's res/, named after the .bti:
  *
- *     ordon_clothes.png          overrides textures/ordon_clothes.bti
- *     ordon_clothes_linkle.png   overrides textures/ordon_clothes_linkle.bti
- *     ordonhero.png              overrides textures/clctres/ordonhero.bti
+ *     kokiri_sword.png           overrides textures/kokiri_sword.bti
  *
  * The user file always wins over the bundled texture, because the override is
- * applied by the mod itself when the texture is first loaded. PNGs with
- * different dimensions are scaled to the original texture size.
+ * applied when the texture is first loaded. PNGs with different dimensions are
+ * scaled to the original texture size.
  *
- * This file is compiled into the collection_lib unity translation unit
- * (included from collection_lib.cpp after collection_common.cpp), so it can
- * use g_modCtx / g_logSvc directly.
+ * Part of the collection_lib unity translation unit (collection_lib.cpp).
  */
 #include <algorithm>
 #include <cmath>
@@ -25,6 +21,7 @@
 #include <fstream>
 #include <new>
 #include <string>
+#include <vector>
 
 #include <mods/svc/host.h>
 
@@ -75,13 +72,14 @@ static void tex_rep_write_be32(u8* p, u32 v) {
 }
 
 static bool tex_rep_resolve_png_path(const char* resPath, std::filesystem::path& out) {
-    if (svc_host == nullptr || g_modCtx == nullptr ||
-        !SERVICE_HAS(svc_host, HostService, data_dir)) {
+    const HostService* host = cl_host_service();
+    if (host == nullptr || g_modCtx == nullptr ||
+        !SERVICE_HAS(host, HostService, data_dir)) {
         return false;
     }
 
     const char* dataDir = nullptr;
-    if (svc_host->data_dir(g_modCtx, &dataDir) != MOD_OK || dataDir == nullptr) {
+    if (host->data_dir(g_modCtx, &dataDir) != MOD_OK || dataDir == nullptr) {
         return false;
     }
 

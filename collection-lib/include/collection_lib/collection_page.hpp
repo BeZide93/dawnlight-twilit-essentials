@@ -1,10 +1,10 @@
 #pragma once
 
-// A Page is a full-screen layer next to the main item grid:
+// A Page is a full-screen layer next to the main item grid (R / L flips between them):
 //   cl::Page* p2 = new cl::Page();
 //   p2->add(cl::heart());
 //   p2->add(cl::fused_shadow());
-// Create pages before collectionlib_init()
+// Create pages before collectionlib_init().
 
 #include "JSystem/J2DGraph/J2DScreen.h"
 #include "JSystem/J2DGraph/J2DPane.h"
@@ -16,23 +16,26 @@ namespace cl {
 
 struct Element {
     u64 paneTag = 0;
-    u64 followerTag = 0;
+    u64 followerTag = 0;            // optional second pane that moves along (e.g. a backdrop)
     f32 followerDx = 0.0f;
     f32 followerDy = 0.0f;
 
-    bool hideOnMain = false;
+    bool hideOnMain = false;        // only visible while the page is shown
     bool selectable = true;
 
+    // The native grid cell this element is. The cell leaves the main grid (it is no longer
+    // selectable there and its grid slot is free for equipment), and selecting the element on
+    // the page shows the cell's native name and description.
     bool claimsCell = false;
     u8   cellX = 0, cellY = 0;
 
-    bool hasPos = false;
+    bool hasPos = false;            // explicit page position instead of the even spacing
     f32  posX = 0.0f, posY = 0.0f;
 };
 
-Element heart();
-Element fused_shadow();
-Element crystal();
+Element heart();          // Pieces of Heart ('heart_n', native cell 5/0)
+Element fused_shadow();   // Fused Shadow / Mirror of Twilight ('kamen_n' + 'modelbgn', native cell 6/0)
+Element crystal();        // placeholder: the vanilla layout has no crystal pane
 
 struct Page {
 public:

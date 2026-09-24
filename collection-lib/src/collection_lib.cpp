@@ -1,126 +1,32 @@
-#include <collection_lib/collection_lib.hpp>
+#include "collection_internal.hpp"
+
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 
+// The library is one translation unit.
 #include "collection_common.cpp"
 #include "tex_replacements.cpp"
 #include "custom_equip.cpp"
-#include "collection_page.cpp"
 #include "collection_layout.cpp"
+#include "collection_page.cpp"
+#include "collection_screen.cpp"
 #include "collection_nav.cpp"
 #include "collection_equip.cpp"
 
-extern const ResourceService* svc_resource;
+// Services the library uses itself, under its own names: a mod that imports the same
+// services as svc_resource / svc_host does not collide with them.
+IMPORT_OPTIONAL_SERVICE(ResourceService, cl_svc_resource);
+IMPORT_OPTIONAL_SERVICE(HostService, cl_svc_host);
 
-const ResourceService* cl_get_resource_service() {
-    return svc_resource;
-}
+const ResourceService* cl_resource_service() { return cl_svc_resource; }
+const HostService* cl_host_service() { return cl_svc_host; }
 
-struct VanillaSlotEntry {
-    u8 row, item;
-    CollectionVanillaSlotDef def;
-};
-static VanillaSlotEntry s_vanillaSlots[8] = {};
-static int s_vanillaSlotCount = 0;
-
-static int cl_add_vanilla_slot(u8 row, const CollectionVanillaSlotDef& def) {
-    if (def.unlocked == nullptr) {
-        return -1;
-    }
-    if (s_vanillaSlotCount >= 8) {
-        return -1;
-    }
-    s_vanillaSlots[s_vanillaSlotCount] = {row, 1, def};
-    return s_vanillaSlotCount++;
-}
-
-int collectionlib_add_vanilla_slot(u8 row, const CollectionVanillaSlotDef& def) { return cl_add_vanilla_slot(row, def); }
-
-int collectionlib_remove_slot(u8 row, u8 item) {
-    for (int i = 0; i < s_vanillaSlotCount;) {
-        if (s_vanillaSlots[i].row == row && s_vanillaSlots[i].item == item) {
-            for (int j = i; j < s_vanillaSlotCount - 1; j++) s_vanillaSlots[j] = s_vanillaSlots[j + 1];
-            s_vanillaSlotCount--;
-        } else {
-            i++;
-        }
-    }
-
-    for (int id = custom_equip_count() - 1; id >= 0; id--) {
-        const CustomEquipDef* d = custom_equip_get(id);
-        if (d == nullptr) continue;
-        const u8 r = d->kind == CE_SWORD ? 1 : d->kind == CE_SHIELD ? 2 : 3;
-        if (r == row && d->item == item) custom_equip_remove(id);
-    }
-
-    cl_remove_cell(row, item);
-    collectionlib_request_reload();
-    return 0;
-}
-
-int collectionlib_clear_all_slots() {
-    log_collect_info("clear_all_slots: wiping %d vanilla claims + %d custom slots", s_vanillaSlotCount, custom_equip_count());
-    s_vanillaSlotCount = 0;
-    custom_equip_reset_registry();
-    cl_set_vanilla_layout_hidden(true);
-    return 0;
-}
-
-int cl_vanilla_slot_count() { return s_vanillaSlotCount; }
-const CollectionVanillaSlotDef* cl_vanilla_slot_get(int i) { return &s_vanillaSlots[i].def; }
-u8 cl_vanilla_slot_row(int i) { return s_vanillaSlots[i].row; }
-u8 cl_vanilla_slot_item(int i) { return s_vanillaSlots[i].item; }
-
-bool cl_column_claimed(u8 row, u8 item) {
-    for (int i = 0; i < s_vanillaSlotCount; ++i) {
-        if (s_vanillaSlots[i].row == row && s_vanillaSlots[i].item == item) return true;
-    }
-    return false;
-}
-
-bool cl_column_occupied(u8 row, u8 item) {
-    if (cl_column_claimed(row, item)) return true;
-    for (int id = 0; id < custom_equip_count(); ++id) {
-        const CustomEquipDef* d = custom_equip_get(id);
-        if (d == nullptr) continue;
-        const u8 r = d->kind == CE_SWORD ? 1 : d->kind == CE_SHIELD ? 2 : 3;
-        if (r == row && d->item == item) return true;
-    }
-    return false;
-}
-
-bool cl_vanilla_slot_unlocked(u8 x, u8 y) {
-    for (int i = 0; i < s_vanillaSlotCount; ++i) {
-        const SlotCell c = grid_cell(s_vanillaSlots[i].row, s_vanillaSlots[i].item);
-        if (c.x == x && c.y == y) return s_vanillaSlots[i].def.unlocked != nullptr && s_vanillaSlots[i].def.unlocked();
-    }
-    return false;
-}
-
-bool cl_vanilla_slot_equipped(u8 x, u8 y) {
-    for (int i = 0; i < s_vanillaSlotCount; ++i) {
-        const SlotCell c = grid_cell(s_vanillaSlots[i].row, s_vanillaSlots[i].item);
-        if (c.x == x && c.y == y) return s_vanillaSlots[i].def.equipped != nullptr && s_vanillaSlots[i].def.equipped();
-    }
-    return false;
-}
-
-static void (*s_registerSlotsFn)() = nullptr;
-
-void collectionlib_set_register_callback(void (*fn)()) {
-    s_registerSlotsFn = fn;
-}
-
-void collectionlib_run_slot_registration() {
-    s_vanillaSlotCount = 0;
-    if (s_registerSlotsFn != nullptr) {
-        s_registerSlotsFn();
-    }
-}
+// ---------------------------------------------------------------------------
+// Policies
+// ---------------------------------------------------------------------------
 
 static bool (*s_unequipPolicy)() = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
-static bool (*s_starterSlotsPolicy)() = nullptr;
 
 void collectionlib_set_unequip_policy(bool (*fn)()) { s_unequipPolicy = fn; }
 void collectionlib_set_keep_ordon_shield_policy(bool (*fn)()) { s_keepOrdonShieldPolicy = fn; }
@@ -128,129 +34,38 @@ void collectionlib_set_keep_ordon_shield_policy(bool (*fn)()) { s_keepOrdonShiel
 bool cl_unequip_enabled() { return s_unequipPolicy != nullptr && s_unequipPolicy(); }
 bool cl_keep_ordon_shield_enabled() { return s_keepOrdonShieldPolicy != nullptr && s_keepOrdonShieldPolicy(); }
 
-CollectionSlot collectionlib_get_slot(u8 row, u8 item) {
-    if (row < 1 || row > 3 || item < 1 || item > 4) return CollectionSlot{};
-    return CollectionSlot{row, item};
-}
+// ---------------------------------------------------------------------------
+// B button icon of a custom sword
+// ---------------------------------------------------------------------------
 
-struct SlotMoveOp {
-    u8 row, fromItem, toItem;
-    bool active;
-};
-static SlotMoveOp s_slotMoves[16] = {};
+DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemB, CollectionLibItemBTextureHook);
 
-void collectionlib_reset_layout() {
-    for (int i = 0; i < 16; ++i) s_slotMoves[i].active = false;
-}
+static void cl_item_b_texture_post(ModContext*, void* args, void*, void*) {
+    const int id = custom_equip_active_id(CE_SWORD);
+    if (id < 0) return;
+    ResTIMG* icon = custom_equip_icon(id);
+    if (icon == nullptr) return;
 
-SlotMoveOp* cl_slot_moves() { return s_slotMoves; }
+    dMeter2Draw_c* draw = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
+    if (draw == nullptr) return;
 
-bool collectionlib_move_slot(CollectionSlot from, u8 newItem) {
-    if (from.row == 0 || from.item == 0 || newItem < 1 || newItem > 4) return false;
-    if (newItem == from.item) return true;
-    for (int i = 0; i < 16; ++i) {
-        if (s_slotMoves[i].active && s_slotMoves[i].row == from.row &&
-            s_slotMoves[i].fromItem == from.item) {
-            s_slotMoves[i].toItem = newItem;
-            return true;
-        }
+    if (draw->mpItemB != nullptr && draw->mpItemB->getPanePtr() != nullptr) {
+        static_cast<J2DPicture*>(draw->mpItemB->getPanePtr())->changeTexture(icon, 0);
     }
-    for (int i = 0; i < 16; ++i) {
-        if (!s_slotMoves[i].active) {
-            s_slotMoves[i] = {from.row, from.item, newItem, true};
-            return true;
-        }
+    if (draw->mpItemBPane != nullptr) {
+        draw->mpItemBPane->hide();
     }
-    return false;
 }
 
-int collectionlib_add_sword_slot(u8 item, const CustomEquipDef& def) {
-    CustomEquipDef d = def;
-    d.kind = CE_SWORD;
-    d.item = item;
-    return custom_equip_register(d);
+static void refresh_item_b_texture() {
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    dMeter2Draw_c* draw = meter != nullptr ? meter->getMeterDrawPtr() : nullptr;
+    if (draw != nullptr) draw->changeTextureItemB(dComIfGs_getSelectEquipSword());
 }
 
-int collectionlib_add_shield_slot(u8 item, const CustomEquipDef& def) {
-    CustomEquipDef d = def;
-    d.kind = CE_SHIELD;
-    d.item = item;
-    return custom_equip_register(d);
-}
-
-int collectionlib_add_tunic_slot(u8 item, const CustomEquipDef& def) {
-    CustomEquipDef d = def;
-    d.kind = CE_TUNIC;
-    d.item = item;
-    return custom_equip_register(d);
-}
-
-static u8 cl_next_free_column(u8 row) {
-    const u8 first = cl_vanilla_layout_hidden() ? 1 : ((row == 3) ? 5 : 4);
-    for (u8 col = first; col <= 12; ++col) {
-        if (!cl_item_exists(row, col)) return col;
-    }
-    return 0;
-}
-
-int collectionlib_add_next_sword_slot(const CustomEquipDef& def) {
-    const u8 col = cl_next_free_column(1);
-    const int id = (col != 0) ? collectionlib_add_sword_slot(col, def) : -1;
-    return id;
-}
-
-int collectionlib_add_next_shield_slot(const CustomEquipDef& def) {
-    const u8 col = cl_next_free_column(2);
-    const int id = (col != 0) ? collectionlib_add_shield_slot(col, def) : -1;
-    return id;
-}
-
-int collectionlib_add_next_tunic_slot(const CustomEquipDef& def) {
-    const u8 col = cl_next_free_column(3);
-    const int id = (col != 0) ? collectionlib_add_tunic_slot(col, def) : -1;
-    return id;
-}
-
-CollectionSlotRef collectionlib_get_slot_ref(u8 row, u8 item) {
-    return CollectionSlotRef{row, item};
-}
-
-bool CollectionSlotRef::remove() const {
-    if (row == 0 || item == 0) return false;
-    collectionlib_remove_slot(row, item);
-    return true;
-}
-
-bool CollectionSlotRef::move(u8 newRow, u8 newItem) const {
-    if (row == 0 || item == 0) return false;
-    if (newRow != row) return false;
-    return collectionlib_move_slot(CollectionSlot{row, item}, newItem);
-}
-
-bool CollectionSlotRef::exists() const {
-    return cl_item_exists(row, item);
-}
-
-int CollectionSlotRef::replace(const CustomEquipDef& def) const {
-    if (row == 0 || item == 0) return -1;
-    return collectionlib_add_slot_override(row, item, def);
-}
-
-int collectionlib_add_slot_override(u8 row, u8 item, const CustomEquipDef& def) {
-    if (row < 1 || row > 3 || item == 0) return -1;
-    cl_clear_removed_cell(row, item);
-    CustomEquipDef d = def;
-    d.kind = (row == 1) ? CE_SWORD : (row == 2) ? CE_SHIELD : CE_TUNIC;
-    d.item = item;
-    return custom_equip_register(d);
-}
-
-Slot get_slot(u8 row, u8 item) {
-    return Slot{row, item};
-}
-void collectionlib_request_reload() {
-    s_needReloadCollect = true;
-}
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
 
 static void ensure_collection_heap_capacity() {
     static bool s_done = false;
@@ -280,26 +95,6 @@ static void ensure_collection_heap_capacity() {
     }
 }
 
-DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemB, CollectionLibItemBTextureHook);
-
-static void cl_item_b_texture_post(ModContext*, void* args, void*, void*) {
-    if (!custom_equip_active(CE_SWORD)) return;
-    const int id = custom_equip_active_id(CE_SWORD);
-    if (id < 0) return;
-    ResTIMG* icon = custom_equip_icon(id);
-    if (icon == nullptr) return;
-
-    dMeter2Draw_c* draw = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
-    if (draw == nullptr) return;
-
-    if (draw->mpItemB != nullptr && draw->mpItemB->getPanePtr() != nullptr) {
-        static_cast<J2DPicture*>(draw->mpItemB->getPanePtr())->changeTexture(icon, 0);
-    }
-    if (draw->mpItemBPane != nullptr) {
-        draw->mpItemBPane->hide();
-    }
-}
-
 ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_svc,
                              const SaveService* save_svc, ModContext* mod_ctx, ModError*) {
     ensure_collection_heap_capacity();
@@ -311,64 +106,11 @@ ModResult collectionlib_init(const HookService* hook_svc, const LogService* log_
     custom_equip_restore_from_save();
 
     if (hook_svc != nullptr) {
-        mods::hook::add_pre<DaAlinkCreateHook>(hook_svc, on_da_alink_create_pre);
-        mods::hook::add_post<DaAlinkCreateHook>(hook_svc, on_da_alink_create_post);
-        mods::hook::add_pre<DaAlinkChangeLinkHook>(hook_svc, on_da_alink_change_link_pre);
-        mods::hook::add_post<DaAlinkChangeLinkHook>(hook_svc, on_da_alink_change_link_post);
-        mods::hook::add_post<DaAlinkChangeWolfHook>(hook_svc, on_da_alink_change_wolf_post);
-        mods::hook::add_pre<SetSelectEquipClothesHook>(hook_svc, on_set_select_equip_clothes_pre);
-        mods::hook::add_pre<Meter2InfoSetShieldHook>(hook_svc, on_meter2_info_set_shield_pre);
-        mods::hook::add_pre<MsgFlowGetCheckHook>(hook_svc, on_msg_flow_get_check_pre);
-
-        mods::hook::add_post<MenuCollect2DCreateHook>(hook_svc, on_menu_collect_2d_create_post);
-        mods::hook::add_pre<MenuCollect2DDeleteHook>(hook_svc, on_menu_collect_2d_delete_pre);
-        mods::hook::add_pre<ScreenSetHook>(hook_svc, on_screen_set_pre);
-        mods::hook::add_post<ScreenSetHook>(hook_svc, on_screen_set_post);
-        mods::hook::add_post<MenuCollectWideHook>(hook_svc, on_menu_collect_wide_post);
-        mods::hook::add_post<MenuCollect2DMoveHook>(hook_svc, on_menu_collect_2d_move_post);
-        mods::hook::add_post<MwExecuteHook>(hook_svc, on_mw_execute_post);
-
-        ModResult r_getItemTag = mods::hook::add_pre<GetItemTagHook>(hook_svc, on_get_item_tag_pre);
-        ModResult r_pointerWait = mods::hook::add_pre<PointerWaitHook>(hook_svc, on_pointer_wait_pre);
-
-        if (hook_svc->resolve) {
-            void* hitPaneAddr = nullptr;
-            ModResult r_resolve = hook_svc->resolve(mod_ctx, kHitPaneMangledName, &hitPaneAddr, nullptr);
-            if (r_resolve == MOD_OK && hitPaneAddr) {
-                g_hitPaneFn = reinterpret_cast<bool (*)(CPaneMgr*, f32)>(hitPaneAddr);
-            }
-
-            void* setHoverTargetAddr = nullptr;
-            ModResult r_resolve3 = hook_svc->resolve(mod_ctx, kSetHoverTargetMangledName, &setHoverTargetAddr, nullptr);
-            if (r_resolve3 == MOD_OK && setHoverTargetAddr) {
-                g_setHoverTargetFn = reinterpret_cast<void (*)(u16)>(setHoverTargetAddr);
-            }
-
-            void* peekClickAddr = nullptr;
-            ModResult r_resolve4 = hook_svc->resolve(mod_ctx, kPeekClickMangledName, &peekClickAddr, nullptr);
-            if (r_resolve4 == MOD_OK && peekClickAddr) {
-                g_peekClickFn = reinterpret_cast<bool (*)()>(peekClickAddr);
-            }
-        }
-        mods::hook::add_pre<CursorPosSetHook>(hook_svc, on_cursor_pos_set_pre);
-        mods::hook::add_pre<CursorMoveHook>(hook_svc, on_cursor_move_pre);
-        ModResult r_pointerWaitReplace = mods::hook::replace<PointerWaitHook>(hook_svc, on_pointer_wait_replace);
-        mods::hook::add_post<PointerWaitHook>(hook_svc, on_pointer_wait_post);
-        mods::hook::add_pre<SetItemNameStringHook>(hook_svc, on_set_item_name_string_pre);
-        mods::hook::add_pre<GetStringKanjiHook>(hook_svc, on_get_string_kanji_pre);
-        mods::hook::add_pre<MsgStringGetStringLocalHook>(hook_svc, on_get_string_local_pre);
-        mods::hook::add_pre<WaitProcHook>(hook_svc, on_wait_proc_pre);
-        mods::hook::add_post<WaitProcHook>(hook_svc, on_wait_proc_post);
-        mods::hook::add_pre<PointerActivateCurrentHook>(hook_svc, on_pointer_activate_current_pre);
-        mods::hook::add_pre<ChangeSwordHook>(hook_svc, on_change_sword_pre);
-        mods::hook::add_pre<ChangeShieldHook>(hook_svc, on_change_shield_pre);
-        mods::hook::add_pre<ChangeClotheHook>(hook_svc, on_change_clothes_pre);
-        mods::hook::add_pre<SetEquipFrameColorSwordHook>(hook_svc, on_set_equip_frame_sword_pre);
-        mods::hook::add_pre<SetEquipFrameColorShieldHook>(hook_svc, on_set_equip_frame_shield_pre);
-        mods::hook::add_pre<SetEquipFrameColorClothesHook>(hook_svc, on_set_equip_frame_clothes_pre);
-
+        screen_install_hooks(hook_svc);
+        nav_install_hooks(hook_svc);
+        equip_install_hooks(hook_svc);
         custom_equip_init_hooks(hook_svc, g_saveSvc);
-        mods::hook::add_post<CollectionLibItemBTextureHook>(hook_svc, cl_item_b_texture_post);
+        CL_HOOK_POST(CollectionLibItemBTextureHook, cl_item_b_texture_post);
     }
     return MOD_OK;
 }
@@ -380,72 +122,50 @@ void collectionlib_update() {
 
 void collectionlib_shutdown() {
     collection_page_teardown();
+    screen_shutdown();
     custom_equip_shutdown();
-    slot_registry_clear();
-    s_picTunagiKen2 = nullptr;
-    s_picTunagiTate2 = nullptr;
-    s_picTunagiFuku3 = nullptr;
-    s_cachedScreen = nullptr;
-    s_capturedScreen = nullptr;
+    // The meter must not keep showing an icon that is freed next.
+    refresh_item_b_texture();
+    cl_free_icons();
     s_currentCollect2D = nullptr;
 }
 
-struct RowPanePair {
-    u64 iconTag;
-    u64 frameTag;
-};
+// ---------------------------------------------------------------------------
+// Mod-link compat
+//
+// Older SDK headers declare J3DTexture::initGXTexObj out-of-line on PC, but the game binary
+// does not export it to mods; the model code needs it. The body mirrors the in-tree one.
+// Newer versions export it as loadGXTexObj (CMakeLists.txt tells them apart).
+// ---------------------------------------------------------------------------
 
-static RowPanePair cl_vanilla_pane(u8 row, u8 item) {
-    static const RowPanePair kRow1[5] = {{0, 0}, {MULTI_CHAR('ken_n0'), MULTI_CHAR('ken_g_0')}, {0, 0},
-                                         {MULTI_CHAR('ken_n1'), MULTI_CHAR('ken_g_1')}, {MULTI_CHAR('heart_n'), 0}};
-    static const RowPanePair kRow2[5] = {{0, 0}, {MULTI_CHAR('tate_n0'), MULTI_CHAR('tate_g_0')}, {0, 0},
-                                         {MULTI_CHAR('tate_n1'), MULTI_CHAR('tate_g_1')}, {0, 0}};
-    static const RowPanePair kRow3[5] = {{0, 0}, {0, 0}, {MULTI_CHAR('fuku_n0'), MULTI_CHAR('fuku_g_0')},
-                                         {MULTI_CHAR('fuku_n1'), MULTI_CHAR('fuku_g_1')}, {MULTI_CHAR('fuku_n2'), MULTI_CHAR('fuku_g_2')}};
-    if (row < 1 || row > 3 || item < 1 || item > 4) return {0, 0};
-    if (row == 1) return kRow1[item];
-    if (row == 2) return kRow2[item];
-    return kRow3[item];
-}
+#if CL_DEFINE_INIT_GX_TEX_OBJ
+#include <dolphin/gx.h>
+#include "JSystem/J3DGraphBase/J3DTexture.h"
 
-void cl_apply_slot_moves(J2DScreen* screen, f32 baseX, f32 dx) {
-    if (screen == nullptr || dx <= 0.0f) return;
+void J3DTexture::initGXTexObj(u16 idx) {
+    J3D_ASSERT_RANGE(29, idx < mNum);
+    ResTIMG* timg = getResTIMG(idx);
 
-    const f32 frameDx = -24.5f;
-    for (int i = 0; i < 16; ++i) {
-        if (!s_slotMoves[i].active) continue;
-        const u8 row = s_slotMoves[i].row;
-        const u8 from = s_slotMoves[i].fromItem;
-        const u8 to = s_slotMoves[i].toItem;
-        if (from == 0 || to == 0 || from == to) continue;
+    GXTlutObj& tlutObj = mpTlutObj[idx];
+    TGXTexObj& texObj = mpTexObj[idx];
 
-        const f32 toX = baseX + static_cast<f32>(to - 1) * dx;
-        const f32 toFrameX = toX + frameDx;
-        const f32 rowY = collection_row_icon_y(static_cast<u8>(row - 1));
-
-        const SlotCell srcCell = grid_cell(row, from);
-        const SlotSpec* src = slot_at(srcCell.x, srcCell.y);
-        J2DPane* icon = nullptr;
-        J2DPane* frame = nullptr;
-        if (src != nullptr && src->icon != nullptr) {
-            icon = src->icon;
-            frame = src->frame;
-        } else {
-            const RowPanePair vp = cl_vanilla_pane(row, from);
-            if (vp.iconTag != 0) icon = screen->search(vp.iconTag);
-            if (vp.frameTag != 0) frame = screen->search(vp.frameTag);
-        }
-        if (icon == nullptr) continue;
-
-        set_pane_pos(icon, toX, rowY);
-        if (frame != nullptr) set_pane_pos(frame, toFrameX, rowY);
-
-        const SlotCell dstCell = grid_cell(row, to);
-        const SlotSpec* dst = slot_at(dstCell.x, dstCell.y);
-        if (dst != nullptr && dst->icon != nullptr) {
-            const f32 fromX = baseX + static_cast<f32>(from - 1) * dx;
-            set_pane_pos(dst->icon, fromX, rowY);
-            if (dst->frame != nullptr) set_pane_pos(dst->frame, fromX + frameDx, rowY);
-        }
+    if (!timg->indexTexture) {
+        GXInitTexObj(&texObj, mpImgDataPtr[idx], timg->width, timg->height,
+                     (GXTexFmt)timg->format, (GXTexWrapMode)timg->wrapS, (GXTexWrapMode)timg->wrapT,
+                     timg->mipmapEnabled);
+    } else {
+        GXInitTexObjCI(&texObj, mpImgDataPtr[idx], timg->width, timg->height,
+                       (GXCITexFmt)timg->format, (GXTexWrapMode)timg->wrapS,
+                       (GXTexWrapMode)timg->wrapT, timg->mipmapEnabled, GX_TLUT0);
+        GXInitTlutObj(&tlutObj, mpTlutDataPtr[idx], (GXTlutFmt)timg->colorFormat,
+                      timg->numColors);
     }
+
+    const f32 kLODClampScale = 1.0f / 8.0f;
+    const f32 kLODBiasScale = 1.0f / 100.0f;
+    GXInitTexObjLOD(&texObj, (GXTexFilter)timg->minFilter, (GXTexFilter)timg->magFilter,
+                    timg->minLOD * kLODClampScale, timg->maxLOD * kLODClampScale,
+                    timg->LODBias * kLODBiasScale, timg->biasClamp, timg->doEdgeLOD,
+                    (GXAnisotropy)timg->maxAnisotropy);
 }
+#endif

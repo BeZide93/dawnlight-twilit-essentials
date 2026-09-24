@@ -37,6 +37,7 @@ extern const SaveService* svc_save;
 #include "d/d_item_data.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_meter2_info.h"
+#include "d/d_pane_class.h"
 #include "d/d_s_play.h"
 #include "d/d_msg_object.h"
 #include "d/d_save.h"

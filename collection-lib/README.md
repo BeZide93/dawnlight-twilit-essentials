@@ -1,22 +1,26 @@
 # dusklight-collection-lib
 
-A reusable [Dusklight](https://github.com/TwilitRealm/dusklight) library that extends the
-Twilight Princess pause **Collection screen** with custom equippable slots. It is linked
-into a mod statically at build time - there is no runtime dependency and no extra
-`.dusk` file to install.
+A reusable [Dusklight](https://github.com/TwilitRealm/dusklight) library that lets a mod
+change the equipment rows of the Twilight Princess pause **Collection screen**: add slots,
+move slots, replace slots. It is linked into a mod statically at build time - there is no
+runtime dependency and no extra `.dusk` file to install.
+
+The library does not redraw the screen. Without any change the rows stay exactly native,
+and native items keep the game's own code (visibility, names, equipping, equipped frame)
+wherever they end up. Only what a mod adds or replaces is handled by the library, with the
+native rules: empty frames stay visible, the cursor walks the columns like the native one,
+A equips, the frame of the worn item lights up, mouse pointer support comes with it.
 
 What it gives a mod:
 
-- Custom **swords, shields and tunics** as new equippable slots on the Collection screen,
-  including model swap on Link (in-game and on the menu doll), frame highlights,
-  descriptions, cursor navigation and save persistence.
-- Optional vanilla starter slots: **wooden sword, Ordon clothes and Ordon shield**,
-  including the "shield never leaves the collection" behavior.
-- An optional **Unequip** action for equip slots.
-- Full-screen **pages** next to the item grid via a small `cl::Page` API (R/L to
-  flip) - e.g. Heart Container + Mirror of Twilight on a second page, which
-  frees up the right side of the item grid for custom slots.
-- Widescreen layout handling and safe system-heap expansion for the menu's resources.
+- Custom **swords, shields and clothes** as equippable slots, including model swap on
+  Link, the B button icon, names, descriptions and save persistence.
+- Slots **without a model**: a custom icon/name for a vanilla item (e.g. Ordon Clothes).
+- Full-screen **pages** next to the item grid via a small `cl::Page` API (R/L to flip) -
+  e.g. Pieces of Heart and Fused Shadow on a second page, which frees the sword row's
+  columns 3 and 4.
+- Optional, non-native behavior behind predicates: **Unequip** with A, keeping the Ordon
+  Shield for item checks.
 
 > One library instance owns the Collection screen. Do **not** install two mods that both
 > embed this library: each copy would add its own slots and hooks independently, and the
@@ -57,6 +61,9 @@ add_mod(my_mod
 target_link_libraries(my_mod PRIVATE collection_lib)
 ```
 
+The library imports the services it needs itself (resource, host); the mod passes the
+hook, log and save services to `collectionlib_init`.
+
 ### 3. Use it in code
 
 ```cpp
@@ -73,13 +80,15 @@ IMPORT_OPTIONAL_SERVICE(SaveService, svc_save);
 DEFINE_MOD();
 
 static void register_slots() {
-    collectionlib_register_slot({
-        CE_SWORD, 5,
+    collectionlib_add_next_sword_slot({
+        CE_SWORD, 0,
         "Gilded Sword",
         "A blade with a golden shine.",
-        "textures/clctres/gilded.bti",
+        "textures/clctres/gilded.bti", nullptr,
         "models/clctres/AlSwords.arc", 0x0007,
         0x0008,   // sheath model, 0xFFFF = none
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+        dItemNo_MASTER_SWORD_e,   // plays like the Master Sword
     });
 }
 
@@ -87,14 +96,9 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     if (svc_hook == nullptr) {
         return MOD_ERROR;
     }
-
-    // Optional feature policies (the library holds no settings of its own;
-    // your mod owns its config and injects the decisions as predicates).
-
-    // The library (re-)runs this callback on init and on every collection
-    // screen build - registration is idempotent per (kind, item).
+    // The library runs this on init and before every build of the Collection screen,
+    // always starting from the native layout.
     collectionlib_set_register_callback(&register_slots);
-
     return collectionlib_init(svc_hook, svc_log, svc_save, mod_ctx);
 }
 
@@ -109,146 +113,122 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
 }
 ```
 
-A complete, buildable mod lives in [examples/basic](examples/basic).
+## The layout
 
-## Creating slots
+Rows and columns are 1-based. Columns count like the native screen:
 
-Every slot is one `collectionlib_register_slot({...})` call with a `CustomEquipDef`.
-The `kind` picks the row, `item` the 1-based column within that row:
+| Row | Native columns |
+| --- | --- |
+| 1 (swords) | 1 = Ordon Sword (Wooden Sword before it), 2 = Master Sword |
+| 2 (shields) | 1 = Wooden Shield (Ordon Shield before it), 2 = Hylian Shield |
+| 3 (clothes) | 1 = Hero's Clothes, 2 = Zora Armor, 3 = Magic Armor |
+
+A row holds up to 6 columns. The sword row gets 4 while the Pieces of Heart and the Fused
+Shadow use its spare grid cells; put those on a page (see below) for all 6. Rows longer than
+the native ones push the heart and the Fused Shadow to the right.
+
+```cpp
+get_slot(1, 1).replace(kokiriSword);     // custom item instead of the Ordon Sword
+get_slot(1, 3).replace(goronSword);      // fills the empty column 3
+collectionlib_add_next_sword_slot(fairy);  // first empty column (4)
+get_slot(2, 1).insert(ordonShield);      // column 1, the native shields move to 2 and 3
+get_slot(3, 3).move(3, 1);               // Magic Armor to column 1, Hero's Clothes to 3
+get_slot(2, 2).remove();                 // no Hylian Shield in the grid
+collectionlib_clear_all_slots();         // empty all rows, native items included
+```
+
+All layout calls belong into the register callback. Registration is idempotent per
+(row, column): a slot registered again keeps its loaded model, icon and equipped state;
+slots the callback stops registering are removed. After changing what the callback does
+at runtime (e.g. a config toggle), call `collectionlib_request_reload()`.
+
+## Custom slots
+
+A slot is a `CustomEquipDef`:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `CE_SWORD`, `CE_SHIELD` or `CE_TUNIC` |
-| `item` | 1-based column inside the row (continues after the vanilla slots) |
-| `name`, `description` | Slot label and description text |
-| `iconBti` | `.bti` icon texture, path relative to your mod's `res/` |
-| `modelArc`, `modelFileId` | Model archive (`.arc`) and the file id of the BMD inside it |
+| `kind`, `item` | Row and column; set by the layout function you call |
+| `name`, `description` | Slot label and description text; `name = nullptr` shows the game's own (translated) name and description of `baseItem` |
+| `iconBti` | `.bti` icon in your mod's `res/` - or the archive holding `iconArcFileId`; `nullptr` shows the game's own icon of `baseItem` (Wooden / Ordon Sword, Ordon / Wooden Shield) |
+| `iconArcFileId` | File id of the icon inside that archive (`nullptr` = `iconBti` is a .bti). An archive that is not in `res/` is looked up in the game's `Layout/clctres.arc`, overlay patches included |
+| `modelArc`, `modelFileId` | Model archive and the file id of the BMD inside it; `nullptr` = no model swap |
 | `sheathFileId` | Swords only: file id of the sheath model, `0xFFFF` for none |
 | `offX/Y/Z`, `rotX/Y/Z`, `scale` | Model fit-up relative to the vanilla equip model |
-| `baseClothes` | Tunics only: vanilla clothes model the custom body grafts onto |
-| `padColor` | Tunics only: gamepad LED color override (`0xRRGGBB`), `0xFFFFFFFF` = vanilla |
+| `baseItem` | The vanilla item the slot stands in for, equipped underneath so it plays like it (swords/shields: stats and abilities, clothes: also the body the model grafts on) |
+| `padColor` | Clothes only: gamepad LED color override (`0xRRGGBB`), `0xFFFFFFFF` = vanilla |
 | `unlocked` | Optional `bool(*)()` gate; `nullptr` = always available |
+| `ironBootsHideFeet` | Clothes only: the Iron Boots hide the model's own boots (default, like vanilla); `false` keeps the feet visible |
 
-Slot registration is **idempotent** per `(kind, item)` - the library invokes your
-registration callback again every time the collection screen is built, so the same
-`collectionlib_register_slot` calls may run many times.
-
-Icons and models are loaded through the Dusklight `ResourceService` and therefore always
-resolve inside the **owning mod's** `res/` directory. Example layout:
-
-```
-my-mod/
-  res/
-    textures/clctres/my_sword.bti
-    models/clctres/MySword.arc
-  src/main.cpp
-  mod.json
-```
-
-## Moving and adding slots
-
-Slots live in rows (1 = swords, 2 = shields, 3 = tunics); positions are 1-based,
-counted left-to-right. Moves are recorded once and re-applied on every collection
-screen build:
+A slot without a model is simply its `baseItem` with the slot's icon and name - equipping
+it equips the vanilla item, and it shows as worn while that item is. Such a slot gives the
+item a column of its own, the way the starter gear gets one:
 
 ```cpp
-CollectionSlot master = collectionlib_get_slot(1, 2);   // second sword slot
-collectionlib_move_slot(master, 3);                     // ...move it to column 3
-collectionlib_add_sword_slot(1, woodenSwordDef);        // ...and add one at column 1
-collectionlib_reset_layout();                            // ...or drop all moves again
+CustomEquipDef woodenSword{};
+woodenSword.baseItem = dItemNo_WOOD_STICK_e;   // name, icon and model: none of its own
+get_slot(1, 1).insert(woodenSword);            // Wooden Sword, Ordon Sword, Master Sword
 ```
 
-### Vanilla first columns (starter gear)
+- A Wooden Sword or Ordon Shield slot takes that item out of the native cell that shows it
+  before the Ordon Sword / Wooden Shield is owned.
+- With a slot based on the Ordon Clothes, the clothes row stays while they are worn (the game
+  empties it, having no cell to switch back from them), and Link keeps them on reload.
 
-Each row's first column hosts a vanilla cell (wooden sword, ordon shield, ordon
-clothes). A mod claims it and owns its visibility entirely:
-
-```cpp
-collectionlib_add_vanilla_sword_slot({.unlocked = &my_unlocked_gate});
-collectionlib_add_vanilla_shield_slot({.unlocked = &my_unlocked_gate});
-collectionlib_add_vanilla_tunic_slot({.unlocked = &my_unlocked_gate,
-    .name = "Ordon Clothes", .icon = get_ordon_clothes_texture()});
-```
-
-Claimed columns also drive the row layout: claimed first column = the row keeps
-all columns; unclaimed = the row shifts one slot left.
-
-### Auto-placement (multi-mod friendly)
-
-Hardcoding a column means two mods can claim the same slot. To queue into the
-next free column of a row instead, use the `add_next_*` variants - they scan
-the row for the first column not claimed by another registered slot:
-
-```cpp
-collectionlib_add_next_sword_slot(def);   // first free sword column, -1 if full
-```
-
-Rows are 4 columns wide; when every column is taken the call returns `-1`.
-
-`collectionlib_move_slot` visually translates the slot's panes; the recorded move is
-re-applied on rebuilds, widescreen relayouts included. `collectionlib_add_*_slot`
-register a custom equip slot at an explicit column.
+Icons are copied once and stay valid for the whole session, so the B button can keep a
+custom sword icon outside the menu. Icons from `.bti` files can be overridden by the user
+with PNGs in `<Dusklight data folder>/texture_replacements/` (named after the `.bti`).
 
 ## Pages (second screen)
 
-Pages are opt-in: without one, the Collection screen behaves like vanilla. Create a
-page **before** `collectionlib_init` and add elements to it:
+Pages are opt-in: without one, the Collection screen behaves like vanilla. Create a page
+**before** `collectionlib_init` and add elements to it:
 
 ```cpp
 cl::Page* p2 = new cl::Page();
-p2->add(cl::heart());          // Heart Container ('heart_n'), owns its grid cell (6,0)
-p2->add(cl::fused_shadow());   // Mirror of Twilight ('kamen_n' + 'modelbgn' backdrop)
+p2->add(cl::heart());          // Pieces of Heart ('heart_n'), native cell 5/0
+p2->add(cl::fused_shadow());   // Fused Shadow / Mirror ('kamen_n' + 'modelbgn'), native cell 6/0
 ```
 
-`add()` re-parents the element's pane into the page: the pane is removed from its
-current parent and appended to the page's own container (this happens when the next
-collection screen is built - before that, elements are just pane tags). From then on
-the page owns the pane's position:
+`add()` re-parents the element's pane into the page when the screen is built; from then
+on the page owns its position:
 
-- **R** slides the page in from the right, **L** back to the item grid (the grid
-  fades and slides away; the Link doll stays on all pages). Every transition is
-  animated - page to page slides the outgoing page left while the incoming one
-  enters from the right.
-- Default layout: elements are spaced evenly around the page anchor
-  (`set_anchor` / `set_spacing`), so the two lines above reproduce the classic
-  second page - heart and mirror side by side, roughly screen-centred.
-- The page has its own cursor (left/right between selectable elements, down drops
-  into the item grid, walking up pops back onto the page).
-- `cl::heart()` claims the heart's vanilla grid cell (6,0): the cell is not
-  selectable on the main page while the page exists, and becomes a normal grid
-  slot again when the page is removed.
-- `cl::crystal()` is a placeholder: the vanilla layout has no crystal pane, so
-  until its tag points at a pane that exists, the element stays invisible,
-  occupies **no** layout slot (the others close the gap) and is skipped by the
-  page cursor. Adjust the tag inside `cl::crystal()` once a crystal pane exists.
+- **R** slides the page in from the right, **L** back to the item grid (the equipment
+  rows fade and slide away; the Link doll stays on all pages).
+- Elements are spaced evenly around the page anchor (`set_anchor` / `set_spacing`).
+- The page has its own cursor (left/right between elements, down or past the first
+  element drops into the item rows, walking up from the item rows goes back onto the
+  page). Selecting an element that claims a native cell shows that cell's native name
+  and description.
+- An element with `claimsCell` takes its native cell out of the main grid, so the sword
+  row can use it: with `cl::heart()` and `cl::fused_shadow()` it holds 6 columns instead of 4.
+- `cl::crystal()` is a placeholder: the vanilla layout has no crystal pane, so the element
+  stays invisible and is skipped until its tag points at a pane that exists.
 
-Custom elements: brace-initialize a `cl::Element` (pane tag + optional follower
-pane, `hideOnMain`, `claimsCell`, explicit position) and `add()` it - see
+Custom elements: brace-initialize a `cl::Element` (pane tag, optional follower pane,
+`hideOnMain`, `claimsCell`, explicit position) and `add()` it - see
 `include/collection_lib/collection_page.hpp`.
 
 ## API overview
 
 | Function | Purpose |
 | --- | --- |
-| `collectionlib_set_register_callback(void (*)())` | Provide the function that registers all of the mod's slots |
-| `collectionlib_register_slot(const CustomEquipDef&)` | Add a custom slot; returns the slot id (call from the callback) |
-| `collectionlib_add_sword_slot / add_shield_slot / add_tunic_slot` | Register a slot at an explicit column |
-| `collectionlib_add_next_sword_slot / add_next_shield_slot / add_next_tunic_slot` | Register at the first free column of the row |
-| `collectionlib_get_slot(row, item)` | Resolve a slot position to a handle |
-| `collectionlib_move_slot(CollectionSlot, newItem)` | Move a slot to another column (recorded, replayed per build) |
-| `collectionlib_reset_layout()` | Drop all recorded slot moves |
-| `collectionlib_slot_count()` | Number of registered slots |
-| `collectionlib_activate(int id)` | Equip the custom slot with this id |
-| `collectionlib_clear(CustomEquipKind)` | Unequip back to vanilla gear for a kind |
-| `collectionlib_active(CustomEquipKind)` | Is a custom item equipped for this kind? |
-| `collectionlib_active_id(CustomEquipKind)` | Active slot id of a kind, or `-1` |
-| `collectionlib_request_reload()` | Rebuild the Collection screen on next open (after changes) |
+| `collectionlib_set_register_callback(void (*)())` | The function that describes the layout |
+| `get_slot(row, item).replace(def)` / `collectionlib_add_*_slot(item, def)` | Custom item in a column (replaces what is there) |
+| `get_slot(row, item).insert(def)` | Custom item in a column, what is there moves one column right |
+| `collectionlib_add_next_sword/shield/tunic_slot(def)` | Custom item in the first empty column, `-1` if the row is full |
+| `collectionlib_register_slot(def)` | Row from `def.kind`, column `def.item` (0 = next free) |
+| `get_slot(row, item).move(row, newItem)` / `collectionlib_move_slot` | Swap two columns of a row |
+| `get_slot(row, item).remove()` / `collectionlib_remove_slot` | Empty a column |
+| `collectionlib_clear_all_slots()` / `collectionlib_reset_layout()` | Empty all rows / back to native |
+| `collectionlib_slot_count()` | Number of custom slots |
+| `collectionlib_activate(id)` / `collectionlib_clear(kind)` | Equip a custom slot / back to vanilla gear |
+| `collectionlib_active(kind)` / `collectionlib_active_id(kind)` | Is / which custom slot is worn |
+| `collectionlib_request_reload()` | Rebuild the Collection screen if it is open |
+| `custom_equip_set_suppressed(bool)` / `custom_equip_restore_from_save()` | Take custom items off (e.g. for a challenge mode) / put the saved ones back on |
+| `collectionlib_set_unequip_policy(fn)` | A on the worn sword/shield unequips it (not native) |
+| `collectionlib_set_keep_ordon_shield_policy(fn)` | Item checks keep counting the Ordon Shield (not native) |
 | `collectionlib_init / update / shutdown` | Lifecycle |
-
-The full types (`CustomEquipDef`, `SlotSpec`, `SlotText`, `SlotAuto`, ...) are documented
-inline in `include/collection_lib/collection_common.hpp` and
-`include/collection_lib/custom_equip.hpp`. For hand-placed slots with custom positions and
-navigation, build a `SlotSpec` with `autoLayout` enabled - see the header comments.
 
 ## Building the example
 

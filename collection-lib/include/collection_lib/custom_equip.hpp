@@ -3,6 +3,9 @@
 #include <cstddef>
 #include "collection_common.hpp"
 
+// Icon inside an archive: file id of a .bti in the archive named by CustomEquipDef::iconBti.
+// Resolved against the mod's res/ first, then against the game's collection archive
+// (Layout/clctres.arc), so overlay-patched game archives work too.
 struct IconArcRef {
     u16 fileId = 0xFFFF;
     IconArcRef() = default;
@@ -12,12 +15,14 @@ struct IconArcRef {
 
 struct CustomEquipDef {
     CustomEquipKind kind;
-    u8          item;
-    const char* name;
+    u8          item;               // column; set by the layout functions
+    const char* name;               // nullptr = the game's name and description of baseItem
     const char* description;
-    const char* iconBti;
+    const char* iconBti;            // .bti path in res/, or the archive holding iconArcFileId;
+                                    // nullptr = the game's icon of baseItem (Wooden / Ordon
+                                    // Sword, Ordon / Wooden Shield)
     IconArcRef  iconArcFileId;
-    const char* modelArc;
+    const char* modelArc;           // nullptr = no model swap: the slot only equips baseItem
     u32         modelFileId;
     u32         sheathFileId = 0xFFFF; // SWORD only
 
@@ -25,15 +30,22 @@ struct CustomEquipDef {
     f32 rotX = 0.0f, rotY = 0.0f, rotZ = 0.0f;   // degrees
     f32 scale = 1.0f;
 
-    u8 baseClothes = dItemNo_WEAR_KOKIRI_e; // TUNIC only: base skeleton
+    // The vanilla item this slot stands in for. Equipping the slot equips it underneath, so
+    // gameplay (damage, Zora diving, ...) behaves like that item:
+    //   swords:  WOOD_STICK / SWORD / MASTER_SWORD (Light Sword once owned)
+    //   shields: WOOD_SHIELD / SHIELD / HYLIA_SHIELD
+    //   clothes: WEAR_CASUAL / WEAR_KOKIRI / WEAR_ZORA / ARMOR (the body the model grafts on)
+    // dItemNo_NONE_e: swords/shields keep whatever is equipped, clothes use WEAR_KOKIRI.
+    u8 baseItem = dItemNo_NONE_e;
     unsigned int padColor = 0xFFFFFFFFu;    // TUNIC only: 0xRRGGBB, 0xFFFFFFFF = vanilla logic
 
     bool (*unlocked)() = nullptr;   // nullptr = always available
+
+    // TUNIC only: the Iron Boots hide the model's own boots, like on every vanilla outfit.
+    // false keeps them visible (models whose feet the Iron Boots do not cover).
+    bool ironBootsHideFeet = true;
 };
 
-void custom_equip_reset_registry();
-void custom_equip_remove(int id);
-int  custom_equip_register(const CustomEquipDef& def);
 int  custom_equip_count();
 const CustomEquipDef* custom_equip_get(int id);
 
@@ -41,27 +53,8 @@ void custom_equip_set_suppressed(bool suppressed);
 bool custom_equip_is_suppressed();
 void custom_equip_activate(int id);
 void custom_equip_deactivate(CustomEquipKind kind);
-void custom_equip_deactivate_all();
 void custom_equip_clear(CustomEquipKind kind);
 bool custom_equip_active(CustomEquipKind kind);
 int  custom_equip_active_id(CustomEquipKind kind);
-
-void custom_equip_on_equip(dMenu_Collect2D_c* collect2D);
-bool custom_equip_is_unlocked(u8 x, u8 y);
-bool custom_equip_is_equipped(u8 x, u8 y);
-
-ResTIMG* custom_equip_icon(int id);
-
-u64 custom_equip_icon_tag(int id);
-u64 custom_equip_pic_tag(int id);
-u64 custom_equip_frame_tag(int id);
-
-struct SaveService;
-class daAlink_c;
-void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* save_svc);
-void custom_equip_update();
-void custom_equip_shutdown();
+// Equip the custom items the save file had on again (e.g. after custom_equip_set_suppressed).
 void custom_equip_restore_from_save();
-void custom_equip_before_link_rebuild();
-void custom_equip_on_alink_created(daAlink_c* a);
-void custom_equip_set_link_model_wolf(bool isWolf);

@@ -1,20 +1,16 @@
-#include "collection_page.hpp"
+#include "collection_internal.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
-#include "d/d_menu_window.h"
-#include "d/d_select_cursor.h"
-#include "d/d_lib.h"
-#include "Z2AudioLib/Z2SeMgr.h"
 
 #include <chrono>
 #include <cmath>
 
 static cl::Page* s_pages[cl::Page::kMaxPages] = {};
 static int  s_pageCount = 0;
-static int  s_target = 0;
-static f32  s_strip = 0.0f;
-static int  s_p2sel = -1;
+static int  s_target = 0;     // page the strip moves to (0 = item grid)
+static f32  s_strip = 0.0f;   // eased position of the strip, in pages
+static int  s_p2sel = -1;     // selected element of the target page, -1 = cursor in the item rows
 
 alignas(8) static unsigned char s_pagePool[sizeof(cl::Page) * cl::Page::kMaxPages];
 static bool s_pagePoolUsed[cl::Page::kMaxPages] = {};
@@ -75,7 +71,7 @@ cl::Element cl::heart() {
     e.paneTag = MULTI_CHAR('heart_n');
     e.hideOnMain = true;
     e.claimsCell = true;
-    e.cellX = 6;
+    e.cellX = 5;
     e.cellY = 0;
     return e;
 }
@@ -84,15 +80,16 @@ cl::Element cl::fused_shadow() {
     Element e;
     e.paneTag = MULTI_CHAR('kamen_n');
     e.followerTag = MULTI_CHAR('modelbgn');
-
     e.followerDx = -13.0f;
     e.followerDy = -22.0f;
+    e.claimsCell = true;
+    e.cellX = 6;
+    e.cellY = 0;
     return e;
 }
 
 cl::Element cl::crystal() {
     Element e;
-
     e.paneTag = MULTI_CHAR('crystal');
     return e;
 }
@@ -159,59 +156,33 @@ static void element_slot(const cl::Page* pg, int slotIndex, int slotCount, const
     y = pg->mAnchorY;
 }
 
-static const u64 kGridTags[] = {
-    MULTI_CHAR('ken_n0'),  MULTI_CHAR('ken_n1'),
-    MULTI_CHAR('tate_n0'), MULTI_CHAR('tate_n1'),
-    MULTI_CHAR('fuku_n0'), MULTI_CHAR('fuku_n1'), MULTI_CHAR('fuku_n2'),
-    MULTI_CHAR('ken_g_0'),  MULTI_CHAR('ken_g_1'),
-    MULTI_CHAR('tate_g_0'), MULTI_CHAR('tate_g_1'),
-    MULTI_CHAR('fuku_g_0'), MULTI_CHAR('fuku_g_1'), MULTI_CHAR('fuku_g_2'),
-    MULTI_CHAR('tunagi00'), MULTI_CHAR('tunagi01'), MULTI_CHAR('tunagi03'),
-    MULTI_CHAR('tunagi04'), MULTI_CHAR('tunagi06'), MULTI_CHAR('tunagi07'),
-    MULTI_CHAR('tunagi08'),
-    MULTI_CHAR('tuna_k2'), MULTI_CHAR('tuna_t2'), MULTI_CHAR('tuna_f3'),
-    MULTI_CHAR('ken_mid'), MULTI_CHAR('tate_mid'), MULTI_CHAR('fuku_ord'),
-    MULTI_CHAR('ken_gm'),  MULTI_CHAR('tate_gm'),  MULTI_CHAR('fuku_go'),
-    MULTI_CHAR('fuku_her'),
-};
+static constexpr int kMaxGridPanes = 96;
 
-static void fade_grid(J2DScreen* s, u8 a) {
-    for (u64 tag : kGridTags) {
-        if (J2DPane* p = s->search(tag)) p->setAlpha(a);
-    }
-    for (int i = 0; i < slot_count(); i++) {
-        const SlotSpec* slot = slot_get(i);
-        if (slot && slot->autoLayout.on) {
-            if (slot->icon) slot->icon->setAlpha(a);
-            if (slot->frame) slot->frame->setAlpha(a);
-        }
-    }
-    for (int i = 0; i < s_customConnectorCount; i++) {
-        if (s_customConnectors[i]) s_customConnectors[i]->setAlpha(a);
+static void fade_grid(u8 a) {
+    J2DPane* panes[kMaxGridPanes];
+    const int n = screen_grid_panes(panes, kMaxGridPanes);
+    for (int i = 0; i < n; i++) panes[i]->setAlpha(a);
+}
+
+// While sliding, grid panes left of the grid frame would cross the Link doll: hide them.
+static constexpr f32 kGridFrameLeftEdge = -117.5f;
+
+static void grid_mask_beyond_frame() {
+    J2DPane* panes[kMaxGridPanes];
+    const int n = screen_grid_panes(panes, kMaxGridPanes);
+    for (int i = 0; i < n; i++) {
+        if (panes[i]->getTranslateX() < kGridFrameLeftEdge) panes[i]->hide();
     }
 }
 
-static constexpr f32 kGridFrameLeftEdge = -117.5f;
-
-static void grid_mask_beyond_frame(J2DScreen* s, f32 dx) {
-    for (u64 tag : kGridTags) {
-        J2DPane* p = s->search(tag);
-        if (p != nullptr && p->getTranslateX() + dx < kGridFrameLeftEdge) p->hide();
-    }
-    for (int i = 0; i < slot_count(); i++) {
-        const SlotSpec* slot = slot_get(i);
-        if (slot && slot->autoLayout.on) {
-            if (slot->icon != nullptr && slot->icon->getTranslateX() + dx < kGridFrameLeftEdge) {
-                slot->icon->hide();
-            }
-            if (slot->frame != nullptr && slot->frame->getTranslateX() + dx < kGridFrameLeftEdge) {
-                slot->frame->hide();
-            }
-        }
-    }
-    for (int i = 0; i < s_customConnectorCount; i++) {
-        J2DPane* p = s_customConnectors[i];
-        if (p != nullptr && p->getTranslateX() + dx < kGridFrameLeftEdge) p->hide();
+// Name / description of the selected page element (native text of the cell it claims).
+static void show_element_name(dMenu_Collect2D_c* c) {
+    if (s_target < 1 || s_p2sel < 0) return;
+    const cl::Element& e = s_pages[s_target - 1]->mElements[s_p2sel];
+    if (e.claimsCell) {
+        screen_show_native_name(c, e.cellX, e.cellY);
+    } else {
+        c->setItemNameStringNull();
     }
 }
 
@@ -247,10 +218,6 @@ static void ease_strip(f32 tgt) {
 }
 
 void collection_page_update() {
-    if (!is_collection_menu_enabled()) {
-        collection_page_reset();
-        return;
-    }
     ease_strip(static_cast<f32>(s_target));
 }
 
@@ -267,7 +234,6 @@ bool collection_page_on_page() {
 }
 
 f32 collection_page_grid_dx() {
-
     const f32 t = (s_strip < 1.0f) ? s_strip : 1.0f;
     return -smoothstep(t) * page_slide_w();
 }
@@ -285,6 +251,8 @@ bool collection_page_claims_cell(u8 x, u8 y) {
 
 static void page_attach(cl::Page* pg, J2DPane* pane, int k, J2DScreen* screen) {
     if (pg->mRootPane == nullptr) {
+        // The root sits where the pane's old parents put it, so page coordinates keep
+        // meaning what they meant in the layout.
         f32 tx = 0.0f, ty = 0.0f;
         for (J2DPane* p = pane->getParentPane();
              p != nullptr && p != static_cast<J2DPane*>(screen);
@@ -310,7 +278,6 @@ void collection_page_sync_screen(J2DScreen* screen) {
     for (int k = 0; k < s_pageCount; k++) {
         cl::Page* pg = s_pages[k];
         if (pg->mScreen != screen) {
-
             pg->mRootPane = nullptr;
             for (int i = 0; i < cl::Page::kMaxElements; i++) {
                 pg->mPrimaryPane[i] = nullptr;
@@ -339,8 +306,24 @@ void collection_page_sync_screen(J2DScreen* screen) {
     }
 }
 
-void collection_page_handle_input(dMenu_Collect2D_c* collect2D) {
-    if (collect2D == nullptr || s_pageCount == 0) return;
+// Back on the item grid: cursor, name and A button of the grid cell again.
+static void return_to_grid(dMenu_Collect2D_c* c) {
+    c->cursorPosSet();
+    c->setItemNameString(c->mCursorX, c->mCursorY);
+}
+
+bool collection_page_focus_first(dMenu_Collect2D_c* c) {
+    if (c == nullptr || s_target < 1) return false;
+    const int first = first_navigable(s_pages[s_target - 1]);
+    if (first < 0) return false;
+    s_p2sel = first;
+    Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    show_element_name(c);
+    return true;
+}
+
+void collection_page_handle_input(dMenu_Collect2D_c* c) {
+    if (c == nullptr || s_pageCount == 0) return;
 
     const int prevPage = s_target;
     if (mDoCPd_c::getTrigR(PAD_1)) {
@@ -349,89 +332,79 @@ void collection_page_handle_input(dMenu_Collect2D_c* collect2D) {
         if (s_target > 0) s_target--;
     }
     if (s_target != prevPage) {
+        if (c->mpDrawCursor != nullptr) c->mpDrawCursor->onPlayAllAnime();
+        Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CHANGE_WINDOW, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+
         if (s_target >= 1) {
             s_p2sel = first_navigable(s_pages[s_target - 1]);
+            if (s_p2sel >= 0) {
+                show_element_name(c);
+            } else if (c->mCursorY < kClRows) {
+                // Nothing to select on this page: the grid cursor would sit off screen.
+                c->mCursorX = 3;
+                c->mCursorY = 3;
+                return_to_grid(c);
+            }
         } else {
             s_p2sel = -1;
+            return_to_grid(c);
         }
-        collect2D->setItemNameStringNull();
-
-        if (collect2D->mpDrawCursor != nullptr) {
-            collect2D->mpDrawCursor->onPlayAllAnime();
-        }
-        Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CHANGE_WINDOW, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        return;
     }
 
     const bool onTarget = s_target >= 1 &&
                           s_strip - static_cast<f32>(s_target) < 0.5f &&
                           static_cast<f32>(s_target) - s_strip < 0.5f;
-    if (onTarget && s_p2sel >= 0) {
-        const int prevSel = s_p2sel;
-        bool right = dMw_RIGHT_TRIGGER() != 0;
-        bool left  = dMw_LEFT_TRIGGER() != 0;
-        bool down  = dMw_DOWN_TRIGGER() != 0;
-        if (collect2D->mpStick) {
-            collect2D->mpStick->checkTrigger();
-            if (collect2D->mpStick->checkRightTrigger()) right = true;
-            if (collect2D->mpStick->checkLeftTrigger())  left  = true;
-            if (collect2D->mpStick->checkDownTrigger())  down  = true;
-        }
+    if (!onTarget || s_p2sel < 0) return;
 
-        const cl::Page* pg = s_pages[s_target - 1];
+    bool right = dMw_RIGHT_TRIGGER() != 0;
+    bool left = dMw_LEFT_TRIGGER() != 0;
+    bool down = dMw_DOWN_TRIGGER() != 0;
+    if (c->mpStick != nullptr) {
+        c->mpStick->checkTrigger();
+        if (c->mpStick->checkRightTrigger()) right = true;
+        if (c->mpStick->checkLeftTrigger()) left = true;
+        if (c->mpStick->checkDownTrigger()) down = true;
+    }
 
-        auto drop_to_grid = [&]() {
+    const cl::Page* pg = s_pages[s_target - 1];
+    const int prevSel = s_p2sel;
+
+    if (right) {
+        const int nxt = next_navigable(pg, s_p2sel);
+        if (nxt >= 0) s_p2sel = nxt;
+    } else if (left || down) {
+        const int prv = left ? prev_navigable(pg, s_p2sel) : -1;
+        if (prv >= 0) {
+            s_p2sel = prv;
+        } else {
+            // Off the page into the item rows below.
             s_p2sel = -1;
-            collect2D->mCursorX = 3;
-            collect2D->mCursorY = 3;
-            collect2D->cursorPosSet();
-            collect2D->setItemNameString(3, 3);
+            c->mCursorX = 3;
+            c->mCursorY = 3;
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
-        };
-
-        if (right) {
-            const int nxt = next_navigable(pg, s_p2sel);
-            if (nxt >= 0) s_p2sel = nxt;
-        } else if (left) {
-            const int prv = prev_navigable(pg, s_p2sel);
-            if (prv >= 0) s_p2sel = prv;
-            else { drop_to_grid(); return; }
-        } else if (down) {
-            drop_to_grid();
+            return_to_grid(c);
             return;
         }
+    }
 
-        if (s_p2sel != prevSel) {
-            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
-        }
+    if (s_p2sel != prevSel) {
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        show_element_name(c);
     }
 }
 
-void collection_page_apply(dMenu_Collect2D_c* collect2D) {
-    if (collect2D == nullptr || collect2D->mpScreen == nullptr || s_pageCount == 0) return;
-    J2DScreen* screen = collect2D->mpScreen;
-
-    {
-        JKRExpHeap* heap = collect2D->mpHeap;
-        JKRHeap* oldHeap = (heap != nullptr) ? mDoExt_setCurrentHeap(heap) : nullptr;
-        collection_page_sync_screen(screen);
-        if (oldHeap != nullptr) {
-            mDoExt_setCurrentHeap(oldHeap);
-        }
-    }
+void collection_page_apply(dMenu_Collect2D_c* c) {
+    if (c == nullptr || c->mpScreen == nullptr || s_pageCount == 0) return;
 
     ease_strip(static_cast<f32>(s_target));
 
     const f32 p = smoothstep((s_strip < 1.0f) ? s_strip : 1.0f);
     const bool showPage = p > 0.001f;
-    const f32 dTgt = static_cast<f32>(s_target) - s_strip;
-    const bool onTargetPage = dTgt > -1.0f && dTgt < 1.0f;
 
     const f32 fadeT = smoothstep(p < 0.6f ? p / 0.6f : 1.0f);
-    fade_grid(screen, static_cast<u8>(255.0f * (1.0f - fadeT)));
-
-    if (s_strip > 0.001f) {
-        grid_mask_beyond_frame(screen, collection_page_grid_dx());
-    }
+    fade_grid(static_cast<u8>(255.0f * (1.0f - fadeT)));
+    if (s_strip > 0.001f) grid_mask_beyond_frame();
 
     for (int k = 0; k < s_pageCount; k++) {
         cl::Page* pg = s_pages[k];
@@ -454,52 +427,28 @@ void collection_page_apply(dMenu_Collect2D_c* collect2D) {
             f32 x, y;
             element_slot(pg, slotIndex, slotCount, e, x, y);
             slotIndex++;
-            set_pane_pos(prim, x + pageSlide, y);
-            if (foll != nullptr) set_pane_pos(foll, x + e.followerDx + pageSlide, y + e.followerDy);
+            cl_set_pane_pos(prim, x + pageSlide, y);
+            if (foll != nullptr) cl_set_pane_pos(foll, x + e.followerDx + pageSlide, y + e.followerDy);
 
             if (e.hideOnMain) {
                 if (pageVisible) prim->show(); else prim->hide();
             }
         }
-
-        for (int i = 0; i < pg->mElementCount; i++) {
-            const cl::Element& e = pg->mElements[i];
-            if (!e.claimsCell || slot_at(e.cellX, e.cellY) != nullptr) continue;
-            collect2D->field_0x22d[e.cellX][e.cellY] = 0;
-            if (!pageVisible && collect2D->mCursorX == e.cellX && collect2D->mCursorY == e.cellY) {
-                if (e.cellX > 0) collect2D->mCursorX = static_cast<u8>(e.cellX - 1);
-            }
-        }
     }
 
-    if (showPage && s_target >= 1 && s_p2sel >= 0) {
-        collect2D->setItemNameStringNull();
-
+    if (showPage && s_target >= 1 && s_p2sel >= 0 && c->mpDrawCursor != nullptr) {
         const cl::Page* pg = s_pages[s_target - 1];
-        if (collect2D->mpDrawCursor && pg != nullptr && s_p2sel < pg->mElementCount) {
-            J2DPane* sel = pg->mPrimaryPane[s_p2sel];
-            if (sel != nullptr) {
-                collect2D->mpDrawCursor->setAlphaRate(1.0f);
-                collect2D->mpDrawCursor->setPos(sel->getTranslateX(), sel->getTranslateY(), sel, false);
-                collect2D->mpDrawCursor->setParam(1.0f, 1.0f, 0.1f, 0.7f, 0.7f);
-            }
-        }
-    } else if (showPage && s_target >= 1 && s_p2sel < 0 && onTargetPage && collect2D->mCursorY <= 2) {
-
-        cl::Page* pg = s_pages[s_target - 1];
-        const int first = first_navigable(pg);
-        if (first >= 0) {
-            s_p2sel = first;
-            const cl::Element& e = pg->mElements[first];
-            if (e.claimsCell) {
-                collect2D->mCursorX = e.cellX;
-                collect2D->mCursorY = e.cellY;
+        J2DPane* sel = s_p2sel < pg->mElementCount ? pg->mPrimaryPane[s_p2sel] : nullptr;
+        if (sel != nullptr) {
+            const cl::Element& e = pg->mElements[s_p2sel];
+            const Vec pos = cl_pane_global_center(sel);
+            c->mpDrawCursor->setAlphaRate(1.0f);
+            c->mpDrawCursor->setPos(pos.x, pos.y, sel, false);
+            if (e.claimsCell && e.cellX == 6 && e.cellY == 0) {
+                c->mpDrawCursor->setParam(0.6f, 0.85f, 0.03f, 0.6f, 0.6f);   // native fused-shadow cursor
             } else {
-                collect2D->mCursorX = 6;
-                collect2D->mCursorY = 0;
+                c->mpDrawCursor->setParam(1.0f, 1.0f, 0.1f, 0.7f, 0.7f);
             }
-            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
     }
-
 }
