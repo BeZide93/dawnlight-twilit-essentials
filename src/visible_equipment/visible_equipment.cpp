@@ -152,6 +152,34 @@ static bool isInWarpVisual(daAlink_c *alink) {
          proc == daAlink_c::PROC_DUNGEON_WARP_SCN_START || proc == daAlink_c::PROC_TW_GATE;
 }
 
+static bool isModelWarpMaterialOn(J3DModel *model) {
+  if (model == nullptr) {
+    return false;
+  }
+  J3DModelData *modelData = model->getModelData();
+  if (modelData == nullptr || modelData->getMaterialNum() == 0) {
+    return false;
+  }
+  J3DMaterial *material = modelData->getMaterialNodePointer(0);
+  J3DTevBlock *tevBlock = (material != nullptr) ? material->getTevBlock() : nullptr;
+  if (tevBlock == nullptr || tevBlock->getTevStageNum() == 0) {
+    return false;
+  }
+  J3DTevOrder *tevorder = tevBlock->getTevOrder(tevBlock->getTevStageNum() - 1);
+  return tevorder != nullptr && tevorder->getTexMap() == 3;
+}
+
+static bool isLinkWarpMaterialOn(daAlink_c *alink) {
+  if (alink == nullptr) {
+    return false;
+  }
+  if (alink->mProcID == daAlink_c::PROC_WARP) {
+    return true;
+  }
+  return alink->mProcID == daAlink_c::PROC_TOOL_DEMO && alink->mProcVar2.field_0x300c != 0 &&
+         isModelWarpMaterialOn(alink->mSwordModel);
+}
+
 static MtxP getBoneMtx(daAlink_c *alink, const char *boneName) {
   if (alink == nullptr || alink->mpLinkModel == nullptr || boneName == nullptr) {
     return nullptr;
@@ -1349,7 +1377,7 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
     }
   }
 
-  const bool inWarp = alink->mProcID == daAlink_c::PROC_WARP;
+  const bool inWarp = isLinkWarpMaterialOn(alink);
 
   J3DModel *lanternModel = alink->mpKanteraModel;
   bool lanternShaderReady = ensureLanternWarpCapability(lanternModel);
