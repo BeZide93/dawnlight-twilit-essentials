@@ -3391,8 +3391,11 @@ static void update_zant_instant_fight() {
         const bool inWater = link->checkModeFlg(0x40000) ||
                              link->mWaterY > link->current.pos.y + 20.0f;
         if (z->mFightPhase == daB_ZANT_c::PHASE_OI) {
-            if (!link->checkEquipHeavyBoots()) {
+            if (!s_oiBootsDone && !link->checkEquipHeavyBoots()) {
                 link->setHeavyBoots(1);
+                if (link->checkEquipHeavyBoots()) {
+                    s_oiBootsDone = true;
+                }
             }
         } else if (z->mFightPhase == daB_ZANT_c::PHASE_MK && link->checkEquipHeavyBoots() && !inWater) {
             link->setHeavyBoots(0);
