@@ -238,7 +238,12 @@ f32 collection_page_grid_dx() {
     return -smoothstep(t) * page_slide_w();
 }
 
+static bool pages_enabled() {
+    return s_pageCount > 0 && !cl_hd_layout_requested();
+}
+
 bool collection_page_claims_cell(u8 x, u8 y) {
+    if (!pages_enabled()) return false;
     for (int k = 0; k < s_pageCount; k++) {
         const cl::Page* pg = s_pages[k];
         for (int i = 0; i < pg->mElementCount; i++) {
@@ -274,7 +279,7 @@ static void page_attach(cl::Page* pg, J2DPane* pane, int k, J2DScreen* screen) {
 }
 
 void collection_page_sync_screen(J2DScreen* screen) {
-    if (screen == nullptr) return;
+    if (screen == nullptr || !pages_enabled()) return;
     for (int k = 0; k < s_pageCount; k++) {
         cl::Page* pg = s_pages[k];
         if (pg->mScreen != screen) {
@@ -323,7 +328,7 @@ bool collection_page_focus_first(dMenu_Collect2D_c* c) {
 }
 
 void collection_page_handle_input(dMenu_Collect2D_c* c) {
-    if (c == nullptr || s_pageCount == 0) return;
+    if (c == nullptr || !pages_enabled()) return;
 
     const int prevPage = s_target;
     if (mDoCPd_c::getTrigR(PAD_1)) {
@@ -395,7 +400,7 @@ void collection_page_handle_input(dMenu_Collect2D_c* c) {
 }
 
 void collection_page_apply(dMenu_Collect2D_c* c) {
-    if (c == nullptr || c->mpScreen == nullptr || s_pageCount == 0) return;
+    if (c == nullptr || c->mpScreen == nullptr || !pages_enabled()) return;
 
     ease_strip(static_cast<f32>(s_target));
 

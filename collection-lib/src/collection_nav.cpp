@@ -87,6 +87,26 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
     if (!screen_active(c) || c->mpStick == nullptr) return HOOK_CONTINUE;
 
+    if (screen_hd_active()) {
+        c->mpStick->checkTrigger();
+        int dir;
+        if (c->mpStick->checkRightTrigger()) {
+            dir = 1;
+        } else if (c->mpStick->checkLeftTrigger()) {
+            dir = 0;
+        } else if (c->mpStick->checkUpTrigger()) {
+            dir = 2;
+        } else if (c->mpStick->checkDownTrigger()) {
+            dir = 3;
+        } else {
+            return HOOK_SKIP_ORIGINAL;
+        }
+        u8 tx = kNone;
+        u8 ty = kNone;
+        if (hd_nav_target(c, dir, &tx, &ty)) move_cursor(c, tx, ty);
+        return HOOK_SKIP_ORIGINAL;
+    }
+
     s_moveFromX = c->mCursorX;
     s_moveFromY = c->mCursorY;
     // With a page shown the equipment rows are off screen; the item rows move natively.
@@ -195,7 +215,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
 void on_cursor_move_post(ModContext*, void* args, void*, void*) {
     if (args == nullptr) return;
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
-    if (!screen_active(c)) return;
+    if (!screen_active(c) || screen_hd_active()) return;
 
     const bool enteredGrid = s_moveFromY >= kClRows && c->mCursorY < kClRows;
 
@@ -457,7 +477,7 @@ void nav_install_hooks(const HookService* hook_svc) {
     CL_HOOK_POST(PointerWaitHook, on_pointer_wait_post);
 
     CL_HOOK_PRE(GetItemTagHook, on_get_item_tag_pre);
-    CL_HOOK_PRE(CursorMoveHook, on_cursor_move_pre);
+    CL_HOOK_PRE_PRIO(CursorMoveHook, on_cursor_move_pre, kClBeforeOtherMods);
     CL_HOOK_POST(CursorMoveHook, on_cursor_move_post);
     CL_HOOK_PRE(CursorPosSetHook, on_cursor_pos_set_pre);
     CL_HOOK_PRE(GetStringKanjiHook, on_get_string_kanji_pre);

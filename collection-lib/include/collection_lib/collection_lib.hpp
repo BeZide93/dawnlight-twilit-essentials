@@ -101,3 +101,5 @@ inline int  collectionlib_active_id(CustomEquipKind kind) { return custom_equip_
 void collectionlib_set_unequip_policy(bool (*fn)());
 // Item checks in message flows treat the Ordon Shield as still owned once collected.
 void collectionlib_set_keep_ordon_shield_policy(bool (*fn)());
+
+void collectionlib_set_hd_layout_policy(bool (*fn)());

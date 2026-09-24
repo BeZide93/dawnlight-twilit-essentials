@@ -10,6 +10,7 @@
 #include "collection_layout.cpp"
 #include "collection_page.cpp"
 #include "collection_screen.cpp"
+#include "collection_hd.cpp"
 #include "collection_nav.cpp"
 #include "collection_equip.cpp"
 
@@ -27,12 +28,15 @@ const HostService* cl_host_service() { return cl_svc_host; }
 
 static bool (*s_unequipPolicy)() = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
+static bool (*s_hdLayoutPolicy)() = nullptr;
 
 void collectionlib_set_unequip_policy(bool (*fn)()) { s_unequipPolicy = fn; }
 void collectionlib_set_keep_ordon_shield_policy(bool (*fn)()) { s_keepOrdonShieldPolicy = fn; }
+void collectionlib_set_hd_layout_policy(bool (*fn)()) { s_hdLayoutPolicy = fn; }
 
 bool cl_unequip_enabled() { return s_unequipPolicy != nullptr && s_unequipPolicy(); }
 bool cl_keep_ordon_shield_enabled() { return s_keepOrdonShieldPolicy != nullptr && s_keepOrdonShieldPolicy(); }
+bool cl_hd_layout_requested() { return s_hdLayoutPolicy != nullptr && s_hdLayoutPolicy(); }
 
 // ---------------------------------------------------------------------------
 // B button icon of a custom sword

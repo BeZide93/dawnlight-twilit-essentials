@@ -19,7 +19,8 @@ namespace {
 
 using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
 
-std::string mod_enabled_cvar_name(std::string_view id) {
+// The host's config key of a mod's var: "mod.<id with '.' -> '_' and '_' -> '__'>.<name>".
+std::string mod_cvar_name(std::string_view id, std::string_view var) {
     std::string name = "mod.";
     for (const char c : id) {
         if (c == '.') {
@@ -30,7 +31,8 @@ std::string mod_enabled_cvar_name(std::string_view id) {
             name.push_back(c);
         }
     }
-    name.append(".enabled");
+    name.push_back('.');
+    name.append(var);
     return name;
 }
 
@@ -50,11 +52,15 @@ GetConfigVarFn host_get_config_var() {
 
 }  // namespace
 
-bool is_mod_installed(std::string_view id) {
+bool is_mod_enabled(std::string_view id) {
+    return mod_config_bool(id, "enabled", false);
+}
+
+bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback) {
     const auto getVar = host_get_config_var();
-    if (getVar == nullptr) return false;
-    const auto* var = getVar(mod_enabled_cvar_name(id));
-    return var != nullptr && static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue();
+    if (getVar == nullptr) return fallback;
+    const auto* var = getVar(mod_cvar_name(modId, name));
+    return var != nullptr ? static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue() : fallback;
 }
 
 static void normalizeArcName(const char* src, char* dst, size_t dstSize) {

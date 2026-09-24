@@ -10,6 +10,14 @@ bool g_configCollectionOrdonHeroAlways = false;
 
 static cl::Page* s_ordonHeroPage = nullptr;
 
+constexpr const char* kLinkleModId = "com.ditrey.linkle";
+constexpr const char* kTwilightHdModId = "org.twilight.hd_hud";
+
+// Twilight HD builds its own Collection screen while its "TPHD Collection Screen" setting is on.
+static bool twilight_hd_collection_active() {
+    return is_mod_enabled(kTwilightHdModId) && mod_config_bool(kTwilightHdModId, "collection-screen", true);
+}
+
 static bool player_has_hero_clothes() {
     return dComIfGs_isCollectClothes(KOKIRI_CLOTHES_FLAG) ||
            dComIfGs_isItemFirstBit(dItemNo_WEAR_KOKIRI_e);
@@ -67,7 +75,7 @@ static void register_starter_gear() {
         .unlocked = &starter_shield_unlocked,
     });
 
-    const bool linkle = is_mod_installed("com.ditrey.linkle");
+    const bool linkle = is_mod_enabled(kLinkleModId);
     get_slot(3, 1).insert({
         .kind = CE_TUNIC,
         .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
@@ -128,6 +136,7 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     sync_collection_ordon_hero_page();
 
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
+    collectionlib_set_hd_layout_policy(&twilight_hd_collection_active);
 
     collectionlib_set_register_callback([]() {
         register_starter_gear();

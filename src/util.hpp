@@ -26,4 +26,7 @@ void renderModelAtMtx(J3DModel* model, MtxP mtx, mDoExt_bckAnm* bck = nullptr);
 
 void ensure_system_heap_capacity();
 
-bool is_mod_installed(std::string_view id);
+// Is the mod with this id enabled in the mod list?
+bool is_mod_enabled(std::string_view id);
+// A bool setting another mod registered (its config var `name`), `fallback` when it has none.
+bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback);

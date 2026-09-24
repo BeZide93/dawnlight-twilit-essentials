@@ -22,6 +22,7 @@ DEFINE_HOOK(&dMenu_Collect2D_c::menuCollectWide, MenuCollectWideHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::setEquipItemFrameColorSword, SetEquipFrameColorSwordHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::setEquipItemFrameColorShield, SetEquipFrameColorShieldHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::setEquipItemFrameColorClothes, SetEquipFrameColorClothesHook);
+DEFINE_HOOK(&J2DScreen::draw, ClScreenDrawHook);
 
 namespace {
 
@@ -30,6 +31,7 @@ struct ColPanes {
     J2DPicture*    pic = nullptr;     // custom slots: the icon picture
     J2DPicture*    frame = nullptr;   // native frame (native cell) or a clone
     const ResTIMG* tex = nullptr;     // texture currently shown by pic
+    J2DPicture*    flourish[2] = {};
 };
 
 struct Pos {
@@ -73,6 +75,8 @@ struct ScreenState {
     Pos      heartPos, kamenPos, modelbgnPos;
     bool     heartOnMain = true;
     bool     maskOnMain = true;
+
+    J2DPane* hdRoot = nullptr;
 
     // The native tables as screenSet() left them, before the library changed any cell.
     bool snap = false;
@@ -375,7 +379,12 @@ void create_panes() {
 }
 
 void set_frame_color(J2DPicture* frame, bool on) {
-    if (frame != nullptr) frame->setBlackWhite(kFrameBlack, on ? kFrameOn : kFrameOff);
+    if (frame == nullptr) return;
+    if (s.hdRoot != nullptr) {
+        frame->setBlackWhite(kFrameBlack, on ? kClHdFrameOn : kClHdFrameOff);
+    } else {
+        frame->setBlackWhite(kFrameBlack, on ? kFrameOn : kFrameOff);
+    }
 }
 
 // Custom slots on top of what the native setEquipItemFrameColor* painted.
@@ -570,6 +579,13 @@ void on_menu_collect_wide_post(ModContext*, void* args, void*, void*) {
     collection_page_apply(c);
 }
 
+HookAction on_screen_draw_pre(ModContext*, void* args, void*, void*) {
+    if (args == nullptr || !s.built || s.hdRoot == nullptr) return HOOK_CONTINUE;
+    if (mods::arg<J2DScreen*>(args, 0) != s.screen) return HOOK_CONTINUE;
+    screen_apply_layout(s.collect);
+    return HOOK_CONTINUE;
+}
+
 void on_set_equip_frame_sword_post(ModContext*, void* args, void*, void*) {
     if (args != nullptr && screen_active(mods::arg<dMenu_Collect2D_c*>(args, 0))) color_row_frames(0);
 }
@@ -590,6 +606,59 @@ void on_mw_execute_post(ModContext*, void*, void*, void*) {
         mw->dMw_collect_delete(true);
         mw->dMw_collect_create();
     }
+}
+
+void hd_attach(dMenu_Collect2D_c* c) {
+    if (s.hdRoot != nullptr || !cl_hd_layout_requested()) return;
+    J2DPane* root = find(kClHdRootTag);
+    if (root == nullptr) return;
+    s.hdRoot = root;
+
+    const ResTIMG* hdFrameTex = cl_pane_texture(s.nativeFrame[0][0]);
+    JKRHeap* oldHeap = c->mpHeap != nullptr ? mDoExt_setCurrentHeap(c->mpHeap) : nullptr;
+    for (int r = 0; r < kClRows; r++) {
+        for (int col = 1; col <= kClMaxCols; col++) {
+            const ClColumn& column = layout_column(r, col);
+            if (column.type != ClColType::Custom) continue;
+            ColPanes& p = s.cols[r][col];
+            if (native_col_of_x(r, column.x) == 0 && p.frame != nullptr) {
+                if (hdFrameTex != nullptr && cl_pane_texture(p.frame) != hdFrameTex) {
+                    p.frame->changeTexture(hdFrameTex, 0);
+                    p.frame->setTexCoord(p.frame->getTexture(0), BIND15, MIRROR0, false);
+                    p.frame->setCornerColor(JUtility::TColor(255, 255, 255, 255));
+                    p.frame->setAlpha(255);
+                }
+                root->appendChild(p.frame);
+                for (int corner = 0; corner < 2; corner++) {
+                    const u64 tag = cl_make_tag('c', 'l', 'f', 'l', static_cast<u8>(r),
+                                                static_cast<u8>(col * 2 + corner));
+                    p.flourish[corner] = hd_new_flourish(root, tag, corner != 0);
+                }
+            }
+            if (p.icon != nullptr) root->appendChild(p.icon);
+        }
+    }
+    if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
+    screen_refresh_frames(c);
+}
+
+void place_hd_column(int r, int col, const ClColumn& column, ColPanes& p) {
+    const ClHdPos pos = hd_column_pos(r, col);
+    hd_place(p.icon, pos.x, pos.y, kClHdIconSize, kClHdIconSize);
+    hd_place(p.frame, pos.x, pos.y, kClHdFrameSize, kClHdFrameSize);
+
+    const int frameIndex = native_col_of_x(r, column.x) != 0 ? hd_frame_index(column.x, static_cast<u8>(r)) : -1;
+    if (frameIndex >= 0) {
+        hd_place_flourishes(find(hd_native_flourish_tag(frameIndex, 0)),
+                            find(hd_native_flourish_tag(frameIndex, 1)), pos);
+        return;
+    }
+    const bool lit = p.frame != nullptr && p.frame->getWhite().r > 200;
+    for (J2DPicture* flourish : p.flourish) {
+        if (flourish == nullptr) continue;
+        if (lit) flourish->show(); else flourish->hide();
+    }
+    hd_place_flourishes(p.flourish[0], p.flourish[1], pos);
 }
 
 }  // namespace
@@ -616,6 +685,14 @@ J2DPane* screen_cell_pane(u8 x, u8 y) {
     return cell_pane(y, x);
 }
 
+J2DPicture* screen_cell_frame(u8 x, u8 y) {
+    if (!s.built || y >= kClRows || x >= 7) return nullptr;
+    const int col = layout_col_of_cell(y, x);
+    return col != 0 ? s.cols[y][col].frame : nullptr;
+}
+
+bool screen_hd_active() { return s.built && s.hdRoot != nullptr; }
+
 int screen_equip_row_at(u8 x, u8 y) {
     if (y >= kClRows || x >= 7) return -1;
     if (layout_col_of_cell(y, x) != 0) return y;
@@ -637,6 +714,8 @@ void screen_refresh_frames(dMenu_Collect2D_c* c) {
 void screen_apply_layout(dMenu_Collect2D_c* c) {
     if (!screen_active(c)) return;
 
+    hd_attach(c);
+    const bool hd = s.hdRoot != nullptr;
     const f32 dx = collection_page_grid_dx();
     const f32 scaleX = s.refIcon->getScaleX();
     const f32 scaleY = s.refIcon->getScaleY();
@@ -645,22 +724,14 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
     bool nativeFrameUsed[kClRows][3] = {};
 
     for (int r = 0; r < kClRows; r++) {
+        const bool hdRow = hd && !hd_row_native(r);
         for (int col = 1; col <= kClMaxCols; col++) {
             const ClColumn& column = layout_column(r, col);
             if (column.type == ClColType::Empty) continue;
             ColPanes& p = s.cols[r][col];
             const int nativeCol = native_col_of_x(r, column.x);
 
-            Pos icon{s.iconCol1[r].x + (col - 1) * s.iconDx, s.iconCol1[r].y};
-            Pos frame{s.frameCol1[r].x + (col - 1) * s.frameDx, s.frameCol1[r].y};
-            if (nativeCol != 0 && nativeCol == col) {
-                // In its native column: exactly the native spot.
-                if (column.type == ClColType::Native) icon = s.nativeIconPos[r][nativeCol - 1];
-                frame = s.nativeFramePos[r][nativeCol - 1];
-            }
-
             if (p.icon != nullptr) {
-                cl_set_pane_pos(p.icon, icon.x + dx, icon.y);
                 bool visible;
                 if (column.type == ClColType::Native) {
                     // Same rule screenSet() uses for native panes.
@@ -669,7 +740,7 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
                 } else {
                     visible = custom_equip_unlocked(column.customId);
                     c->field_0x22d[column.x][r] = visible ? 1 : 0;
-                    p.icon->scale(scaleX, scaleY);
+                    if (!hd) p.icon->scale(scaleX, scaleY);
                     ResTIMG* tex = custom_equip_icon(column.customId);
                     if (p.pic != nullptr && tex != nullptr && tex != p.tex) {
                         p.pic->changeTexture(tex, 0);
@@ -679,18 +750,31 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
                 }
                 if (visible) p.icon->show(); else p.icon->hide();
             }
-
             if (p.frame != nullptr) {
-                cl_set_pane_pos(p.frame, frame.x + dx, frame.y);
                 p.frame->show();
                 if (nativeCol != 0) nativeFrameUsed[r][nativeCol - 1] = true;
             }
+
+            if (hd) {
+                if (hdRow) place_hd_column(r, col, column, p);
+                continue;
+            }
+            Pos icon{s.iconCol1[r].x + (col - 1) * s.iconDx, s.iconCol1[r].y};
+            Pos frame{s.frameCol1[r].x + (col - 1) * s.frameDx, s.frameCol1[r].y};
+            if (nativeCol != 0 && nativeCol == col) {
+                // In its native column: exactly the native spot.
+                if (column.type == ClColType::Native) icon = s.nativeIconPos[r][nativeCol - 1];
+                frame = s.nativeFramePos[r][nativeCol - 1];
+            }
+            if (p.icon != nullptr) cl_set_pane_pos(p.icon, icon.x + dx, icon.y);
+            if (p.frame != nullptr) cl_set_pane_pos(p.frame, frame.x + dx, frame.y);
         }
 
         for (int k = 1; k <= native_col_count(r); k++) {
             if (!nativeIconUsed[r][k - 1]) s.nativeIcon[r][k - 1]->hide();
             if (!nativeFrameUsed[r][k - 1]) s.nativeFrame[r][k - 1]->hide();
         }
+        if (hd) continue;
 
         // Connectors: one left of column 1, one between every two neighboring columns.
         if (layout_column(r, 1).type != ClColType::Empty) {
@@ -714,6 +798,16 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
             cl_set_pane_pos(conn, pos.x + dx, pos.y);
             conn->show();
         }
+    }
+
+    if (hd) {
+        const ClHdPos heart = hd_heart_pos();
+        const ClHdPos mask = hd_mask_pos();
+        if (c->mpHeartParent != nullptr) {
+            hd_place(c->mpHeartParent->getPanePtr(), heart.x, heart.y, kClHdHeartSize, kClHdHeartSize);
+        }
+        hd_place(s.kamen, mask.x, mask.y, kClHdMaskSize, kClHdMaskSize);
+        return;
     }
 
     // Rows longer than the native ones push the heart (behind the sword and shield rows) and
@@ -787,11 +881,13 @@ void screen_install_hooks(const HookService* hook_svc) {
     CL_HOOK_PRE(MenuCollect2DDeleteHook, on_menu_collect_2d_delete_pre);
     CL_HOOK_PRE(ScreenSetHook, on_screen_set_pre);
     CL_HOOK_POST(ScreenSetHook, on_screen_set_post);
-    CL_HOOK_POST(MenuCollectWideHook, on_menu_collect_wide_post);
+    CL_HOOK_POST_PRIO(MenuCollectWideHook, on_menu_collect_wide_post, kClAfterOtherMods);
+    CL_HOOK_PRE_PRIO(ClScreenDrawHook, on_screen_draw_pre, kClAfterOtherMods);
     CL_HOOK_POST(SetEquipFrameColorSwordHook, on_set_equip_frame_sword_post);
     CL_HOOK_POST(SetEquipFrameColorShieldHook, on_set_equip_frame_shield_post);
     CL_HOOK_POST(SetEquipFrameColorClothesHook, on_set_equip_frame_clothes_post);
     CL_HOOK_POST(MwExecuteHook, on_mw_execute_post);
+    hd_install_hooks(hook_svc);
 }
 
 void screen_shutdown() { s = ScreenState{}; }

@@ -62,15 +62,33 @@ template <class Entry>
 void cl_replace(const HookService* h, HookReplaceFn fn, const char* name) {
     if (mods::hook::replace<Entry>(h, fn) != MOD_OK) log_collect_warn("collection-lib: hook %s not installed", name);
 }
+template <class Entry>
+void cl_add_pre(const HookService* h, HookPreFn fn, const char* name, int32_t priority) {
+    HookOptions options = HOOK_OPTIONS_INIT;
+    options.priority = priority;
+    if (mods::hook::add_pre<Entry>(h, fn, &options) != MOD_OK) log_collect_warn("collection-lib: hook %s not installed", name);
+}
+template <class Entry>
+void cl_add_post(const HookService* h, HookPostFn fn, const char* name, int32_t priority) {
+    HookOptions options = HOOK_OPTIONS_INIT;
+    options.priority = priority;
+    if (mods::hook::add_post<Entry>(h, fn, &options) != MOD_OK) log_collect_warn("collection-lib: hook %s not installed", name);
+}
 #define CL_HOOK_PRE(entry, fn) cl_add_pre<entry>(hook_svc, fn, #entry)
 #define CL_HOOK_POST(entry, fn) cl_add_post<entry>(hook_svc, fn, #entry)
+#define CL_HOOK_PRE_PRIO(entry, fn, prio) cl_add_pre<entry>(hook_svc, fn, #entry, prio)
+#define CL_HOOK_POST_PRIO(entry, fn, prio) cl_add_post<entry>(hook_svc, fn, #entry, prio)
 #define CL_HOOK_REPLACE(entry, fn) cl_replace<entry>(hook_svc, fn, #entry)
+
+constexpr int32_t kClBeforeOtherMods = 100;
+constexpr int32_t kClAfterOtherMods = -100;
 
 extern dMenu_Collect2D_c* s_currentCollect2D;
 extern bool s_needReloadCollect;
 
 bool cl_unequip_enabled();
 bool cl_keep_ordon_shield_enabled();
+bool cl_hd_layout_requested();
 
 // ---------------------------------------------------------------------------
 // Pane / texture helpers (collection_common.cpp)
@@ -201,6 +219,8 @@ int screen_equip_row_at(u8 x, u8 y);
 u64 screen_custom_icon_tag(int r, u8 x);
 // Pane of an equipment row cell (what getItemTag() would name), nullptr if none.
 J2DPane* screen_cell_pane(u8 x, u8 y);
+J2DPicture* screen_cell_frame(u8 x, u8 y);
+bool screen_hd_active();
 
 void screen_install_hooks(const HookService* hook_svc);
 void screen_shutdown();
@@ -216,6 +236,31 @@ bool native_cell_equipped(int r, u8 x);
 
 void equip_install_hooks(const HookService* hook_svc);
 void nav_install_hooks(const HookService* hook_svc);
+
+constexpr u64 kClHdRootTag = MULTI_CHAR('hd_colly');
+constexpr f32 kClHdIconSize = 46.0f;
+constexpr f32 kClHdFrameSize = kClHdIconSize + 6.0f;
+constexpr f32 kClHdSideScale = 0.85f;
+constexpr f32 kClHdHeartSize = 112.0f * kClHdSideScale;
+constexpr f32 kClHdMaskSize = 80.0f * kClHdSideScale;
+
+struct ClHdPos {
+    f32 x = 0.0f, y = 0.0f;
+};
+
+void hd_place(J2DPane* pane, f32 x, f32 y, f32 w, f32 h);
+bool hd_row_native(int r);
+ClHdPos hd_column_pos(int r, int col);
+ClHdPos hd_heart_pos();
+ClHdPos hd_mask_pos();
+int hd_frame_index(u8 x, u8 y);
+u64 hd_native_flourish_tag(int frameIndex, int corner);
+void hd_place_flourishes(J2DPane* topLeft, J2DPane* bottomRight, ClHdPos cell);
+J2DPicture* hd_new_flourish(J2DPane* root, u64 tag, bool bottomRight);
+extern const JUtility::TColor kClHdFrameOn;
+extern const JUtility::TColor kClHdFrameOff;
+bool hd_nav_target(dMenu_Collect2D_c* c, int dir, u8* x, u8* y);
+void hd_install_hooks(const HookService* hook_svc);
 
 // ---------------------------------------------------------------------------
 // Pages (collection_page.cpp)

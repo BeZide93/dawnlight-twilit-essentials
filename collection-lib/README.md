@@ -209,6 +209,37 @@ Custom elements: brace-initialize a `cl::Element` (pane tag, optional follower p
 `hideOnMain`, `claimsCell`, explicit position) and `add()` it - see
 `include/collection_lib/collection_page.hpp`.
 
+## Twilight HD
+
+[Twilight HD](https://github.com/OTPR26/twilight-hd-hud) (`org.twilight.hd_hud`) replaces
+the Collection screen with a TPHD layout: clothes centered above Link, shields to his left,
+swords to his right, its own frame art and a cursor that moves by distance. Tell the library
+when that layout is on, and it lays the rows out on it:
+
+```cpp
+static bool twilight_hd_collection() {
+    return is_mod_enabled("org.twilight.hd_hud") &&
+           mod_config_bool("org.twilight.hd_hud", "collection-screen", true);
+}
+collectionlib_set_hd_layout_policy(&twilight_hd_collection);
+```
+
+(`is_mod_enabled` / `mod_config_bool` stand for the mod's own lookups of the host config
+vars `mod.org_twilight_hd__hud.enabled` / `.collection-screen`.)
+
+- Rows that still hold exactly the native items stay where Twilight HD puts them.
+- Changed rows: swords grow to the right, shields to the left, clothes stay centered, in
+  column order. A longer sword row moves the Fused Shadow to the right.
+- Twilight HD places its cells once more right before the screen draws; the library's
+  placement runs after it (lower hook priority).
+- Added slots get Twilight HD's frames, colors, corner flourishes and cursor brackets, and
+  its distance-based cursor reaches them (the library's navigation runs before Twilight HD's).
+- Pages are off: the layout has room for every column.
+
+The canvas positions and the cursor navigation follow Twilight HD's source
+(`collection_layout.hpp`, `collection_screen.inc`), MIT License, Copyright (c) 2026 Hyrule
+Hysteria.
+
 ## API overview
 
 | Function | Purpose |
@@ -228,6 +259,7 @@ Custom elements: brace-initialize a `cl::Element` (pane tag, optional follower p
 | `custom_equip_set_suppressed(bool)` / `custom_equip_restore_from_save()` | Take custom items off (e.g. for a challenge mode) / put the saved ones back on |
 | `collectionlib_set_unequip_policy(fn)` | A on the worn sword/shield unequips it (not native) |
 | `collectionlib_set_keep_ordon_shield_policy(fn)` | Item checks keep counting the Ordon Shield (not native) |
+| `collectionlib_set_hd_layout_policy(fn)` | Rows on Twilight HD's layout while `fn` says it is on |
 | `collectionlib_init / update / shutdown` | Lifecycle |
 
 ## Building the example
