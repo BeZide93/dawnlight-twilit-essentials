@@ -28,10 +28,6 @@ ConfigVarHandle g_varEponaTopSpeedPct = 0;
 ConfigVarHandle g_varEponaUnlimitedSpurs = 0;
 ConfigVarHandle g_varEponaAutoGallop = 0;
 
-UiElementHandle g_eponaStatusText = 0;
-
-static const UiService* s_ui = nullptr;
-
 static bool s_unlimitedSpurs = true;
 static bool s_autoGallop = true;
 static f32 s_turnRate = 1.25f;
@@ -193,9 +189,8 @@ ModResult init_epona_config(const ConfigService* config_svc, ModContext* mod_ctx
     return MOD_OK;
 }
 
-ModResult init_epona(const HookService* hook_svc, const UiService* ui_svc, ModError* error) {
+ModResult init_epona(const HookService* hook_svc, ModError* error) {
     if (hook_svc == nullptr) return MOD_ERROR;
-    s_ui = ui_svc;
 
     if (mods::hook::add_pre<EponaExecuteHook>(hook_svc, on_execute_pre) != MOD_OK ||
         mods::hook::add_post<EponaStickDataHook>(hook_svc, on_stick_data_post) != MOD_OK ||
@@ -206,20 +201,4 @@ ModResult init_epona(const HookService* hook_svc, const UiService* ui_svc, ModEr
     return MOD_OK;
 }
 
-void update_epona_status_text() {
-    if (s_ui == nullptr || g_eponaStatusText == 0) {
-        return;
-    }
-
-    char text[128] = "";
-    daHorse_c* horse = dComIfGp_getHorseActor();
-    if (horse != nullptr) {
-        std::snprintf(text, sizeof(text), "Speed: %.0f / %.0f   Spurs: %d/6", horse->speedF,
-            horse->m_lashMaxSpeedF, static_cast<int>(horse->m_lashCnt));
-    }
-    s_ui->elem_set_text(mod_ctx, g_eponaStatusText, text);
-}
-
-void shutdown_epona() {
-    g_eponaStatusText = 0;
-}
+void shutdown_epona() {}
