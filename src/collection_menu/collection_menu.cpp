@@ -108,9 +108,10 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
             });
         }
 
-        if (g_configCollectionStarterEquip || g_configCollectionKeepOrdonShield) {
+        if (g_configCollectionStarterEquip) {
             add_vanilla_shield_slot({
                 .unlocked = []() {
+                    if (!g_configCollectionStarterEquip) return false;
                     if (g_configCollectionKeepOrdonShield) {
                         return dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) ||
                             dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e);
