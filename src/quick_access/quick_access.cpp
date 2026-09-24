@@ -230,6 +230,32 @@ static void refresh_wheel_down_slot_cache() {
     s_lastWheelDownSlot = dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN);
 }
 
+static bool is_ooccoo_item(u8 itemNo) {
+    return itemNo == dItemNo_DUNGEON_EXIT_e || itemNo == dItemNo_DUNGEON_BACK_e ||
+           itemNo == dItemNo_LV7_DUNGEON_EXIT_e;
+}
+
+static void sync_ooccoo_assignment() {
+    const u8 current = dComIfGs_getItem(SLOT_18, false);
+    if (!is_ooccoo_item(current)) {
+        return;
+    }
+    bool changed = false;
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
+        if (is_ooccoo_item(s_customItems[i]) && s_customItems[i] != current) {
+            s_customItems[i] = current;
+            changed = true;
+        }
+    }
+    if (is_ooccoo_item(s_assignedItem) && s_assignedItem != current) {
+        s_assignedItem = current;
+        changed = true;
+    }
+    if (changed) {
+        qa_custom_store();
+    }
+}
+
 static void sync_wheel_down_assignment() {
     if (g_configCustomZButtonEnabled) {
         return;
@@ -953,6 +979,65 @@ static void play_cursor_se() {
 }
 
 static u8 s_deferredUseItem = QA_ITEM_NONE;
+static u8 s_qaOoccooActive = QA_ITEM_NONE;
+static u8 s_qaOoccooPending = QA_ITEM_NONE;
+static int s_qaOoccooPendingFrames = 0;
+static u8 s_qaOoccooPrevSelect = QA_ITEM_NONE;
+
+static bool qa_in_dungeon_warp(daAlink_c* link) {
+    return link->mProcID == daAlink_c::PROC_DUNGEON_WARP_READY ||
+           link->mProcID == daAlink_c::PROC_DUNGEON_WARP;
+}
+
+static void qa_keep_ooccoo_select(daAlink_c* link) {
+    if (s_qaOoccooActive == QA_ITEM_NONE) {
+        return;
+    }
+    if (qa_in_dungeon_warp(link)) {
+        g_dComIfG_gameInfo.play.setSelectItem(2, s_qaOoccooActive);
+        return;
+    }
+    g_dComIfG_gameInfo.play.setSelectItem(2, s_qaOoccooPrevSelect);
+    s_qaOoccooActive = QA_ITEM_NONE;
+}
+
+static bool qa_start_ooccoo(daAlink_c* link, u8 itemNo) {
+    const u8 prevSelect = dComIfGp_getSelectItem(2);
+    g_dComIfG_gameInfo.play.setSelectItem(2, itemNo);
+    const int proc_type = link->checkNewItemChange(2);
+    if (proc_type != 0) {
+        link->changeItemTriggerKeepProc(2, proc_type);
+    }
+    if (qa_in_dungeon_warp(link)) {
+        s_qaOoccooActive = itemNo;
+        s_qaOoccooPrevSelect = prevSelect;
+        play_ok_se();
+        return true;
+    }
+    g_dComIfG_gameInfo.play.setSelectItem(2, prevSelect);
+    play_error_se();
+    return false;
+}
+
+bool quick_access_run_pending_ooccoo(daAlink_c* link) {
+    if (s_qaOoccooPending == QA_ITEM_NONE || link == nullptr || !link->checkModeFlg(4)) {
+        return false;
+    }
+    const u8 itemNo = s_qaOoccooPending;
+    s_qaOoccooPending = QA_ITEM_NONE;
+    s_qaOoccooPendingFrames = 0;
+    return qa_start_ooccoo(link, itemNo);
+}
+
+static void qa_tick_pending_ooccoo() {
+    if (s_qaOoccooPending == QA_ITEM_NONE) {
+        return;
+    }
+    if (--s_qaOoccooPendingFrames <= 0) {
+        s_qaOoccooPending = QA_ITEM_NONE;
+        play_error_se();
+    }
+}
 
 // Using a quick access item other than the lantern snuffs a burning lantern for
 // real (clear FLG2_UNK_1), so it does not come back lit when switching back to it.
@@ -1349,6 +1434,7 @@ HookAction on_qa_alink_execute_pre(ModContext*, void*, void*, void*) {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link != nullptr) {
         s_qaPreEquipItem = link->mEquipItem;
+        qa_keep_ooccoo_select(link);
     }
     return HOOK_CONTINUE;
 }
@@ -1371,6 +1457,7 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     }
 
     qa_tick_held_item(link);
+    qa_tick_pending_ooccoo();
 
     if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
         if (s_qaBootsGraceFrames > 0) {
@@ -1455,6 +1542,12 @@ static void execute_generic_item(u8 itemNo) {
     if (itemNo == dItemNo_NORMAL_BOMB_e || itemNo == dItemNo_WATER_BOMB_e ||
         itemNo == dItemNo_POKE_BOMB_e) {
         execute_bomb_item(link, itemNo);
+        return;
+    }
+
+    if (is_ooccoo_item(itemNo)) {
+        s_qaOoccooPending = itemNo;
+        s_qaOoccooPendingFrames = 10;
         return;
     }
 
@@ -1888,6 +1981,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     }
 
     sync_wheel_down_assignment();
+    sync_ooccoo_assignment();
 
     qa_tick_bomb_tracking();
 
