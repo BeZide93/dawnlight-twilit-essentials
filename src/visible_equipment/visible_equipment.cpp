@@ -24,6 +24,7 @@
 #include "f_pc/f_pc_name.h"
 #include "f_pc/f_pc_profile_lst.h"
 #include "m_Do/m_Do_ext.h"
+#include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_mtx.h"
 #include "mods/api.h"
 #include "mods/svc/hook.hpp"
@@ -1320,6 +1321,14 @@ static bool isSceneLoadStable() {
   return true;
 }
 
+static bool isSceneDrawStable() {
+  if (isSceneLoadStable()) {
+    return true;
+  }
+  JUTFader *fader = mDoGph_gInf_c::getFader();
+  return fader != nullptr && fader->getStatus() != JUTFader::None;
+}
+
 static void on_alink_draw_post_impl(ModContext *, void *, void *, void *);
 
 static void on_alink_draw_post(ModContext *ctx, void *args, void *retval, void *user) {
@@ -1360,7 +1369,7 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
   const bool cacheOk = syncEquipmentModelCache(alink);
   const bool playerDrawn =
       !alink->checkPlayerNoDraw() && !isInWarpVisual(alink);
-  const bool sceneStable = isSceneLoadStable();
+  const bool sceneStable = isSceneDrawStable();
 
   bool wantShowBow = cacheOk && isHuman && playerDrawn && sceneStable &&
                      g_configVisibleEquipShowBow && checkShouldShowBow();
