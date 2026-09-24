@@ -8,6 +8,7 @@
 #include "boss_rush_equipment.hpp"
 #include "boss_rush_timer.hpp"
 #include "boss_rush_save.hpp"
+#include "boss_rush_gamemode.hpp"
 #include "ganondorf_cape.hpp"
 #include "../util.hpp"
 #include "../boss_bar/boss_bar.hpp"
@@ -245,6 +246,7 @@ const BossGalleryEntry g_bossGalleryTable[] = {
 const size_t g_bossGalleryCount = sizeof(g_bossGalleryTable) / sizeof(g_bossGalleryTable[0]);
 
 bool g_configBossRushSuggestedItems = false;
+bool g_configMasterRushRetryFromStart = true;
 bool g_configBossRushRefillAfterFight = false;
 bool g_configBossRushSeparateGanon = false;
 
@@ -4268,6 +4270,8 @@ bool boss_rush_scene_load_stable() {
     return true;
 }
 
+static void enter_boss_rush_mode_state();
+
 static void prepare_boss_rush_state() {
     daAlink_c* link = daAlink_getAlinkActorClass();
     const char* curStage = dComIfGp_getStartStageName();
@@ -4290,6 +4294,10 @@ static void prepare_boss_rush_state() {
 
     }
 
+    enter_boss_rush_mode_state();
+}
+
+static void enter_boss_rush_mode_state() {
     persist_boss_rush_session_marker();
     s_bossRushModeActive = true;
     force_boss_rush_fast_transitions();
@@ -4327,6 +4335,19 @@ void start_boss_rush() {
         }
     }
     start_boss_rush_entry_warp();
+}
+
+void boss_rush_begin_game_mode() {
+    boss_rush_save_apply_preset(false);
+    s_hasSavedLocation = false;
+    enter_boss_rush_mode_state();
+    custom_equip_set_suppressed(true);
+    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+    s_chamberEquipsPending = true;
+
+    cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
+    dComIfGs_setRestartRoom(spawnPos, cM_deg2s(180.0f), kBossRushChamberRoom);
+    dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
 }
 
 static void start_boss_rush_entry_warp() {
@@ -4745,6 +4766,10 @@ static void close_boss_rush_session() {
 }
 
 void exit_boss_rush() {
+    if (boss_rush_game_mode_is_active()) {
+        boss_rush_game_mode_return_to_menu();
+        return;
+    }
     if (!s_bossRushModeActive && !s_exitingBossRush) return;
     if (s_exitSaveReloadPending) return;
 
@@ -4959,6 +4984,12 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
         return;
     }
 
+    const bool restartRun = s_rushRunActive && g_configMasterRushRetryFromStart && s_rushRunCount > 0;
+    if (restartRun) {
+        idx = static_cast<int>(s_rushRunOrder[0]);
+        s_rushRunPos = 0;
+    }
+
     s_recordReturnReason = nullptr;
     s_recordReturnFrames = -1;
     s_returningToChamber = false;
@@ -4969,7 +5000,7 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
     reset_boss_rush_midna_flow();
     Z2GetAudioMgr()->subBgmStop();
 
-    const bool inGanonGauntlet = !g_configBossRushSeparateGanon &&
+    const bool inGanonGauntlet = !restartRun && !g_configBossRushSeparateGanon &&
         (s_gauntletLadderActive ||
          (idx >= 0 && static_cast<size_t>(idx) < g_bossGalleryCount &&
           (std::strcmp(g_bossGalleryTable[idx].displayName, "Ganondorf") == 0 ||
@@ -5036,12 +5067,21 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
         }
     }
 
-    if (s_fightStartLife > 0) {
-        dComIfGs_setLife(s_fightStartLife);
-        sync_life_meter_instant(s_fightStartLife, dComIfGs_getMaxLife());
+    if (restartRun) {
+        s_gauntletLadderActive = false;
+        s_gauntletPhase = 0;
+        boss_rush_timer_end_all_phases();
+        apply_boss_rush_loadout(false);
+        dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
+        sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()), dComIfGs_getMaxLife());
+        boss_rush_timer_begin_chain_run();
+    } else {
+        if (s_fightStartLife > 0) {
+            dComIfGs_setLife(s_fightStartLife);
+            sync_life_meter_instant(s_fightStartLife, dComIfGs_getMaxLife());
+        }
+        boss_rush_timer_reset_run();
     }
-
-    boss_rush_timer_reset_run();
     boss_bar_force_reset();
     boss_bar_consume_defeat_event();
 
@@ -5191,12 +5231,16 @@ static void apply_pending_gear_save_if_covered() {
     s_pendingGearBoss = nullptr;
 }
 
+void boss_rush_arm_chamber_camera(int frames) {
+    s_chamberCamArmFrames = frames;
+}
+
 int boss_rush_gauntlet_phase() {
     return s_gauntletPhase;
 }
 
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
-    if (is_game_resetting_or_title()) {
+    if (is_game_resetting_or_title() && !boss_rush_game_mode_entering()) {
         if (s_bossRushModeActive || s_exitingBossRush || boss_rush_session_marker_present()) {
             close_boss_rush_session();
         }

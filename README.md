@@ -56,6 +56,7 @@ A collection of quality-of-life improvements, combat tweaks, and visual enhancem
 * Shows your four bottles in their own menu on the L button.
 * Tap L to use the bottle on L. Hold L to open the menu, then release to use the bottle you picked.
 * Note: while this is on, L no longer triggers targeting and shield.
+* If "Hide items from item wheel" is on, your bottles are hidden from the normal item wheel as well.
 
 ### Collection Menu Enhancements
 * Adds extra equipment slots for the Wooden Sword and Ordon Clothes in the Collection screen.

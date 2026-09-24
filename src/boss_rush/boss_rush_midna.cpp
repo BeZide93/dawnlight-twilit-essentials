@@ -1,4 +1,5 @@
 #include "boss_rush_midna.hpp"
+#include "boss_rush_gamemode.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
 
@@ -1063,7 +1064,11 @@ bool process_pending_boss_rush_midna_action(const LogService* log_svc, ModContex
     if (action == PendingBossRushMidnaAction::BackToChamber) {
         return_to_boss_rush_chamber(log_svc, mod_ctx, "Left via Midna's call menu");
     } else if (action == PendingBossRushMidnaAction::LeaveChamber) {
-        exit_boss_rush();
+        if (boss_rush_game_mode_is_active()) {
+            boss_rush_game_mode_return_to_menu_smooth();
+        } else {
+            exit_boss_rush();
+        }
     } else if (action == PendingBossRushMidnaAction::RetryFight) {
         boss_rush_retry_current_fight(log_svc, mod_ctx);
     }

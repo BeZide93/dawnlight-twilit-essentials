@@ -1,6 +1,7 @@
 #include "general/general.hpp"
 #include "general/always.hpp"
 #include "general/damage_vignette.hpp"
+#include "general/drowning_warning.hpp"
 #include "general/hud_auto_fade.hpp"
 #include "general/oxygen_vignette.hpp"
 #include "general/sprint_fov_kick.hpp"
@@ -18,6 +19,7 @@
 #include "boss_rush/boss_rush_timer.hpp"
 #include "boss_rush/boss_rush_timer_v2.hpp"
 #include "boss_rush/boss_rush_portal.hpp"
+#include "boss_rush/boss_rush_gamemode.hpp"
 #include "boss_rush/boss_rush_dpad.hpp"
 #include "boss_rush/boss_rush_save.hpp"
 #include "visible_equipment/visible_equipment.hpp"
@@ -58,6 +60,7 @@
 #include "mods/svc/camera.h"
 #include "mods/svc/http.h"
 #include "mods/svc/http.hpp"
+#include "mods/svc/game_mode.h"
 
 #include "d/actor/d_a_title.h"
 #include "d/actor/d_a_alink.h"
@@ -226,6 +229,7 @@ IMPORT_OPTIONAL_SERVICE(ItemService, svc_item);
 IMPORT_OPTIONAL_SERVICE(StageService, svc_stage);
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 IMPORT_OPTIONAL_SERVICE(HttpService, svc_http);
+IMPORT_OPTIONAL_SERVICE(GameModeService, svc_game_mode);
 
 extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_header_record,
@@ -244,6 +248,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_stage,
     &mod_meta_import_svc_gfx,
     &mod_meta_import_svc_http,
+    &mod_meta_import_svc_game_mode,
 };
 
 static constexpr float kFreeCamSlowFactor = 0.35f;
@@ -407,6 +412,7 @@ static ConfigVarHandle s_varGeneralSceneTransitions = 0;
 static ConfigVarHandle s_varGeneralLockonLetterbox = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
+static ConfigVarHandle s_varGeneralDrowningWarning = 0;
 static ConfigVarHandle s_varGeneralSprintFovKick = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varDamageVignetteIntensity = 0;
@@ -487,6 +493,7 @@ static ConfigVarHandle s_varBossRushBestTimes = 0;
 static ConfigVarHandle s_varBossRushChainBest = 0;
 static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
 static ConfigVarHandle s_varBossRushPortal = 0;
+static ConfigVarHandle s_varMasterRushRetryMode = 0;
 
 static bool s_generalInitialized = false;
 static bool s_damageVignetteInitialized = false;
@@ -545,6 +552,12 @@ static void on_boss_rush_suggested_items_changed(ModContext*, ConfigVarHandle, c
 static void on_boss_rush_refill_after_fight_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossRushRefillAfterFight = value->bool_value;
+    }
+}
+
+static void on_master_rush_retry_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configMasterRushRetryFromStart = value->int_value == 0;
     }
 }
 
@@ -611,6 +624,12 @@ static void on_oxygen_vignette_changed(ModContext*, ConfigVarHandle, const Confi
     }
 }
 
+static void on_general_drowning_warning_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configDrowningWarningEnabled = value->bool_value;
+    }
+}
+
 static bool is_boss_rush_timer_sub_disabled(ModContext* ctx, void* user) {
     return is_boss_rush_fight_toggle_disabled(ctx, user);
 }
@@ -661,6 +680,7 @@ static void on_bottles_quick_access_changed(ModContext*, ConfigVarHandle, const 
     if (value) {
         g_configBottlesQuickAccessEnabled = value->bool_value;
     }
+    quick_access_itemwheel_refresh();
 }
 
 static void on_sheathed_spin_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1309,11 +1329,6 @@ static void ui_add_percent(UiElementHandle pane, const char* label, ConfigVarHan
     svc_ui->pane_add_control(mod_ctx, pane, &c, nullptr);
 }
 
-static ModResult qol_tab_update(ModContext*, void*, ModError*) {
-    update_epona_status_text();
-    return MOD_OK;
-}
-
 static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandle left,
                                      UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
@@ -1331,8 +1346,6 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     ui_add_toggle(left, "Auto-gallop", g_varEponaAutoGallop,
         "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
         is_epona_sub_disabled);
-    g_eponaStatusText = 0;
-    svc_ui->pane_add_text(mod_ctx, left, "", &g_eponaStatusText);
 
     svc_ui->pane_add_section(mod_ctx, left, "Warping");
     ui_add_toggle(left, "Warp as human", s_varGeneralHumanWarp,
@@ -1527,6 +1540,9 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>Red screen-edge flash when hit, plus a pulsing vignette at low health.</p>");
     ui_add_toggle(left, "Drowning vignette", s_varGeneralDrowningVignette,
         "<p>Blue screen-edge vignette while the air meter runs low.</p>");
+    ui_add_toggle(left, "Drowning warning bands", s_varGeneralDrowningWarning,
+        "<p>Layered blue bands that pulse at the screen edges while the air meter runs low. "
+        "An alternative style to the drowning vignette above - both can be on at once.</p>");
     if (s_varDamageVignetteIntensity != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
@@ -1593,8 +1609,9 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "customize its items.</p>",
         kQuickAccessAppearances, 2, is_quick_access_sub_disabled);
     ui_add_toggle(left, "Hide items from item wheel", s_varQuickAccessHideWheelItems,
-        "<p>Hides your quick items from the normal item wheel. Disabling Quick Access "
-        "restores them.</p>",
+        "<p>Hides your quick items from the normal item wheel. While Bottle Quick Access "
+        "is on, your bottles (and their contents) are hidden from the wheel as well. "
+        "Disabling Quick Access restores them.</p>",
         is_quick_access_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
@@ -1817,6 +1834,13 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
     }
 
+    svc_ui->pane_add_section(mod_ctx, left, "Master Rush");
+    static const char* const kMasterRushRetryModes[] = {"At beginning", "Current boss"};
+    ui_add_select(left, "Retry", s_varMasterRushRetryMode,
+        "<p><b>At beginning</b> restarts the whole Master Rush at Ook and resets the timer. "
+        "<b>Current boss</b> restarts only the current fight and keeps the timer running.</p>",
+        kMasterRushRetryModes, 2);
+
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");
     svc_ui->pane_add_rml(mod_ctx, right,
@@ -1899,7 +1923,7 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
 
 static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "General",   tab_general,   nullptr, nullptr },
-    { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, qol_tab_update, nullptr },
+    { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, nullptr, nullptr },
     { sizeof(UiTabDesc), "Combat",    tab_combat,    nullptr, nullptr },
     { sizeof(UiTabDesc), "Visuals",   tab_visuals,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quick Access", tab_quick_access, nullptr, nullptr },
@@ -2314,6 +2338,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descGeneralDrowningVignette, &s_varGeneralDrowningVignette) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralDrowningVignette, &g_configOxygenVignetteEnabled);
             svc_config->subscribe(mod_ctx, s_varGeneralDrowningVignette, on_oxygen_vignette_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descGeneralDrowningWarning = CONFIG_VAR_DESC_INIT;
+        descGeneralDrowningWarning.name = "drowningWarningEnabled";
+        descGeneralDrowningWarning.type = CONFIG_VAR_BOOL;
+        descGeneralDrowningWarning.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descGeneralDrowningWarning, &s_varGeneralDrowningWarning) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralDrowningWarning, &g_configDrowningWarningEnabled);
+            svc_config->subscribe(mod_ctx, s_varGeneralDrowningWarning, on_general_drowning_warning_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descDamageVignetteIntensity = CONFIG_VAR_DESC_INIT;
@@ -2835,6 +2868,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varBossRushRefillAfterFight, on_boss_rush_refill_after_fight_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descMasterRushRetryMode = CONFIG_VAR_DESC_INIT;
+        descMasterRushRetryMode.name = "masterRushRetryMode";
+        descMasterRushRetryMode.type = CONFIG_VAR_INT;
+        descMasterRushRetryMode.default_int = 0;
+        if (svc_config->register_var(mod_ctx, &descMasterRushRetryMode, &s_varMasterRushRetryMode) == MOD_OK) {
+            int64_t mode = 0;
+            svc_config->get_int(mod_ctx, s_varMasterRushRetryMode, &mode);
+            g_configMasterRushRetryFromStart = mode == 0;
+            svc_config->subscribe(mod_ctx, s_varMasterRushRetryMode, on_master_rush_retry_mode_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descBossRushSeparateGanon = CONFIG_VAR_DESC_INIT;
         descBossRushSeparateGanon.name = "bossRushSeparateGanon";
         descBossRushSeparateGanon.type = CONFIG_VAR_BOOL;
@@ -2953,6 +2997,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     s_bossRushPortalInitialized = init_boss_rush_portal(svc_hook, svc_log, mod_ctx) == MOD_OK;
     log_init_result("boss_rush_portal", s_bossRushPortalInitialized);
     log_init_result("boss_rush_dpad", init_boss_rush_dpad(svc_hook, svc_log, mod_ctx) == MOD_OK);
+    log_init_result("boss_rush_gamemode", init_boss_rush_gamemode(mod_ctx) == MOD_OK);
     s_visibleEquipmentInitialized = init_visible_equipment(svc_hook, error) == MOD_OK;
     log_init_result("visible_equipment", s_visibleEquipmentInitialized);
     s_zButtonInitialized = init_z_button(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
@@ -2973,7 +3018,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("collection_menu", s_collectionMenuInitialized);
     s_collectionMenuChestInitialized = init_collection_menu_chest(svc_hook, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("collection_menu_shield", s_collectionMenuChestInitialized);
-    s_eponaInitialized = init_epona(svc_hook, svc_ui, error) == MOD_OK;
+    s_eponaInitialized = init_epona(svc_hook, error) == MOD_OK;
     log_init_result("epona", s_eponaInitialized);
 
     s_titleModActive = true;
@@ -3041,6 +3086,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
     run_shutdown_step("hp_bars", shutdown_hp_bars);
     run_shutdown_step("boss_bar", shutdown_boss_bar);
+    run_shutdown_step("boss_rush_gamemode", shutdown_boss_rush_gamemode);
     run_shutdown_step("boss_rush", shutdown_boss_rush);
     run_shutdown_step("boss_rush_portal", shutdown_boss_rush_portal);
     run_shutdown_step("boss_rush_dpad", shutdown_boss_rush_dpad);

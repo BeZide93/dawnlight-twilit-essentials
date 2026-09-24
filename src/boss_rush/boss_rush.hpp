@@ -16,6 +16,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx);
 void shutdown_boss_rush();
 
 void start_boss_rush();
+void boss_rush_begin_game_mode();
+void boss_rush_arm_chamber_camera(int frames);
 void start_boss_rush_dungeon_warp();
 void start_boss_rush_map_portal_warp();
 void exit_boss_rush();
@@ -38,6 +40,7 @@ void boss_rush_request_retry();
 void boss_rush_debug_kill_current_boss();
 
 extern bool g_configBossRushSuggestedItems;
+extern bool g_configMasterRushRetryFromStart;
 
 extern bool g_configBossRushRefillAfterFight;
 

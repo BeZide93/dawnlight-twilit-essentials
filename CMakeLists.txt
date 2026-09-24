@@ -48,6 +48,7 @@ add_mod(twilit_essentials
             src/general/hud_auto_fade.cpp
             src/general/damage_vignette.cpp
             src/general/oxygen_vignette.cpp
+            src/general/drowning_warning.cpp
             src/general/sprint_fov_kick.cpp
             src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp
@@ -64,6 +65,7 @@ add_mod(twilit_essentials
             src/boss_rush/boss_rush_portal.cpp
             src/boss_rush/boss_rush_dpad.cpp
             src/boss_rush/boss_rush_save.cpp
+            src/boss_rush/boss_rush_gamemode.cpp
             src/boss_rush/ganondorf_cape.cpp
             src/visible_equipment/visible_equipment.cpp
             src/z_button/z_button.cpp
