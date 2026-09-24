@@ -51,6 +51,10 @@ HookAction on_set_heavy_boots_pre(ModContext*, void* args, void* ret, void*) {
 
 HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (quick_access_run_pending_ooccoo(link)) {
+        *static_cast<BOOL*>(retval) = TRUE;
+        return HOOK_SKIP_ORIGINAL;
+    }
     if (!g_configCustomZButtonEnabled || link == nullptr) {
         return HOOK_CONTINUE;
     }
@@ -181,6 +185,11 @@ HookAction on_check_item_button_change_pre(ModContext*, void* args, void*, void*
 HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     const int itemNo = mods::arg<int>(args, 1);
+    if (itemNo == dItemNo_DUNGEON_EXIT_e) {
+        *static_cast<int*>(retval) =
+            dComIfGs_getItem(SLOT_18, false) == dItemNo_DUNGEON_EXIT_e ? 3 : 2;
+        return HOOK_SKIP_ORIGINAL;
+    }
     if (!g_configCustomZButtonEnabled || link == nullptr) {
         if (link != nullptr && quick_access_keep_boots_equipped(link) &&
             link->checkGroupItem(itemNo, dItemNo_HVY_BOOTS_e))
