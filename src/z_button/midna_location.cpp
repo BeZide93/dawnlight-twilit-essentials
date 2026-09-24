@@ -10,6 +10,7 @@ static const ResTIMG* s_origZbtnlTex = nullptr;
 static JUtility::TColor s_origBlack(0, 0, 0, 0);
 static JUtility::TColor s_origWhite(40, 90, 160, 255);
 static bool s_hasOrigProps = false;
+static bool s_buttonPromptDirty = false;
 
 void update_midna_pane(dMeter2Draw_c* draw) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || draw == nullptr) return;
@@ -204,6 +205,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
 
     if (zbtnPic) {
         if (g_configCustomZButtonEnabled && !isNativeZButtonEngine()) {
+            s_buttonPromptDirty = true;
             ResTIMG* dpadTex = get_dpad_left_texture();
             if (dpadTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != dpadTex) {
                 zbtnPic->changeTexture(dpadTex, 0);
@@ -223,7 +225,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
                     child->setAlpha(0);
                 }
             }
-        } else {
+        } else if (s_buttonPromptDirty) {
             const ResTIMG* origTex = get_orig_z_button_texture();
             if (origTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != origTex) {
                 zbtnPic->changeTexture(origTex, 0);
@@ -233,7 +235,6 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
             }
             if (z_btnl) {
                 z_btnl->show();
-                z_btnl->setAlpha(255);
             }
             if (zbtn_n) {
                 for (J2DPane* child = zbtn_n->getFirstChildPane(); child != nullptr; child = child->getNextChildPane()) {
@@ -241,9 +242,9 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
                         continue;
                     }
                     child->show();
-                    child->setAlpha(255);
                 }
             }
+            s_buttonPromptDirty = false;
         }
     }
 }
