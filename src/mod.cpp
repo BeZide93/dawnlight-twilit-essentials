@@ -1808,16 +1808,14 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
         "into the Boss Rush chamber.</p>");
 
-#if 0
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;
         ctrl.label = "DEBUG: Kill current boss";
-        ctrl.help_rml = "<p>Sets the current boss's HP to 0. Testing only.</p>";
+        ctrl.help_rml = "<p>Defeats the current boss as if you had beaten it (timer, Master Rush). Testing only.</p>";
         ctrl.on_pressed = on_kill_current_boss_pressed;
         svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
     }
-#endif
 
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");

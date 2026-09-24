@@ -90,6 +90,8 @@ A collection of quality-of-life improvements, combat tweaks, and visual enhancem
 ### Boss Rush
 * Fight every boss in the game on demand. The "Start Boss Rush" setting takes you to a room with a statue for every boss.
 * Press A in front of a statue to jump straight into that fight. Intro cutscenes are skipped, and you return to the room automatically afterwards.
+* Cutscenes in between boss phases are completely removed (Diababa, Morpheel, Blizzeta, Stallord, Argorok).
+* **Master Rush:** press A at the Master Sword in the middle of the room to fight every boss in a row. Your hearts carry over from fight to fight, and the timer saves your best time for the whole run.
 * Press D-Pad Right to restart a fight at any time.
 * A built-in timer measures each fight and saves your personal best for every boss.
 * Optional helpers: the right items for each boss, a refill after every fight, a map portal (press Z on the map screen), and a mode that limits your gear to what you would normally have.

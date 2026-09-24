@@ -73,7 +73,7 @@ static void normalizeArcName(const char* src, char* dst, size_t dstSize) {
     }
 }
 
-int loadObjectArchive(const char* arcName) {
+static int loadArchiveFrom(const char* dirPath, const char* arcName) {
     if (arcName == nullptr) return -1;
 
     char cleanName[64];
@@ -97,7 +97,13 @@ int loadObjectArchive(const char* arcName) {
         } else if (zeldaHeap != nullptr && zeldaHeap->getFreeSize() > 6000000) {
             targetHeap = zeldaHeap;
         }
-        dComIfG_setObjectRes(cleanName, 0, targetHeap);
+        if (dirPath == nullptr) {
+            dComIfG_setObjectRes(cleanName, 0, targetHeap);
+        } else {
+            dRes_control_c::setRes(cleanName, g_dComIfG_gameInfo.mResControl.mObjectInfo,
+                                   ARRAY_SIZEU(g_dComIfG_gameInfo.mResControl.mObjectInfo), dirPath, 0,
+                                   targetHeap);
+        }
     }
 
     const int sync = dComIfG_syncObjectRes(cleanName);
@@ -108,6 +114,15 @@ int loadObjectArchive(const char* arcName) {
         return -1;
     }
     return 1;
+}
+
+int loadObjectArchive(const char* arcName) {
+    return loadArchiveFrom(nullptr, arcName);
+}
+
+int loadArchiveFromDir(const char* dirPath, const char* arcName) {
+    if (dirPath == nullptr) return -1;
+    return loadArchiveFrom(dirPath, arcName);
 }
 
 void unloadObjectArchive(const char* arcName) {

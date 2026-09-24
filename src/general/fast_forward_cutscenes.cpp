@@ -35,6 +35,7 @@ using SetTimescaleFn = void (*)(float);
 using GetTimescaleFn = float (*)();
 
 constexpr float kFastForwardScale = 4.0f;
+constexpr float kHiddenRunScale = 16.0f;
 constexpr int kLeadFrames = 5;
 constexpr int kFightStartHoldFrames = 60;
 constexpr int kDefeatMinHoldFrames = 120;
@@ -58,16 +59,31 @@ bool s_extHoldsFastScale = false;
 DEFINE_HOOK_SYMBOL("aurora_get_timescale", float(), AuroraGetTimescaleHook);
 DEFINE_HOOK_SYMBOL("aurora_set_timescale", void(float), AuroraSetTimescaleHook);
 
+bool s_hiddenRun = false;
+float s_hostScale = 1.0f;
+
+float sane_host_scale(float scale) {
+    return scale > 0.0f && scale < kHiddenRunScale ? scale : 1.0f;
+}
+
 void on_aurora_get_timescale_post(ModContext*, void*, void* retval, void*) {
-    if (!s_active || retval == nullptr) return;
+    if (retval == nullptr) return;
+    if (s_hiddenRun) {
+        *static_cast<float*>(retval) = s_hostScale;
+        return;
+    }
+    if (!s_active) return;
     float shown = s_restoreScale;
     if (!(shown > 0.0f) || shown == kFastForwardScale) shown = 1.0f;
     *static_cast<float*>(retval) = shown;
 }
 
 HookAction on_aurora_set_timescale_pre(ModContext*, void* args, void*, void*) {
-    s_extHoldsFastScale = mods::arg<float>(args, 0) == kFastForwardScale;
-    return HOOK_CONTINUE;
+    float& requested = mods::arg_ref<float>(args, 0);
+    requested = sane_host_scale(requested);
+    s_hostScale = requested;
+    s_extHoldsFastScale = requested == kFastForwardScale;
+    return s_hiddenRun ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
 }
 
 float live_timescale() {
@@ -330,8 +346,12 @@ void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
 
 }  // namespace
 
+void update_hidden_run_watchdog();
+
 void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx) {
     if (!s_setTimescale) return;
+
+    update_hidden_run_watchdog();
 
     update_boss_rush_fight_start_hold();
 
@@ -422,7 +442,10 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
     }
 }
 
+void fast_forward_set_hidden_run(bool on);
+
 void shutdown_fast_forward_cutscenes() {
+    fast_forward_set_hidden_run(false);
     stop_fast_forward();
     s_confirmFrames = 0;
     s_holdActive = false;
@@ -433,6 +456,32 @@ void shutdown_fast_forward_cutscenes() {
     s_postBoostFrames = -1;
     s_extHoldsFastScale = false;
     s_holdMinFrames = 0;
+}
+
+void update_hidden_run_watchdog() {
+    if (s_hiddenRun) return;
+    const float current = live_timescale();
+    if (current >= kHiddenRunScale) {
+        own_set_timescale(sane_host_scale(s_hostScale));
+    } else if (current > 0.0f) {
+        s_hostScale = current;
+    }
+}
+
+void fast_forward_set_hidden_run(bool on) {
+    if (!s_setTimescale) return;
+    if (on == s_hiddenRun) {
+        if (on && live_timescale() != kHiddenRunScale) own_set_timescale(kHiddenRunScale);
+        return;
+    }
+    if (on) {
+        s_hostScale = sane_host_scale(live_timescale());
+        s_hiddenRun = true;
+        own_set_timescale(kHiddenRunScale);
+    } else {
+        s_hiddenRun = false;
+        own_set_timescale(sane_host_scale(s_hostScale));
+    }
 }
 
 float general_get_aurora_timescale() {

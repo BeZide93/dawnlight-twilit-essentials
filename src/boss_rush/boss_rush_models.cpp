@@ -1051,5 +1051,5 @@ void draw_boss_rush_models(float floorY) {
         }
     }
 
-    // draw_boss_rush_master_sword(floorY);
+    draw_boss_rush_master_sword(floorY);
 }

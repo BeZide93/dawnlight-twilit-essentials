@@ -9,6 +9,7 @@
 #include <string_view>
 
 int loadObjectArchive(const char* arcName);
+int loadArchiveFromDir(const char* dirPath, const char* arcName);
 
 void unloadObjectArchive(const char* arcName);
 J3DModel* loadBmdFromArc(const char* arcName, const char* bmdName, cXyz scale = cXyz(1.0f, 1.0f, 1.0f));
@@ -26,7 +27,5 @@ void renderModelAtMtx(J3DModel* model, MtxP mtx, mDoExt_bckAnm* bck = nullptr);
 
 void ensure_system_heap_capacity();
 
-// Is the mod with this id enabled in the mod list?
 bool is_mod_enabled(std::string_view id);
-// A bool setting another mod registered (its config var `name`), `fallback` when it has none.
 bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback);

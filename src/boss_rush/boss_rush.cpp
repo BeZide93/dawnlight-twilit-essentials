@@ -77,6 +77,7 @@ extern const SaveService* svc_save;
 #include "m_Do/m_Do_audio.h"
 #include "dusk/config_var.hpp"
 #include "../general/faster_transitions.hpp"
+#include "../general/fast_forward_cutscenes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1110,6 +1111,7 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
         assign_select_item(SELECT_ITEM_Y, SLOT_8);
     } else if (std::strcmp(name, "Aeralfos") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_10);
+        assign_select_item(SELECT_ITEM_Y, SLOT_0);
     } else if (std::strcmp(name, "Argorok") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_3);
         assign_select_item(SELECT_ITEM_Y, SLOT_10);
@@ -2726,6 +2728,7 @@ static void update_stallord_instant_fight() {
 }
 
 static int s_stallordP2CamFrames = 0;
+static bool s_stallordTransitionHidden = false;
 static int s_stallordArenaSnapFrames = 0;
 
 static int stallord_arena_snap_phase2(void* i_actor, void* i_count) {
@@ -2758,6 +2761,15 @@ static int stallord_arena_snap_phase2(void* i_actor, void* i_count) {
     return 0;
 }
 
+static constexpr int kStallordP2CamFrames = 12;
+
+static void stallord_phase2_camera(camera_process_class* cam) {
+    cam->mCamera.Reset(cXyz(1909.093f, -1502.426f, -1568.052f), cXyz(1933.030f, -1428.330f, -1773.810f),
+                       61.868f, 0);
+    cam->mCamera.Start();
+    cam->mCamera.SetTrimSize(0);
+}
+
 static void stallord_phase2_finalize(fopAc_ac_c* ds) {
     camera_process_class* cam = boss_rush_get_active_player_camera();
     daAlink_c* link = daAlink_getAlinkActorClass();
@@ -2780,14 +2792,8 @@ static void stallord_phase2_finalize(fopAc_ac_c* ds) {
         link->speedF = 0.0f;
     }
     if (cam != nullptr) {
-        const f32 fx = cM_ssin(faceYaw), fz = cM_scos(faceYaw);
-        cXyz center(p.x + fx * 200.0f, p.y + 100.0f, p.z + fz * 200.0f);
-        cXyz eye(p.x - fx * 450.0f, p.y + 170.0f, p.z - fz * 450.0f);
-        cam->mCamera.Reset(center, eye);
-        cam->mCamera.Start();
-        cam->mCamera.SetTrimSize(0);
-        fopCamM_SetAngleY(cam, faceYaw);
-        s_stallordP2CamFrames = 90;
+        stallord_phase2_camera(cam);
+        s_stallordP2CamFrames = kStallordP2CamFrames;
     }
 
     bbi::stallord_prep_phase2_wait(ds);
@@ -2814,6 +2820,7 @@ static void update_stallord_phase_transition_skip() {
     if (instant_fight_rearm(s_gen)) {
         s_p1Killed = false; s_p2Finalized = false; s_done = false; s_fadeFrames = 0;
         s_stallordP2CamFrames = 0; s_stallordArenaSnapFrames = 0;
+        s_stallordTransitionHidden = false;
         mDoGph_gInf_c::offFade();
     }
 
@@ -2825,19 +2832,8 @@ static void update_stallord_phase_transition_skip() {
 
     if (s_stallordP2CamFrames > 0) {
         --s_stallordP2CamFrames;
-        daAlink_c* link = daAlink_getAlinkActorClass();
         camera_process_class* cam = boss_rush_get_active_player_camera();
-        if (link != nullptr && cam != nullptr) {
-            const s16 ang = link->shape_angle.y;
-            const cXyz& lp = link->current.pos;
-            const f32 fx = cM_ssin(ang), fz = cM_scos(ang);
-            cXyz center(lp.x + fx * 200.0f, lp.y + 100.0f, lp.z + fz * 200.0f);
-            cXyz eye(lp.x - fx * 450.0f, lp.y + 170.0f, lp.z - fz * 450.0f);
-            cam->mCamera.Reset(center, eye);
-            cam->mCamera.Start();
-            cam->mCamera.SetTrimSize(0);
-            fopCamM_SetAngleY(cam, ang);
-        }
+        if (cam != nullptr) stallord_phase2_camera(cam);
     }
 
     if (s_done) return;
@@ -2856,7 +2852,7 @@ static void update_stallord_phase_transition_skip() {
 
     if (!s_p1Killed) {
         if (ds != nullptr && bbi::stallord_p1_death_demo(ds)) {
-            mDoGph_gInf_c::fadeOut(0.2f);
+            s_stallordTransitionHidden = true;
             daAlink_c* link = daAlink_getAlinkActorClass();
             if (link != nullptr) link->cancelOriginalDemo();
             dComIfGp_event_reset();
@@ -2891,8 +2887,8 @@ static void update_stallord_phase_transition_skip() {
                 stallord_phase2_finalize(ds);
                 dComIfGs_onZoneSwitch(7, static_cast<s8>(fopAcM_GetRoomNo(ds)));
                 s_p2Finalized = true;
-                mDoGph_gInf_c::fadeIn(0.2f);
-                s_stallordP2CamFrames = 90;
+                s_stallordTransitionHidden = false;
+                s_stallordP2CamFrames = kStallordP2CamFrames;
                 s_done = true;
             }
         }
@@ -3651,6 +3647,164 @@ static HookAction on_boss_rush_alink_execute_pre(ModContext*, void*, void*, void
     return HOOK_CONTINUE;
 }
 
+template <class T>
+static int ticks_to_next_event(T timer, const T* events, int count) {
+    for (int i = 0; i < count; ++i) {
+        if (timer <= events[i]) return timer < events[i] - 1 ? events[i] - 1 - timer : 0;
+    }
+    return 0;
+}
+
+template <class T>
+static void skip_to_next_event(T& timer, const T* events, int count) {
+    timer = static_cast<T>(timer + ticks_to_next_event(timer, events, count));
+}
+
+template <class T>
+static int countdown_ticks_to_next_event(T timer, const T* events, int count) {
+    for (int i = 0; i < count; ++i) {
+        if (timer >= events[i]) return timer > events[i] + 1 ? timer - (events[i] + 1) : 0;
+    }
+    return 0;
+}
+
+template <class T>
+static void count_down_to_end(T& timer) {
+    if (timer > 1) timer = 1;
+}
+
+static bool diababa_phase2_running(fopAc_ac_c* bq) {
+    const s16 mode = reinterpret_cast<const b_bq_class*>(bq)->mDemoMode;
+    return mode >= 1 && mode < 10;
+}
+
+static void diababa_phase2_hurry(fopAc_ac_c* bq) {
+    b_bq_class* b = reinterpret_cast<b_bq_class*>(bq);
+    if (b->mDemoMode == 3) {
+        static const s16 kEvents[] = {205, 290};
+        skip_to_next_event(b->mDemoModeTimer, kEvents, 2);
+    }
+}
+
+static bool morpheel_phase2_running(fopAc_ac_c* ob) {
+    const s16 demo = reinterpret_cast<const b_ob_class*>(ob)->mDemoAction;
+    return demo >= 20 && demo <= 23;
+}
+
+static void morpheel_phase2_hurry(fopAc_ac_c* ob) {
+    b_ob_class* o = reinterpret_cast<b_ob_class*>(ob);
+    if (o->mDemoAction != 21 || o->mAction != OB_ACTION_CORE_END) return;
+    static const s16 kDemoEvents[] = {290, 430};
+    const int headroom = ticks_to_next_event(o->mDemoActionTimer, kDemoEvents, 2);
+    if (headroom <= 0) return;
+
+    int shift = 0;
+    if (o->mMode == 1) {
+        mDoExt_McaMorf* morf = o->mBodyParts[0].mpMorf;
+        if (morf == nullptr) return;
+        static const s16 kFrameEvents[] = {100, 0x7FFF};
+        const s16 frame = static_cast<s16>(morf->getFrame());
+        const s16 end = static_cast<s16>(morf->getEndFrame());
+        shift = std::min(headroom, ticks_to_next_event(frame, kFrameEvents, 2));
+        shift = std::min(shift, std::max(0, end - 2 - frame));
+        if (shift > 0) morf->setFrameF(morf->getFrame() + static_cast<f32>(shift));
+    } else if (o->mMode == 2) {
+        static const s16 kEvents[] = {60, 50, 0};
+        shift = std::min(headroom, countdown_ticks_to_next_event(o->mTimers[0], kEvents, 3));
+        o->mTimers[0] = static_cast<s16>(o->mTimers[0] - shift);
+    }
+    if (shift > 0) o->mDemoActionTimer = static_cast<s16>(o->mDemoActionTimer + shift);
+}
+
+static bool phase2_near_end(fopAc_ac_c* boss, s16 procName) {
+    if (procName == fpcNm_B_BQ_e) {
+        const b_bq_class* b = reinterpret_cast<const b_bq_class*>(boss);
+        return b->mDemoMode == 4 && b->mDemoModeTimer >= 410;
+    }
+    if (procName == fpcNm_B_OB_e) {
+        const b_ob_class* o = reinterpret_cast<const b_ob_class*>(boss);
+        return o->mDemoAction == 23 && o->mDemoActionTimer >= 100;
+    }
+    const daB_YO_c* y = static_cast<const daB_YO_c*>(static_cast<void*>(boss));
+    return y->mMode == 18 && y->mActionTimer <= 20;
+}
+
+static bool blizzeta_phase2_running(fopAc_ac_c* yo) {
+    return static_cast<daB_YO_c*>(static_cast<void*>(yo))->mAction == daB_YO_c::ACT_SERIOUS_DEMO;
+}
+
+static void blizzeta_phase2_hurry(fopAc_ac_c* yo) {
+    daB_YO_c* y = static_cast<daB_YO_c*>(static_cast<void*>(yo));
+    if (y->mMode == 5 && y->mActionTimer > 1) yo->speed.y = 5.0f;
+    if (y->mMode == 3 || y->mMode == 5 || y->mMode == 17) count_down_to_end(y->mActionTimer);
+}
+
+static fopAc_ac_c* phase2_boss(const char* name, s16* procName) {
+    if (std::strcmp(name, "Diababa") == 0) *procName = fpcNm_B_BQ_e;
+    else if (std::strcmp(name, "Morpheel") == 0) *procName = fpcNm_B_OB_e;
+    else if (std::strcmp(name, "Blizzeta") == 0) *procName = fpcNm_B_YO_e;
+    else return nullptr;
+    return fopAcM_SearchByName(*procName);
+}
+
+static bool s_phase2Hidden = false;
+static void update_phase2_demo_skip() {
+    static constexpr f32 kPhaseFadeSpeed = 0.15f;
+    enum { IDLE, FADING, FAST, SLOW };
+    static int s_state = IDLE;
+
+    fopAc_ac_c* boss = nullptr;
+    s16 procName = 0;
+    bool running = s_stallordTransitionHidden && is_boss_rush_active();
+    if (!running && is_boss_rush_active() && !s_returningToChamber) {
+        const int t = boss_rush_target_index();
+        if (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount) {
+            boss = phase2_boss(g_bossGalleryTable[t].displayName, &procName);
+        }
+        if (boss != nullptr) {
+            if (procName == fpcNm_B_BQ_e) running = diababa_phase2_running(boss);
+            else if (procName == fpcNm_B_OB_e) running = morpheel_phase2_running(boss);
+            else running = blizzeta_phase2_running(boss);
+        }
+    }
+
+    if (running) {
+        if (s_state == IDLE) {
+            mDoGph_gInf_c::fadeOut(kPhaseFadeSpeed);
+            s_state = FADING;
+        } else if (s_state == FADING && mDoGph_gInf_c::getFadeRate() >= 1.0f) {
+            s_state = FAST;
+        }
+        if (s_state == FAST) fast_forward_set_hidden_run(true);
+        if (s_state == FAST && boss != nullptr) {
+            if (phase2_near_end(boss, procName)) {
+                fast_forward_set_hidden_run(false);
+                s_state = SLOW;
+            } else if (procName == fpcNm_B_BQ_e) {
+                diababa_phase2_hurry(boss);
+            } else if (procName == fpcNm_B_OB_e) {
+                morpheel_phase2_hurry(boss);
+            } else {
+                blizzeta_phase2_hurry(boss);
+            }
+        }
+    } else if (s_state != IDLE) {
+        fast_forward_set_hidden_run(false);
+        mDoGph_gInf_c::fadeIn(kPhaseFadeSpeed);
+        s_state = IDLE;
+    }
+    s_phase2Hidden = s_state != IDLE;
+}
+
+DEFINE_HOOK(&Z2SeMgr::seStart, BossRushPhaseSeStartHook);
+DEFINE_HOOK(&Z2SeMgr::seStartLevel, BossRushPhaseSeStartLevelHook);
+
+static HookAction on_phase_se_start_pre(ModContext*, void*, void* retval, void*) {
+    if (!s_phase2Hidden) return HOOK_CONTINUE;
+    if (retval != nullptr) *static_cast<bool*>(retval) = false;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     daAlink_c* link = daAlink_getAlinkActorClass();
 
@@ -3679,6 +3833,7 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     update_stallord_instant_fight();
     update_stallord_phase_transition_skip();
     update_argorok_phase_transition_skip();
+    update_phase2_demo_skip();
     update_horsebackganon_instant_fight();
     update_darknut_instant_fight();
     update_armogohma_instant_fight();
@@ -3749,8 +3904,7 @@ static bool link_near_gallery_statue() {
 }
 
 static void show_statue_fight_a_status() {
-    // Master sword spawn/prompt disabled for now.
-    if (link_near_gallery_statue() /* || boss_rush_master_sword_near() */) {
+    if (link_near_gallery_statue() || boss_rush_master_sword_near()) {
         g_dComIfG_gameInfo.play.setDoStatus(BUTTON_STATUS_OPEN, BUTTON_STATUS_FLAG_NONE);
     }
 }
@@ -3769,12 +3923,12 @@ static void on_action_string_post(ModContext*, void* args, void* retval, void*) 
     }
 
     static char fight[] = "Fight";
-    // static char startBossRush[] = "Start boss rush";
+    static char startBossRush[] = "Start Master Rush";
     static char leave[] = "Leave Boss Rush";
     if (link_near_gallery_statue()) {
         *static_cast<char**>(retval) = fight;
-    // } else if (boss_rush_master_sword_near()) {
-    //     *static_cast<char**>(retval) = startBossRush;
+    } else if (boss_rush_master_sword_near()) {
+        *static_cast<char**>(retval) = startBossRush;
     } else {
         *static_cast<char**>(retval) = leave;
     }
@@ -4561,6 +4715,10 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         if (link != nullptr) {
             link->cancelOriginalDemo();
         }
+        if (!boss_rush_screen_is_fully_black()) {
+            mDoGph_gInf_c::offFade();
+        }
+        Z2GetAudioMgr()->subBgmStop();
     }
 
     s_pendingGearSaveApply = true;
@@ -4866,7 +5024,7 @@ static fopAc_ac_c* boss_rush_find_current_boss_actor() {
 }
 
 void boss_rush_debug_kill_current_boss() {
-    if (!boss_rush_is_fighting_here()) {
+    if (!boss_rush_is_fighting_here() || s_returningToChamber || s_pendingFightIndex != -1) {
         return;
     }
 
@@ -4874,9 +5032,7 @@ void boss_rush_debug_kill_current_boss() {
     if (boss != nullptr) {
         boss->health = 0;
     }
-
-    s_killWatchdogFrames = 0;
-    advance_boss_rush_run(s_logSvc, s_modCtx, "Debug kill boss");
+    s_killWatchdogFrames = 60;
 }
 
 static void apply_pending_gear_save_if_covered() {
@@ -5208,6 +5364,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
 
             if (s_activeFightIndex >= 0 && s_activeFightIndex < static_cast<int>(g_bossGalleryCount)) {
                 const BossGalleryEntry& boss = g_bossGalleryTable[s_activeFightIndex];
+                const u16 runCarriedLife = dComIfGs_getLife();
+                Z2GetAudioMgr()->unMuteSceneBgm(0);
 
                 if (std::strcmp(boss.displayName, "Puppet Zelda") == 0 ||
                     std::strcmp(boss.displayName, "Beast Ganon") == 0 || isGanonGauntlet) {
@@ -5265,9 +5423,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 }
 
                 if (s_rushRunActive) {
-                    dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
-                    sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()),
-                                            dComIfGs_getMaxLife());
+                    const u16 life = std::min(runCarriedLife, full_life_for_max(dComIfGs_getMaxLife()));
+                    dComIfGs_setLife(life);
+                    sync_life_meter_instant(life, dComIfGs_getMaxLife());
                 }
 
                 const char* curSt2 = dComIfGp_getStartStageName();
@@ -5358,6 +5516,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_blizzeta_instant_fight();
     update_stallord_instant_fight();
     update_stallord_phase_transition_skip();
+    update_phase2_demo_skip();
     update_horsebackganon_instant_fight();
     update_darknut_instant_fight();
     update_armogohma_instant_fight();
@@ -5850,9 +6009,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
-    // if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
-    //     start_boss_rush_full_run(log_svc, mod_ctx);
-    // }
+    if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
+        start_boss_rush_full_run(log_svc, mod_ctx);
+    }
 }
 
 ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
@@ -5868,6 +6027,8 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
     if (hook_svc) {
         mods::hook::add_post<BossRushDrawHook>(hook_svc, on_boss_rush_draw_post);
         mods::hook::add_post<BossRushAlinkExecuteHook>(hook_svc, on_boss_rush_alink_execute_post);
+        mods::hook::add_pre<BossRushPhaseSeStartHook>(hook_svc, on_phase_se_start_pre);
+        mods::hook::add_pre<BossRushPhaseSeStartLevelHook>(hook_svc, on_phase_se_start_pre);
         mods::hook::add_pre<BossRushAlinkExecuteHook>(hook_svc, on_boss_rush_alink_execute_pre);
         mods::hook::add_pre<BossRushMeterDrawHook>(hook_svc, on_boss_rush_meter_draw_pre);
         mods::hook::add_post<BossRushMeterDrawHook>(hook_svc, on_boss_rush_meter_draw_post);

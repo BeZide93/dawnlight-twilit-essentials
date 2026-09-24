@@ -1111,13 +1111,16 @@ void refresh_boss_rush_midna_flow() {
     const int gauntletPhase = (wantMode == BossRushMidnaMode::Fight) ?
         boss_rush_gauntlet_phase() : 0;
     const bool horseback = wantMode == BossRushMidnaMode::Fight && is_boss_rush_midna_simple_bmg();
+    const char* target = wantMode == BossRushMidnaMode::Fight ? boss_rush_current_target_name() : nullptr;
+    static const char* s_bossRushMidnaTarget = nullptr;
 
     if (wantMode == s_bossRushMidnaMode &&
         s_bossRushMidnaFlowGraph.handle() != 0 &&
         s_bossRushMidnaTopologyVersion == s_bossRushMidnaTopology.version &&
         s_bossRushMidnaTransformOption == transformOption &&
         s_bossRushMidnaGauntletPhase == gauntletPhase &&
-        s_bossRushMidnaHorseback == horseback) {
+        s_bossRushMidnaHorseback == horseback &&
+        s_bossRushMidnaTarget == target) {
         return;
     }
 
@@ -1144,6 +1147,7 @@ void refresh_boss_rush_midna_flow() {
         s_bossRushMidnaTransformOption = transformOption;
         s_bossRushMidnaHorseback = horseback;
         s_bossRushMidnaGauntletPhase = gauntletPhase;
+        s_bossRushMidnaTarget = target;
         boss_rush_debug_log("[midna] graph built mode=%d horse=%d horseNode=%u ver=%u "
                             "prompts=%u root3001=%u gphase=%d",
                             (int)wantMode, (int)horseback,

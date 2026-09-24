@@ -72,7 +72,7 @@ constexpr GearRule kRules[] = {
     {"Blizzeta",        10, IT_BALL,          5, true,  0},
     {"Darknut",         12, 0,                6, true,  0},
     {"Armogohma",       12, IT_BOW | IT_ROD,  6, true,  0},
-    {"Aeralfos",        14, IT_CLAW,          7, true,  0},
+    {"Aeralfos",        14, IT_CLAW | IT_BOOM, 7, true,  0},
     {"Argorok",         14, IT_CLAW | IT_BOOTS,              7, true,  0},
     {"Zant",           17, IT_ZANT_ALL,      7, true,  2},
     {"Puppet Zelda",   20, IT_BOW,           7, true,  0},
