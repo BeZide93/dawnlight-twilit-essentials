@@ -109,12 +109,7 @@ static const u8 kCustomizeBlacklist[] = {
     dItemNo_LIGHT_DROP_e,
 };
 
-static bool customize_blacklisted(u8 itemNo) {
-    for (const u8 banned : kCustomizeHardBlacklist) {
-        if (itemNo == banned) {
-            return true;
-        }
-    }
+bool qa_bottles_menu_owns_item(u8 itemNo) {
     if (!g_configBottlesQuickAccessEnabled) {
         return false;
     }
@@ -124,6 +119,15 @@ static bool customize_blacklisted(u8 itemNo) {
         }
     }
     return false;
+}
+
+static bool customize_blacklisted(u8 itemNo) {
+    for (const u8 banned : kCustomizeHardBlacklist) {
+        if (itemNo == banned) {
+            return true;
+        }
+    }
+    return qa_bottles_menu_owns_item(itemNo);
 }
 
 static void edit_list_add(u8 itemNo) {

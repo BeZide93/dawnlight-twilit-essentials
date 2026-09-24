@@ -44,6 +44,7 @@ DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawHook);
 static std::unordered_map<fpc_ProcID, s16> g_maxHealthMap;
 static std::unordered_map<fpc_ProcID, f32> g_enemyAlphaMap;
 static std::unordered_map<fpc_ProcID, f32> g_enemyAnchorH;
+static std::unordered_map<fpc_ProcID, f32> g_enemyChipMap;
 
 struct DamagePopup {
     fpc_ProcID enemyId;
@@ -293,6 +294,7 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     if (currentAlpha < 0.005f) {
         g_enemyAlphaMap.erase(id);
         g_enemyAnchorH.erase(id);
+        g_enemyChipMap.erase(id);
         return 0;
     }
     g_enemyAlphaMap[id] = currentAlpha;
@@ -304,6 +306,16 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     f32 hpRatio = static_cast<f32>(actor->health) / static_cast<f32>(maxHp);
     if (hpRatio < 0.0f) hpRatio = 0.0f;
     if (hpRatio > 1.0f) hpRatio = 1.0f;
+
+    // White trailing segment that chases the live value down, like the boss bar's chip.
+    f32 chipRatio;
+    auto itChip = g_enemyChipMap.find(id);
+    if (itChip == g_enemyChipMap.end() || hpRatio >= itChip->second) {
+        chipRatio = hpRatio;
+    } else {
+        chipRatio = itChip->second + (hpRatio - itChip->second) * 0.12f;
+    }
+    g_enemyChipMap[id] = chipRatio;
 
     u8 r, g, b;
     if (hpRatio > 0.5f) {
@@ -335,6 +347,12 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
         f32 fillWidth = barWidth * hpRatio;
         J2DFillBox(drawX, drawY, fillWidth, barHeight, JUtility::TColor(r, g, b, getAlpha(240)));
         J2DFillBox(drawX, drawY, fillWidth, 1.0f, JUtility::TColor(255, 255, 255, getAlpha(80)));
+    }
+
+    if (chipRatio > hpRatio + 0.001f) {
+        const f32 chipWidth = barWidth * (chipRatio - hpRatio);
+        J2DFillBox(drawX + barWidth * hpRatio, drawY, chipWidth, barHeight,
+                   JUtility::TColor(236, 226, 200, getAlpha(150)));
     }
 
     if (g_configHpBarsShowNumbers) {
@@ -489,7 +507,9 @@ static void on_meter2_draw_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) {
+    // Only real pause menus hide the bars; keep drawing through hitstop
+    // (which is a scene pause), like the stamina meter does.
+    if (dComIfGp_isPauseFlag()) {
         return;
     }
 
@@ -526,6 +546,7 @@ void shutdown_hp_bars() {
     g_maxHealthMap.clear();
     g_enemyAlphaMap.clear();
     g_enemyAnchorH.clear();
+    g_enemyChipMap.clear();
     s_lastHealthMap.clear();
     s_damagePopups.clear();
 }

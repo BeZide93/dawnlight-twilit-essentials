@@ -39,6 +39,7 @@ u8 qa_custom_item(int idx);
 bool qa_custom_contains(u8 itemNo);
 bool qa_custom_contains_family(u8 itemNo);
 u8 qa_custom_find_family_item(u8 itemNo);
+bool qa_bottles_menu_owns_item(u8 itemNo);
 bool qa_custom_add_item(u8 itemNo);
 bool qa_custom_remove_item(u8 itemNo);
 bool qa_custom_replace_at(int idx, u8 itemNo);

@@ -19,7 +19,12 @@ bool itemwheel_filter_active() {
 }
 
 static bool itemwheel_is_hidden_item(u8 itemNo) {
-    return qa_custom_contains_family(itemNo);
+    if (qa_custom_contains_family(itemNo)) {
+        return true;
+    }
+    // qa_bottles_menu_owns_item only reports bottles/contents while Bottle Quick
+    // Access is enabled, so the wheel keeps them otherwise.
+    return qa_bottles_menu_owns_item(itemNo);
 }
 
 DEFINE_HOOK(&dSv_player_item_c::setLineUpItem, SvSetLineUpItemQuickAccessHook);
