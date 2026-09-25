@@ -273,9 +273,27 @@ void on_cursor_move_post(ModContext*, void* args, void*, void*) {
 // added get the same treatment here, through the game's menu pointer functions.
 // ---------------------------------------------------------------------------
 
+// Mirrors the head of dusk::menu_pointer::State (x, y, valid).
+struct PointerState {
+    f32 x;
+    f32 y;
+    bool valid;
+};
+
 bool (*s_hitRect)(f32, f32, f32, f32, f32) = nullptr;
+// Android builds inline hit_rect() into its callers, so the manifest has no such symbol there;
+// state() is still exported and hit_rect() is only a bounds test on it.
+const PointerState& (*s_pointerState)() = nullptr;
 void (*s_setHoverTarget)(u16) = nullptr;
 bool (*s_consumeClick)() = nullptr;
+
+bool pointer_hit_rect(f32 left, f32 top, f32 right, f32 bottom, f32 padding) {
+    if (s_hitRect != nullptr) return s_hitRect(left, top, right, bottom, padding);
+    const PointerState& state = s_pointerState();
+    if (!state.valid) return false;
+    return state.x >= left - padding && state.x <= right + padding && state.y >= top - padding &&
+           state.y <= bottom + padding;
+}
 
 // Cells in the native getItemTag() table of the equipment rows.
 bool native_table_cell(u8 x, u8 y) {
@@ -297,12 +315,16 @@ bool pointer_hits(CPaneMgr* pm) {
         if (i == 0 || v.y < top) top = v.y;
         if (i == 0 || v.y > bottom) bottom = v.y;
     }
-    return s_hitRect(left, top, right, bottom, 8.0f);
+    return pointer_hit_rect(left, top, right, bottom, 8.0f);
 }
 
 void on_pointer_wait_post(ModContext*, void* args, void* ret, void*) {
     if (args == nullptr || ret == nullptr || *static_cast<bool*>(ret)) return;
-    if (s_hitRect == nullptr || s_setHoverTarget == nullptr || s_consumeClick == nullptr) return;
+    if ((s_hitRect == nullptr && s_pointerState == nullptr) || s_setHoverTarget == nullptr ||
+        s_consumeClick == nullptr)
+    {
+        return;
+    }
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
     if (!screen_active(c) || collection_page_on_page()) return;
 
@@ -329,13 +351,16 @@ void on_pointer_wait_post(ModContext*, void* args, void* ret, void*) {
 }
 
 template <class Fn>
-void resolve_fn(const HookService* hook_svc, const char* name, Fn* out) {
+bool resolve_fn(const HookService* hook_svc, const char* name, Fn* out, bool logMissing = true) {
     void* addr = nullptr;
     if (hook_svc->resolve == nullptr || hook_svc->resolve(g_modCtx, name, &addr, nullptr) != MOD_OK) {
-        log_collect_info("collection-lib: '%s' not found, no mouse pointer on added slots", name);
-        return;
+        if (logMissing) {
+            log_collect_info("collection-lib: '%s' not found, no mouse pointer on added slots", name);
+        }
+        return false;
     }
     *out = reinterpret_cast<Fn>(addr);
+    return true;
 }
 
 HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
@@ -471,7 +496,9 @@ HookAction on_get_string_local_pre(ModContext*, void* args, void* ret, void*) {
 }  // namespace
 
 void nav_install_hooks(const HookService* hook_svc) {
-    resolve_fn(hook_svc, "dusk::menu_pointer::hit_rect", &s_hitRect);
+    if (!resolve_fn(hook_svc, "dusk::menu_pointer::hit_rect", &s_hitRect, false)) {
+        resolve_fn(hook_svc, "dusk::menu_pointer::state", &s_pointerState);
+    }
     resolve_fn(hook_svc, "dusk::menu_pointer::set_hover_target", &s_setHoverTarget);
     resolve_fn(hook_svc, "dusk::menu_pointer::consume_click", &s_consumeClick);
     CL_HOOK_POST(PointerWaitHook, on_pointer_wait_post);
