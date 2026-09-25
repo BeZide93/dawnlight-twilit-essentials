@@ -23,6 +23,9 @@
 #include "m_Do/m_Do_MemCard.h"
 #include "m_Do/m_Do_Reset.h"
 #include "SSystem/SComponent/c_math.h"
+#include "JSystem/J2DGraph/J2DOrthoGraph.h"
+#include "JSystem/JUtility/JUTFader.h"
+#include "JSystem/JUtility/JUTGamePad.h"
 
 #include <cstring>
 
@@ -30,6 +33,9 @@ extern const HookService* svc_hook;
 
 DEFINE_HOOK(&fapGm_Execute, BossRushGameModeExecuteHook);
 DEFINE_HOOK(&dCamera_c::Run, BossRushPreviewCameraRunHook);
+DEFINE_HOOK(&dComIfG_changeOpeningScene, BossRushChangeOpeningSceneHook);
+DEFINE_HOOK(&JUTFader::control, BossRushFaderControlHook);
+DEFINE_HOOK(&JUTGamePad::checkResetSwitch, BossRushCheckResetSwitchHook);
 
 namespace {
 
@@ -67,6 +73,9 @@ fpc_ProcID s_waitSceneId = fpc_ProcID(-1);
 bool s_previewing = false;
 s16 s_previewAngle = kPreviewStartAngle;
 bool s_lastActive = false;
+fpc_ProcID s_previewSceneId = fpc_ProcID(-1);
+fpc_ProcID s_lastOpeningId = fpc_ProcID(-1);
+bool s_maskOpening = false;
 bool s_cardReattachPending = false;
 cXyz s_previewCenter;
 cXyz s_previewEye;
@@ -119,12 +128,24 @@ bool screen_is_black() {
     return fader != nullptr && fader->getStatus() == JUTFader::None;
 }
 
-bool enter_chamber_scene(scene_class* scene, int fadeFrames) {
+void set_chamber_next_stage() {
     dComIfGp_offEnableNextStage();
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
                           kBossRushChamberLayer, 0.0f, 0, 1, 0, cM_deg2s(180.0f), 0, 0);
     g_dComIfG_gameInfo.play.mNextStage.getStartStage()->set(
         kBossRushChamberStage, kBossRushChamberRoom, kBossRushChamberPoint, kBossRushChamberLayer);
+}
+
+void set_title_next_stage() {
+    dComIfGp_offEnableNextStage();
+    dComIfGp_setNextStage("F_SP102", 100, 0, 10);
+    mDoAud_setSceneName(dComIfGp_getNextStageName(), dComIfGp_getNextStageRoomNo(),
+                        dComIfGp_getNextStageLayer());
+    dComIfGs_setRestartRoomParam(0);
+}
+
+bool enter_chamber_scene(scene_class* scene, int fadeFrames) {
+    set_chamber_next_stage();
 
     mDoGph_gInf_c::setFadeColor(*(JUtility::TColor*)&g_blackColor);
     if (!fopScnM_ChangeReq(scene, fpcNm_PLAY_SCENE_e, 0, fadeFrames)) {
@@ -136,17 +157,32 @@ bool enter_chamber_scene(scene_class* scene, int fadeFrames) {
 }
 
 bool leave_chamber_scene(scene_class* scene) {
-    dComIfGp_offEnableNextStage();
-    dComIfGp_setNextStage("F_SP102", 100, 0, 10);
-    mDoAud_setSceneName(dComIfGp_getNextStageName(), dComIfGp_getNextStageRoomNo(),
-                        dComIfGp_getNextStageLayer());
-    dComIfGs_setRestartRoomParam(0);
+    set_title_next_stage();
     mDoGph_gInf_c::setFadeColor(*(JUtility::TColor*)&g_blackColor);
     if (!fopScnM_ChangeReq(scene, fpcNm_OPENING_SCENE_e, 0, kPreviewFadeFrames)) {
         return false;
     }
     fopScnM_ReRequest(fpcNm_OPENING_SCENE_e, 0);
     mDoAud_bgmStop(kPreviewFadeFrames);
+    return true;
+}
+
+bool redirect_to_chamber() {
+    if (!fopScnM_ReRequest(fpcNm_PLAY_SCENE_e, 0)) {
+        return false;
+    }
+    set_chamber_next_stage();
+    mDoAud_bgmStop(kPreviewFadeFrames);
+    s_pendingSaveInit = true;
+    return true;
+}
+
+bool redirect_to_title() {
+    if (!fopScnM_ReRequest(fpcNm_OPENING_SCENE_e, 0)) {
+        return false;
+    }
+    set_title_next_stage();
+    s_pendingSaveInit = false;
     return true;
 }
 
@@ -294,11 +330,32 @@ void update_card_reattach(bool active) {
     }
 }
 
+void update_logo_redirect(base_process_class* logo, bool active) {
+    const fpc_ProcID logoId = fpcM_GetID(logo);
+    if (active && !s_inChamber) {
+        if (redirect_to_chamber()) {
+            s_inChamber = true;
+            s_entering = true;
+            s_chamberFromScene = logoId;
+            s_waitSceneId = logoId;
+        }
+    } else if (!active && s_inChamber && s_entering && s_chamberFromScene == logoId) {
+        if (redirect_to_title()) {
+            s_inChamber = false;
+            s_entering = false;
+        }
+    }
+}
+
 void update_boss_rush_game_mode() {
     if (!s_registered) {
         return;
     }
-    update_card_reattach(boss_rush_game_mode_is_active());
+    const bool activeNow = boss_rush_game_mode_is_active();
+    update_card_reattach(activeNow);
+    if (base_process_class* logo = fpcM_SearchByName(fpcNm_LOGO_SCENE_e)) {
+        update_logo_redirect(logo, activeNow);
+    }
     scene_class* scene = current_scene();
     if (scene == nullptr) {
         return;
@@ -339,6 +396,29 @@ void update_boss_rush_game_mode() {
 
     const bool menuOpen = prelaunch_open();
 
+    if (sceneName == fpcNm_OPENING_SCENE_e && sceneId != s_lastOpeningId) {
+        s_lastOpeningId = sceneId;
+        if (active && !s_inChamber) {
+            s_maskOpening = true;
+        }
+    }
+    if (s_maskOpening && (sceneName != fpcNm_OPENING_SCENE_e || !active)) {
+        s_maskOpening = false;
+    }
+
+    if (menuOpen && active && s_leaving && sceneName == fpcNm_PLAY_SCENE_e &&
+        sceneId == s_waitSceneId && redirect_to_chamber()) {
+        s_leaving = false;
+        s_inChamber = true;
+        s_entering = true;
+    } else if (menuOpen && !active && s_entering && s_inChamber &&
+               sceneId == s_waitSceneId &&
+               (sceneName == fpcNm_OPENING_SCENE_e || sceneName == fpcNm_LOGO_SCENE_e) &&
+               redirect_to_title()) {
+        s_inChamber = false;
+        s_entering = false;
+    }
+
     if (active && !s_inChamber && sceneName == fpcNm_OPENING_SCENE_e && scene_change_allowed(scene)) {
         if (enter_chamber_scene(scene, menuOpen ? kPreviewFadeFrames : kPlayFadeFrames)) {
             s_inChamber = true;
@@ -360,8 +440,9 @@ void update_boss_rush_game_mode() {
                              sceneId != s_reloadFromScene &&
                              ((active && s_inChamber) || s_leaving);
     if (wantPreview) {
-        if (!s_previewing) {
+        if (!s_previewing || sceneId != s_previewSceneId) {
             start_preview();
+            s_previewSceneId = sceneId;
         }
         dComIfGp_2dShowOff();
     } else if (s_previewing) {
@@ -379,6 +460,64 @@ HookAction on_game_execute_pre(ModContext*, void*, void*, void*) {
 
 void on_game_execute_post(ModContext*, void*, void*, void*) {
     update_boss_rush_game_mode();
+}
+
+HookAction on_change_opening_scene_pre(ModContext*, void* args, void* retval, void*) {
+    scene_class* scene = mods::arg<scene_class*>(args, 0);
+    if (scene == nullptr || fpcM_GetName(scene) != fpcNm_LOGO_SCENE_e) {
+        return HOOK_CONTINUE;
+    }
+    const fpc_ProcID logoId = fpcM_GetID(scene);
+    if (s_inChamber && s_entering && s_chamberFromScene == logoId) {
+        if (retval != nullptr) {
+            *static_cast<int*>(retval) = 1;
+        }
+        return HOOK_SKIP_ORIGINAL;
+    }
+    if (s_inChamber || !boss_rush_game_mode_is_active()) {
+        return HOOK_CONTINUE;
+    }
+    if (!enter_chamber_scene(scene, kPreviewFadeFrames)) {
+        return HOOK_CONTINUE;
+    }
+    s_inChamber = true;
+    s_entering = true;
+    s_chamberFromScene = logoId;
+    s_waitSceneId = logoId;
+    if (retval != nullptr) {
+        *static_cast<int*>(retval) = 1;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction on_check_reset_switch_pre(ModContext*, void*, void*, void*) {
+    if (!JUTGamePad::C3ButtonReset::sResetSwitchPushing || !s_registered) {
+        return HOOK_CONTINUE;
+    }
+    if (!boss_rush_game_mode_is_active() || !s_inChamber || s_entering || s_leaving ||
+        s_pendingSaveInit || s_menuReturnPending || prelaunch_open()) {
+        return HOOK_CONTINUE;
+    }
+    JUTGamePad::C3ButtonReset::sResetSwitchPushing = false;
+    if (is_in_boss_rush_chamber()) {
+        boss_rush_game_mode_return_to_menu_smooth();
+    } else {
+        boss_rush_game_mode_return_to_menu();
+    }
+    return HOOK_CONTINUE;
+}
+
+void on_fader_control_post(ModContext*, void* args, void*, void*) {
+    if (!s_maskOpening) {
+        return;
+    }
+    JUTFader* fader = mods::arg<JUTFader*>(args, 0);
+    if (fader == nullptr || fader != mDoGph_gInf_c::getFader()) {
+        return;
+    }
+    J2DOrthoGraph ortho;
+    ortho.setColor(JUtility::TColor(0, 0, 0, 0xFF));
+    ortho.fillBox(fader->mBox);
 }
 
 void on_camera_run_post(ModContext*, void*, void*, void*) {
@@ -418,6 +557,9 @@ ModResult init_boss_rush_gamemode(ModContext* mod_ctx) {
         mods::hook::add_pre<BossRushGameModeExecuteHook>(svc_hook, on_game_execute_pre);
         mods::hook::add_post<BossRushGameModeExecuteHook>(svc_hook, on_game_execute_post);
         mods::hook::add_post<BossRushPreviewCameraRunHook>(svc_hook, on_camera_run_post);
+        mods::hook::add_pre<BossRushChangeOpeningSceneHook>(svc_hook, on_change_opening_scene_pre);
+        mods::hook::add_post<BossRushFaderControlHook>(svc_hook, on_fader_control_post);
+        mods::hook::add_pre<BossRushCheckResetSwitchHook>(svc_hook, on_check_reset_switch_pre);
     }
 
     const char* fullName =
@@ -483,5 +625,6 @@ void shutdown_boss_rush_gamemode() {
     s_returnToPrelaunch = nullptr;
     s_menuReturnPending = false;
     s_reloadFromScene = fpc_ProcID(-1);
+    s_maskOpening = false;
     s_modCtx = nullptr;
 }
