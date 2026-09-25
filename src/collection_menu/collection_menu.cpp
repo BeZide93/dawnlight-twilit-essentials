@@ -80,8 +80,8 @@ static void register_starter_gear() {
         .kind = CE_TUNIC,
         .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
         .description = linkle
-            ? "The clothes Linkle wore at the beginning of her journey in Ordon Village."
-            : "The clothes Link wore at the beginning of his journey in Ordon Village.",
+            ? "The clothes Linkle wore at the beginning\nof her journey in Ordon Village."
+            : "The clothes Link wore at the beginning\nof his journey in Ordon Village.",
         .iconBti = linkle ? "textures/ordon_clothes_linkle.bti" : "textures/ordon_clothes.bti",
         .baseItem = dItemNo_WEAR_CASUAL_e,
     });
