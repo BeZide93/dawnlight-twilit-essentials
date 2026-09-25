@@ -603,6 +603,16 @@ void boss_rush_game_mode_return_to_menu_smooth() {
         boss_rush_game_mode_return_to_menu();
         return;
     }
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link != nullptr) {
+        const cXyz spawnPos(0.0f, kBossChamberFloorY, kBossChamberSpawnZ);
+        link->current.pos = spawnPos;
+        link->old.pos = spawnPos;
+        link->shape_angle.set(0, cM_deg2s(180.0f), 0);
+        link->current.angle.set(0, cM_deg2s(180.0f), 0);
+        link->speedF = 0.0f;
+        link->speed.set(0.0f, 0.0f, 0.0f);
+    }
     s_blendInPending = true;
     open_prelaunch();
 }
