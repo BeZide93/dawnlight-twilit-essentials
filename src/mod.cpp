@@ -2628,9 +2628,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaPerHeart = CONFIG_VAR_DESC_INIT;
         descStaminaPerHeart.name = "staminaPerHeart";
         descStaminaPerHeart.type = CONFIG_VAR_INT;
-        descStaminaPerHeart.default_int = 15;
+        descStaminaPerHeart.default_int = 30;
         if (svc_config->register_var(mod_ctx, &descStaminaPerHeart, &s_varStaminaPerHeart) == MOD_OK) {
-            int64_t v = 15;
+            int64_t v = 30;
             svc_config->get_int(mod_ctx, s_varStaminaPerHeart, &v);
             g_configStaminaPerHeart = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varStaminaPerHeart, on_stamina_per_heart_changed, nullptr, nullptr);
@@ -2697,9 +2697,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaSprintSpeed.name = "staminaSprintSpeed";
         descStaminaSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaSprintSpeed.default_int = 110;
+        descStaminaSprintSpeed.default_int = 140;
         if (svc_config->register_var(mod_ctx, &descStaminaSprintSpeed, &s_varStaminaSprintSpeed) == MOD_OK) {
-            int64_t v = 110;
+            int64_t v = 140;
             svc_config->get_int(mod_ctx, s_varStaminaSprintSpeed, &v);
             if (v < 100) v = 100;
             if (v > 200) v = 200;
@@ -2710,9 +2710,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaWolfSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaWolfSprintSpeed.name = "staminaWolfSprintSpeed";
         descStaminaWolfSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaWolfSprintSpeed.default_int = 110;
+        descStaminaWolfSprintSpeed.default_int = 125;
         if (svc_config->register_var(mod_ctx, &descStaminaWolfSprintSpeed, &s_varStaminaWolfSprintSpeed) == MOD_OK) {
-            int64_t v = 110;
+            int64_t v = 125;
             svc_config->get_int(mod_ctx, s_varStaminaWolfSprintSpeed, &v);
             if (v < 100) v = 100;
             if (v > 200) v = 200;
@@ -2732,9 +2732,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSwimSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaSwimSprintSpeed.name = "staminaSwimSprintSpeed";
         descStaminaSwimSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaSwimSprintSpeed.default_int = 115;
+        descStaminaSwimSprintSpeed.default_int = 125;
         if (svc_config->register_var(mod_ctx, &descStaminaSwimSprintSpeed, &s_varStaminaSwimSprintSpeed) == MOD_OK) {
-            int64_t v = 115;
+            int64_t v = 125;
             svc_config->get_int(mod_ctx, s_varStaminaSwimSprintSpeed, &v);
             if (v < 100) v = 100;
             if (v > 200) v = 200;
