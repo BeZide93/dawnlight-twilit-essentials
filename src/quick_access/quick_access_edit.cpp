@@ -730,6 +730,11 @@ void qa_draw_collection_slot(f32 cx, f32 cy, f32 size, u8 alpha, bool selected, 
     }
 }
 
+static f32 s_hintHitL[4] = {};
+static f32 s_hintHitR[4] = {};
+static f32 s_hintHitY = 0.0f;
+static bool s_hintHitValid = false;
+
 static void draw_hint_row(f32 centerX, f32 y, u8 alpha) {
     struct HintEntry {
         int iconIdx;
@@ -761,16 +766,20 @@ static void draw_hint_row(f32 centerX, f32 y, u8 alpha) {
 
     f32 x = centerX - total * 0.5f;
     for (int i = 0; i < 4; i++) {
+        s_hintHitL[i] = x;
         if (icons) {
             qa_draw_hint_button(kHints[i].iconIdx, x, y - 11.0f, QA_HINT_ICON_H, alpha);
             x += qa_hint_button_width(kHints[i].iconIdx, QA_HINT_ICON_H) + iconGap;
         }
         JUtility::TColor creamTop(255, 248, 210, alpha);
         JUtility::TColor goldBot(235, 185, 65, alpha);
-        qa_draw_text(icons ? kHints[i].label : kHints[i].fallback, x, y, fontW, fontH,
-                     creamTop, goldBot, alpha);
+        const char* label = icons ? kHints[i].label : kHints[i].fallback;
+        qa_draw_text(label, x, y, fontW, fontH, creamTop, goldBot, alpha);
+        s_hintHitR[i] = x + qa_get_text_width(label, fontW);
         x += segW[i] + groupGap;
     }
+    s_hintHitY = y;
+    s_hintHitValid = true;
 }
 
 using QaPointerBeginContextFn = void (*)(int);
@@ -783,9 +792,15 @@ static QaPointerHitRectFn s_pointerHitRect = nullptr;
 static QaPointerSetHoverTargetFn s_pointerSetHoverTarget = nullptr;
 static QaPointerConsumeClickFn s_pointerConsumeClick = nullptr;
 static f32 s_pointerLayoutW = 0.0f;
+static f32 s_pointerLayoutH = 0.0f;
 
 static const int kQaPointerContext = 0x5141;
 static const u16 kQaPointerSlotTarget = 0x100;
+static const u16 kQaPointerHintTarget = 0x200;
+static const u16 kQaPointerCustomizeTarget = 0x300;
+static const f32 kQaPointerHintPadX = 8.0f;
+static const f32 kQaPointerHintTop = 16.0f;
+static const f32 kQaPointerHintBottom = 10.0f;
 static const f32 kQaPointerSlotHalf = 26.0f;
 
 template <class Fn>
@@ -810,6 +825,26 @@ void quick_access_edit_pointer_install(const HookService* hook_svc, ModContext* 
     resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::consume_click", &s_pointerConsumeClick);
 }
 
+static f32 s_menuHintL = 0.0f;
+static f32 s_menuHintR = 0.0f;
+static f32 s_menuHintY = 0.0f;
+static f32 s_menuHintAnchorX = 0.0f;
+static f32 s_menuHintAnchorY = 0.0f;
+static bool s_menuHintValid = false;
+
+void qa_pointer_clear_menu_hint() {
+    s_menuHintValid = false;
+}
+
+void qa_pointer_set_menu_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 anchorY) {
+    s_menuHintL = left;
+    s_menuHintR = right;
+    s_menuHintY = y;
+    s_menuHintAnchorX = anchorX;
+    s_menuHintAnchorY = anchorY;
+    s_menuHintValid = true;
+}
+
 static bool pointer_hits_cell(f32 cx, f32 cy, f32 halfW, f32 halfH, f32 anchorX, f32 anchorY,
                               f32 scale) {
     const f32 x = anchorX + (cx - anchorX) * scale;
@@ -818,16 +853,74 @@ static bool pointer_hits_cell(f32 cx, f32 cy, f32 halfW, f32 halfH, f32 anchorX,
                             y + halfH * scale, 0.0f);
 }
 
+static bool pointer_hits_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 anchorY, f32 scale) {
+    const f32 cy = y + (kQaPointerHintBottom - kQaPointerHintTop) * 0.5f;
+    const f32 halfH = (kQaPointerHintTop + kQaPointerHintBottom) * 0.5f;
+    const f32 halfW = (right - left) * 0.5f + kQaPointerHintPadX;
+    return pointer_hits_cell((left + right) * 0.5f, cy, halfW, halfH, anchorX, anchorY, scale);
+}
+
+static void menu_hint_pointer_update() {
+    if (!s_menuOpen || !s_menuHintValid || s_menuAlpha < 0.01f) {
+        return;
+    }
+    s_pointerBeginContext(kQaPointerContext);
+    if (!pointer_hits_hint(s_menuHintL, s_menuHintR, s_menuHintY, s_menuHintAnchorX,
+                           s_menuHintAnchorY, qa_user_hud_scale())) {
+        return;
+    }
+    s_pointerSetHoverTarget(kQaPointerCustomizeTarget);
+    if (s_pointerConsumeClick()) {
+        qa_enter_edit_mode();
+    }
+}
+
 void quick_access_edit_pointer_update() {
-    if (!s_editMode || s_menuAlpha < 0.01f || s_pointerLayoutW <= 0.0f ||
-        s_pointerBeginContext == nullptr || s_pointerHitRect == nullptr ||
+    if (s_pointerBeginContext == nullptr || s_pointerHitRect == nullptr ||
         s_pointerSetHoverTarget == nullptr || s_pointerConsumeClick == nullptr) {
+        return;
+    }
+    if (!s_editMode) {
+        menu_hint_pointer_update();
+        return;
+    }
+    if (s_menuAlpha < 0.01f || s_pointerLayoutW <= 0.0f) {
         return;
     }
     s_pointerBeginContext(kQaPointerContext);
 
     const f32 scale = qa_user_hud_scale();
     const f32 centerX = s_pointerLayoutW * 0.5f;
+
+    if (s_hintHitValid) {
+        for (int i = 0; i < 4; i++) {
+            if (!pointer_hits_hint(s_hintHitL[i], s_hintHitR[i], s_hintHitY, centerX,
+                                   s_pointerLayoutH, scale)) {
+                continue;
+            }
+            s_pointerSetHoverTarget(static_cast<u16>(kQaPointerHintTarget + i));
+            if (!s_pointerConsumeClick()) {
+                return;
+            }
+            switch (i) {
+            case 0:
+                if (!quick_access_edit_toggle_current()) {
+                    Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+                }
+                break;
+            case 1:
+                quick_access_edit_clear_slot();
+                break;
+            case 2:
+                qa_edit_pointer_back();
+                break;
+            default:
+                qa_edit_pointer_close();
+                break;
+            }
+            return;
+        }
+    }
     const f32 slotsSpan = (QA_QUICK_SLOTS - 1) * 56.0f;
     for (int i = 0; i < QA_QUICK_SLOTS; i++) {
         const f32 cx = centerX - slotsSpan * 0.5f + static_cast<f32>(i) * 56.0f;
@@ -867,6 +960,8 @@ void quick_access_edit_pointer_update() {
 void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
     s_pointerLayoutW = screenW;
+    s_pointerLayoutH = screenH;
+    s_hintHitValid = false;
     qa_hud_scale_begin(screenW * 0.5f, 0.0f);
 
     const f32 centerX = screenW * 0.5f;

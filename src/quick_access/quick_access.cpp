@@ -1889,6 +1889,23 @@ static void leave_edit_mode(bool menuStillWanted) {
     }
 }
 
+void qa_edit_pointer_back() {
+    if (!s_editMode) {
+        return;
+    }
+    leave_edit_mode(controls_binding_held(CTRL_BIND_QUICK_ACCESS));
+    play_ok_se();
+}
+
+void qa_edit_pointer_close() {
+    if (!s_editMode) {
+        return;
+    }
+    s_dpadCancelLatch = true;
+    close_menu();
+    Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_CANCEL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+}
+
 static const int QA_REPEAT_START_INTERVAL = 8;
 static const int QA_REPEAT_ACCEL_STEP = 1;
 static const int QA_REPEAT_MIN_INTERVAL = 2;
@@ -2499,6 +2516,7 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
         }
     }
 
+    qa_pointer_clear_menu_hint();
     if (s_menuAlpha < 0.01f) {
         quick_access_strip_cursor_present();
         return;

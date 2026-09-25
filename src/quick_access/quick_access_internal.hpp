@@ -135,3 +135,7 @@ void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow);
 void quick_access_edit_shutdown();
 void quick_access_edit_pointer_install(const HookService* hook_svc, ModContext* mod_ctx);
 void quick_access_edit_pointer_update();
+void qa_pointer_clear_menu_hint();
+void qa_pointer_set_menu_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 anchorY);
+void qa_edit_pointer_back();
+void qa_edit_pointer_close();

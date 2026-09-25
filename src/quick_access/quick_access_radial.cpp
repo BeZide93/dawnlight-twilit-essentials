@@ -304,6 +304,7 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     const f32 hintGap = 5.0f;
     const f32 hintTotal = hintTextW + (iconsReady ? hintIconW + hintGap : 0.0f);
     f32 hintX = centerX - hintTotal * 0.5f;
+    qa_pointer_set_menu_hint(hintX, hintX + hintTotal, hintY, centerX, screenH);
     if (iconsReady) {
         qa_draw_hint_button(2, hintX, hintY - 12.0f, hintIconH, alpha);
         hintX += hintIconW + hintGap;
