@@ -594,6 +594,10 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
 
     JUtility::TColor hi(170, 255, 150, 255);
     JUtility::TColor lo(28, 158, 54, 255);
+    f32 drain = 1.0f - fill01;
+    drain = drain * drain * (3.0f - 2.0f * drain);
+    hi = lerp(hi, JUtility::TColor(255, 110, 20, 255), drain);
+    lo = lerp(lo, JUtility::TColor(150, 45, 5, 255), drain);
     hi = lerp(hi, JUtility::TColor(224, 255, 214, 255), s_pulse * 0.6f);
     lo = lerp(lo, JUtility::TColor(120, 224, 128, 255), s_pulse * 0.6f);
     hi = lerp(hi, JUtility::TColor(255, 170, 120, 255), s_emptyFlash);
