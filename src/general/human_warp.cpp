@@ -7,6 +7,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
 #include "d/d_particle_name.h"
+#include "JSystem/JParticle/JPAEmitter.h"
 #include "d/d_s_play.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_midna.h"
@@ -23,6 +24,172 @@ DEFINE_HOOK(&daAlink_c::skipPortalObjWarp, GeneralHumanWarpArrivalHook);
 DEFINE_HOOK(&daAlink_c::checkDamageAction, GeneralHumanWarpDamageActionHook);
 DEFINE_HOOK(&mDoCPd_c::read, GeneralHumanWarpPadReadHook);
 DEFINE_HOOK(&dCamera_c::Run, GeneralHumanWarpCameraRunHook);
+DEFINE_HOOK(&daAlink_c::procCoMetamorphoseInit, HumanWarpMetamorphoseBlockHook);
+DEFINE_HOOK(&daAlink_c::procCoMetamorphoseOnlyInit, HumanWarpMetamorphoseOnlyBlockHook);
+DEFINE_HOOK(&daAlink_c::setArcName, HumanWarpSetArcNameHook);
+DEFINE_HOOK(&daAlink_c::procCoWarpInit, HumanWarpObjectArrivalHook);
+DEFINE_HOOK(&daAlink_c::procCoWarp, HumanWarpObjectArrivalProcHook);
+
+static bool s_objectWarpHumanHold = false;
+static bool s_objectWarpStarted = false;
+static int s_objectWarpFrames = 0;
+static int s_objectWarpIdleFrames = 0;
+static char s_objectWarpSourceStage[16] = {0};
+static bool s_objectWarpArrivalHidden = false;
+static bool s_objectWarpArrivalDone = false;
+static bool s_objectWarpArrivalInitPending = false;
+
+static constexpr int kObjectWarpIdleFrames = 30;
+static constexpr int kObjectWarpGiveUpFrames = 3600;
+
+static bool object_warp_hold_blocks(daAlink_c* link) {
+    return s_objectWarpHumanHold && g_configGeneralHumanWarpAnimation && link != nullptr &&
+           !link->checkWolf();
+}
+
+static HookAction on_human_warp_metamorphose_block_pre(ModContext*, void* args, void* retval,
+                                                       void*) {
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!object_warp_hold_blocks(link)) {
+        return HOOK_CONTINUE;
+    }
+    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+    if (link->mDemo.getDemoMode() == daPy_demo_c::DEMO_METAMORPHOSE_UNK1_e) {
+        link->mDemo.setDemoMode(daPy_demo_c::DEMO_METAMORPHOSE_UNK2_e);
+        return HOOK_CONTINUE;
+    }
+    if (link->mDemo.getDemoMode() == daPy_demo_c::DEMO_METAMORPHOSE_UNK2_e) {
+        return HOOK_CONTINUE;
+    }
+    if (retval != nullptr) {
+        *static_cast<int*>(retval) = 1;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction on_human_warp_metamorphose_only_block_pre(ModContext*, void* args, void*,
+                                                            void*) {
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!object_warp_hold_blocks(link)) {
+        return HOOK_CONTINUE;
+    }
+    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+    if (link->mDemo.getDemoMode() == daPy_demo_c::DEMO_METAMORPHOSE_ONLY_UNK1_e) {
+        link->mDemo.setDemoMode(daPy_demo_c::DEMO_METAMORPHOSE_ONLY_UNK2_e);
+    }
+    return HOOK_CONTINUE;
+}
+
+static HookAction on_human_warp_set_arc_name_pre(ModContext*, void* args, void*, void*) {
+    if (!s_objectWarpHumanHold || !g_configGeneralHumanWarpAnimation) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    BOOL& isWolf = mods::arg_ref<BOOL>(args, 1);
+    if (link == nullptr || !isWolf) {
+        return HOOK_CONTINUE;
+    }
+    link->offNoResetFlg1(daPy_py_c::FLG1_IS_WOLF);
+    isWolf = FALSE;
+    dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+    return HOOK_CONTINUE;
+}
+
+static void reveal_object_warp_arrival(daAlink_c* link) {
+    if (!s_objectWarpArrivalHidden) {
+        return;
+    }
+    s_objectWarpArrivalHidden = false;
+    s_objectWarpArrivalDone = true;
+    if (link != nullptr) {
+        link->offPlayerNoDraw();
+        link->offPlayerShadowNoDraw();
+        link->seStartOnlyReverb(Z2SE_AL_WARP_OUT);
+    }
+}
+
+static void kill_link_emitter(daAlink_c* link, int i_slot) {
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(link->field_0x3240[i_slot]);
+    if (emitter != nullptr) {
+        emitter->deleteAllParticle();
+        emitter->becomeInvalidEmitter();
+    }
+    link->field_0x3240[i_slot] = 0;
+}
+
+static bool is_object_warp_human_arrival(daAlink_c* link) {
+    return s_objectWarpHumanHold && g_configGeneralHumanWarpAnimation && link != nullptr &&
+           !link->checkWolf() && dComIfGp_getStartStagePoint() == -4;
+}
+
+static HookAction on_human_warp_object_arrival_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!is_object_warp_human_arrival(link)) {
+        return HOOK_CONTINUE;
+    }
+    if (s_objectWarpArrivalHidden &&
+        link->mDemo.getDemoMode() == daPy_demo_c::DEMO_UNK_45_e) {
+        reveal_object_warp_arrival(link);
+        mods::arg_ref<int>(args, 1) = 1;
+        mods::arg_ref<int>(args, 2) = 1;
+        return HOOK_CONTINUE;
+    }
+    if (!s_objectWarpArrivalDone && !s_objectWarpArrivalHidden &&
+        mods::arg<int>(args, 1) == 1 &&
+        link->mDemo.getDemoMode() != daPy_demo_c::DEMO_UNK_45_e) {
+        s_objectWarpArrivalInitPending = true;
+    }
+    return HOOK_CONTINUE;
+}
+
+static void on_human_warp_object_arrival_post(ModContext*, void* args, void*, void*) {
+    if (!s_objectWarpArrivalInitPending) {
+        return;
+    }
+    s_objectWarpArrivalInitPending = false;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || link->mProcID != daAlink_c::PROC_WARP) {
+        return;
+    }
+    link->mProcVar5.field_0x3012 = 0;
+    kill_link_emitter(link, 0);
+    link->onPlayerNoDraw();
+    link->onPlayerShadowNoDraw();
+    s_objectWarpArrivalHidden = true;
+}
+
+static HookAction on_human_warp_object_arrival_proc_pre(ModContext*, void* args, void* retval,
+                                                        void*) {
+    if (!s_objectWarpArrivalHidden) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    if (link->mDemo.getDemoMode() == daPy_demo_c::DEMO_UNK_45_e) {
+        reveal_object_warp_arrival(link);
+        return HOOK_CONTINUE;
+    }
+    if (retval != nullptr) {
+        *static_cast<int*>(retval) = 1;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static void arm_object_warp_hold() {
+    s_objectWarpHumanHold = true;
+    s_objectWarpArrivalHidden = false;
+    s_objectWarpArrivalDone = false;
+    s_objectWarpArrivalInitPending = false;
+    s_objectWarpStarted = false;
+    s_objectWarpFrames = 0;
+    s_objectWarpIdleFrames = 0;
+    const char* cur = dComIfGp_getStartStageName();
+    std::strncpy(s_objectWarpSourceStage, cur != nullptr ? cur : "",
+                 sizeof(s_objectWarpSourceStage) - 1);
+    s_objectWarpSourceStage[sizeof(s_objectWarpSourceStage) - 1] = '\0';
+}
 
 static bool s_humanWarpInFlight = false;
 
@@ -195,7 +362,15 @@ static HookAction on_check_warp_start_pre(ModContext*, void*, void*, void*) {
     if (link == nullptr || link->checkWolf()) return HOOK_CONTINUE;
 
     if (g_meter2_info.getWarpStatus() != WARP_STATUS_DECIDED_e) return HOOK_CONTINUE;
-    if (is_portal_object_warp()) return HOOK_CONTINUE;
+
+    if (is_portal_object_warp()) {
+        if (!s_objectWarpHumanHold) {
+            arm_object_warp_hold();
+        }
+        s_objectWarpStarted = true;
+        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+        return HOOK_CONTINUE;
+    }
 
     link->allUnequip(0);
     link->mNormalSpeed = 0.0f;
@@ -245,6 +420,46 @@ void update_human_warp(const LogService*, ModContext*) {
 
     if (disable_hits || s_humanWarpHitsDisabled) {
         human_warp_set_hit_enabled(!disable_hits);
+    }
+
+    if (!s_objectWarpHumanHold && g_configGeneralHumanWarpAnimation &&
+        is_portal_object_warp() && g_meter2_info.getWarpStatus() == WARP_STATUS_DECIDED_e) {
+        daAlink_c* link = daAlink_getAlinkActorClass();
+        if (link != nullptr && !link->checkWolf()) {
+            arm_object_warp_hold();
+        }
+    }
+
+    if (s_objectWarpHumanHold) {
+        dComIfGs_setTransformStatus(TF_STATUS_HUMAN);
+        ++s_objectWarpFrames;
+
+        const bool cancelled = !s_objectWarpStarted &&
+                               g_meter2_info.getWarpStatus() != WARP_STATUS_DECIDED_e;
+        const char* cur = dComIfGp_getStartStageName();
+        const bool leftSource =
+            cur != nullptr && std::strcmp(cur, s_objectWarpSourceStage) != 0;
+        daAlink_c* link = daAlink_getAlinkActorClass();
+        if (leftSource && human_warp_scene_load_stable() && link != nullptr &&
+            !link->checkEventRun() && !dComIfGp_event_runCheck()) {
+            ++s_objectWarpIdleFrames;
+        } else {
+            s_objectWarpIdleFrames = 0;
+        }
+
+        if (cancelled || s_objectWarpIdleFrames >= kObjectWarpIdleFrames ||
+            s_objectWarpFrames >= kObjectWarpGiveUpFrames) {
+            s_objectWarpHumanHold = false;
+            s_objectWarpStarted = false;
+            s_objectWarpFrames = 0;
+            s_objectWarpIdleFrames = 0;
+            if (s_objectWarpArrivalHidden) {
+                reveal_object_warp_arrival(link);
+                if (link != nullptr && link->mProcID == daAlink_c::PROC_WARP) {
+                    link->mProcVar5.field_0x3012 = 1;
+                }
+            }
+        }
     }
 
     if (s_cineDeparture) {
@@ -362,6 +577,15 @@ ModResult init_human_warp(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<GeneralHumanWarpArrivalHook>(hook_svc, on_skip_portal_obj_warp_pre);
     mods::hook::add_pre<GeneralHumanWarpDamageActionHook>(hook_svc,
                                                           on_human_warp_damage_action_pre);
+    mods::hook::add_pre<HumanWarpMetamorphoseBlockHook>(hook_svc,
+                                                        on_human_warp_metamorphose_block_pre);
+    mods::hook::add_pre<HumanWarpMetamorphoseOnlyBlockHook>(
+        hook_svc, on_human_warp_metamorphose_only_block_pre);
+    mods::hook::add_pre<HumanWarpSetArcNameHook>(hook_svc, on_human_warp_set_arc_name_pre);
+    mods::hook::add_pre<HumanWarpObjectArrivalHook>(hook_svc, on_human_warp_object_arrival_pre);
+    mods::hook::add_post<HumanWarpObjectArrivalHook>(hook_svc, on_human_warp_object_arrival_post);
+    mods::hook::add_pre<HumanWarpObjectArrivalProcHook>(hook_svc,
+                                                        on_human_warp_object_arrival_proc_pre);
     mods::hook::add_post<GeneralHumanWarpPadReadHook>(hook_svc, on_pad_read_post);
     mods::hook::add_post<GeneralHumanWarpCameraRunHook>(hook_svc, on_camera_run_post);
     return MOD_OK;
@@ -401,5 +625,10 @@ void shutdown_human_warp() {
     s_cineDeparture = false;
     s_cineArrival = false;
     s_humanWarpDepartureFrames = 0;
+    s_objectWarpHumanHold = false;
+    s_objectWarpStarted = false;
+    s_objectWarpFrames = 0;
+    s_objectWarpIdleFrames = 0;
+    reveal_object_warp_arrival(daAlink_getAlinkActorClass());
     human_warp_set_hit_enabled(true);
 }
