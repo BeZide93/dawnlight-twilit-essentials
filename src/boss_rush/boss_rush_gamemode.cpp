@@ -40,7 +40,7 @@ DEFINE_HOOK(&JUTGamePad::checkResetSwitch, BossRushCheckResetSwitchHook);
 
 namespace {
 
-constexpr const char* kGameModeId = "bossrush";
+constexpr const char* kGameModeId = "bossrush_te";
 constexpr const char* kDawnlightModId = "dev.bezide.dawnlight";
 constexpr int kPreviewFadeFrames = 6;
 constexpr int kPlayFadeFrames = 5;
@@ -571,7 +571,7 @@ ModResult init_boss_rush_gamemode(ModContext* mod_ctx) {
         .struct_size = sizeof(GameModeDesc),
         .game_mode_id = kGameModeId,
         .full_name = fullName,
-        .save_name = "twilit-bossrush",
+        .save_name = "te-bossrush",
         .user_data = nullptr,
         .on_activated = nullptr,
         .on_deactivated = nullptr,
