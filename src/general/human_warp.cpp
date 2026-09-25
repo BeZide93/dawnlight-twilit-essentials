@@ -41,12 +41,16 @@ static bool s_humanWarpHitsDisabled = false;
 
 static constexpr int kCineGiveUpFrames = 600;
 
-// True while Link must be untouchable: from the moment the warp is decided on
-// the map, through departure, transition, and until the arrival cine is done.
+static bool is_portal_object_warp() {
+    const u8 target = dComIfGp_TargetWarpPt_get();
+    return target == 3 || target == 6 || target == 8 || target == 9;
+}
+
 static bool human_warp_protection_active() {
     if (s_cineDeparture || s_cineArrival || s_humanWarpArrivalPending) return true;
     if (!g_configGeneralHumanWarpAnimation) return false;
     if (g_meter2_info.getWarpStatus() != WARP_STATUS_DECIDED_e) return false;
+    if (is_portal_object_warp()) return false;
 
     daAlink_c* link = daAlink_getAlinkActorClass();
     return link != nullptr && !link->checkWolf();
@@ -191,6 +195,7 @@ static HookAction on_check_warp_start_pre(ModContext*, void*, void*, void*) {
     if (link == nullptr || link->checkWolf()) return HOOK_CONTINUE;
 
     if (g_meter2_info.getWarpStatus() != WARP_STATUS_DECIDED_e) return HOOK_CONTINUE;
+    if (is_portal_object_warp()) return HOOK_CONTINUE;
 
     link->allUnequip(0);
     link->mNormalSpeed = 0.0f;
