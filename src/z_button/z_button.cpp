@@ -98,6 +98,18 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
     }
     s_wasActive = true;
 
+    // Kill the Midna hint sparkle (field_0x738) while a menu page or an
+    // event/cutscene is active — otherwise its draw keeps blinking over the
+    // map/collection screens. During plain gameplay the hint blink stays.
+    if (dMeter2Info_getWindowStatus() != 0 || dComIfGp_event_runCheck()) {
+        if (g_meter2_info.getMeterClass() != nullptr) {
+            dMeter2Draw_c* draw = g_meter2_info.getMeterClass()->getMeterDrawPtr();
+            if (draw != nullptr) {
+                draw->field_0x738 = 0.0f;
+            }
+        }
+    }
+
     if (g_configCustomZButtonEnabled) {
         if (!s_midnaScaleSaved) {
             s_midnaScaleSaved = true;
