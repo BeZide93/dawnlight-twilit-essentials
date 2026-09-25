@@ -3422,7 +3422,7 @@ static void update_zant_instant_fight() {
     }
 
     if (g_configBossRushSuggestedItems && link != nullptr && !link->checkEventRun() &&
-        z->mAction != daB_ZANT_c::ACT_ROOM_CHANGE) {
+        z->mAction != daB_ZANT_c::ACT_ROOM_CHANGE && dMeter2Info_getWindowStatus() == 0) {
         const bool inWater = link->checkModeFlg(0x40000) ||
                              link->mWaterY > link->current.pos.y + 20.0f;
         if (z->mFightPhase == daB_ZANT_c::PHASE_OI) {
