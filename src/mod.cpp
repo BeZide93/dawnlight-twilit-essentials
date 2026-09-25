@@ -21,6 +21,7 @@
 #include "boss_rush/boss_rush_portal.hpp"
 #include "boss_rush/boss_rush_gamemode.hpp"
 #include "boss_rush/boss_rush_dpad.hpp"
+#include "boss_rush/boss_rush_music.hpp"
 #include "boss_rush/boss_rush_save.hpp"
 #include "visible_equipment/visible_equipment.hpp"
 #include "z_button/z_button.hpp"
@@ -3008,6 +3009,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     s_bossRushPortalInitialized = init_boss_rush_portal(svc_hook, svc_log, mod_ctx) == MOD_OK;
     log_init_result("boss_rush_portal", s_bossRushPortalInitialized);
     log_init_result("boss_rush_dpad", init_boss_rush_dpad(svc_hook, svc_log, mod_ctx) == MOD_OK);
+    log_init_result("boss_rush_music", init_boss_rush_music(svc_hook, svc_log, mod_ctx) == MOD_OK);
     log_init_result("boss_rush_gamemode", init_boss_rush_gamemode(mod_ctx) == MOD_OK);
     s_visibleEquipmentInitialized = init_visible_equipment(svc_hook, error) == MOD_OK;
     log_init_result("visible_equipment", s_visibleEquipmentInitialized);
@@ -3101,6 +3103,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("boss_rush", shutdown_boss_rush);
     run_shutdown_step("boss_rush_portal", shutdown_boss_rush_portal);
     run_shutdown_step("boss_rush_dpad", shutdown_boss_rush_dpad);
+    run_shutdown_step("boss_rush_music", shutdown_boss_rush_music);
     run_shutdown_step("visible_equipment", shutdown_visible_equipment);
     run_shutdown_step("z_button", shutdown_z_button);
     run_shutdown_step("quick_access", shutdown_quick_access);

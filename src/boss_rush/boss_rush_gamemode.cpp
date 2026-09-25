@@ -1,4 +1,5 @@
 #include "boss_rush_gamemode.hpp"
+#include "boss_rush_music.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush_save.hpp"
@@ -152,6 +153,7 @@ bool enter_chamber_scene(scene_class* scene, int fadeFrames) {
         return false;
     }
     mDoAud_bgmStop(fadeFrames);
+    boss_rush_music_begin_chamber_transition();
     s_pendingSaveInit = true;
     return true;
 }
@@ -173,6 +175,7 @@ bool redirect_to_chamber() {
     }
     set_chamber_next_stage();
     mDoAud_bgmStop(kPreviewFadeFrames);
+    boss_rush_music_begin_chamber_transition();
     s_pendingSaveInit = true;
     return true;
 }

@@ -65,6 +65,7 @@ add_mod(twilit_essentials
             src/boss_rush/boss_rush_timer_v2.cpp
             src/boss_rush/boss_rush_portal.cpp
             src/boss_rush/boss_rush_dpad.cpp
+            src/boss_rush/boss_rush_music.cpp
             src/boss_rush/boss_rush_save.cpp
             src/boss_rush/boss_rush_gamemode.cpp
             src/boss_rush/ganondorf_cape.cpp
