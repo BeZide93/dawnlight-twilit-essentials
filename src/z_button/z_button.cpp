@@ -45,6 +45,8 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     z_mobile_init(hook_svc);
 
     mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_post);
+    const HookOptions afterTwilightHd = twilight_hd_hook_order(kTwilightHdRunAfter);
+    mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_twilight_hd_ring_z_post, &afterTwilightHd);
     mods::hook::add_post<CheckStatusHook>(hook_svc, on_check_status_post);
     mods::hook::add_post<Meter2ExecuteHook>(hook_svc, on_meter2_execute_post);
     mods::hook::add_post<Meter2DrawDrawHook>(hook_svc, on_meter2_draw_draw_post);
@@ -62,9 +64,11 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<CheckItemButtonChangeHook>(hook_svc, on_check_item_button_change_pre);
     mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre,
                                                        &beforeTwilightHd);
-    mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre);
+    const HookOptions midnaBeforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore - 1);
+    mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre, &midnaBeforeTwilightHd);
     mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
     mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_post);
+    mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_twilight_hd_z_post, &afterTwilightHd);
     mods::hook::add_pre<SetSelectItemIndexHook>(hook_svc, on_set_select_item_index_pre);
     mods::hook::add_post<DrawButtonZHook>(hook_svc, on_draw_button_z_post);
     mods::hook::add_pre<SetMixItemHook>(hook_svc, on_set_mix_item_pre);

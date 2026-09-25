@@ -78,6 +78,23 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     }
 }
 
+void on_pad_read_twilight_hd_ring_z_post(ModContext*, void*, void*, void*) {
+    if (g_configCustomZButtonEnabled || !twilight_hd_third_item_slot() ||
+        dMeter2Info_getWindowStatus() != 2)
+    {
+        return;
+    }
+
+    JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
+    if (rawGamePad == nullptr) {
+        return;
+    }
+
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    pad.mButtonFlags |= rawGamePad->getButton() & PAD_TRIGGER_Z;
+    pad.mPressedButtonFlags |= rawGamePad->getTrigger() & PAD_TRIGGER_Z;
+}
+
 void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || !args) {
         return;
@@ -110,8 +127,30 @@ void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
     }
 }
 
+void on_set_stick_data_twilight_hd_z_post(ModContext*, void* args, void*, void*) {
+    if (!args || !z_mobile_twilight_hd_z_is_item()) {
+        return;
+    }
+    daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == nullptr || alink->checkWolf() || dMeter2Info_getWindowStatus() != 0 ||
+        quick_access_is_active())
+    {
+        return;
+    }
+    JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
+    if (rawGamePad == nullptr) {
+        return;
+    }
+    if ((rawGamePad->getButton() & PAD_TRIGGER_Z) != 0) {
+        alink->mItemButton |= 0x04;
+    }
+    if ((rawGamePad->getTrigger() & PAD_TRIGGER_Z) != 0) {
+        alink->mItemTrigger |= 0x04;
+    }
+}
+
 HookAction on_midna_talk_trigger_pre(ModContext*, void* args, void* ret, void*) {
-    if (!g_configCustomZButtonEnabled || !args || !ret) {
+    if (!args || !ret) {
         return HOOK_CONTINUE;
     }
 
@@ -120,6 +159,22 @@ HookAction on_midna_talk_trigger_pre(ModContext*, void* args, void* ret, void*) 
         return HOOK_CONTINUE;
     }
 
-    *reinterpret_cast<BOOL*>(ret) = g_dpadLeftTrig ? 1 : 0;
-    return HOOK_SKIP_ORIGINAL;
+    const bool touchMidna = z_mobile_consume_midna_touch() && !quick_access_is_active();
+    if (g_configCustomZButtonEnabled) {
+        *reinterpret_cast<BOOL*>(ret) = (g_dpadLeftTrig || touchMidna) ? 1 : 0;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (touchMidna) {
+        *reinterpret_cast<BOOL*>(ret) = 1;
+        return HOOK_SKIP_ORIGINAL;
+    }
+    JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
+    if (z_mobile_twilight_hd_touch_z() && rawGamePad != nullptr &&
+        (rawGamePad->getTrigger() & PAD_TRIGGER_Z) != 0)
+    {
+        *reinterpret_cast<BOOL*>(ret) = 0;
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
 }

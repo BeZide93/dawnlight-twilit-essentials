@@ -4,6 +4,9 @@
 
 bool z_mobile_active();
 void z_mobile_init(const HookService* hook_svc);
+bool z_mobile_consume_midna_touch();
+bool z_mobile_twilight_hd_touch_z();
+bool z_mobile_twilight_hd_z_is_item();
 bool z_mobile_wants_midona_host();
 J2DPane* z_mobile_sync_touch_z(dMeter2Draw_c* draw);
 void z_mobile_report_after_midna_alpha(dMeter2Draw_c* draw);

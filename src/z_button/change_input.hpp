@@ -12,7 +12,9 @@ struct CheckItemButtonChangeHook;
 struct CheckItemChangeFromButtonHook;
 
 void on_pad_read_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+void on_pad_read_twilight_hd_ring_z_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 void on_set_stick_data_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+void on_set_stick_data_twilight_hd_z_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_midna_talk_trigger_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 void on_order_talk_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_check_item_set_button_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);

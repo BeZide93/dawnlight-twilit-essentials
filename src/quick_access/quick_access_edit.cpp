@@ -787,8 +787,16 @@ using QaPointerHitRectFn = bool (*)(f32, f32, f32, f32, f32);
 using QaPointerSetHoverTargetFn = void (*)(u16);
 using QaPointerConsumeClickFn = bool (*)();
 
+struct QaPointerState {
+    f32 x;
+    f32 y;
+    bool valid;
+};
+using QaPointerStateFn = const QaPointerState& (*)();
+
 static QaPointerBeginContextFn s_pointerBeginContext = nullptr;
 static QaPointerHitRectFn s_pointerHitRect = nullptr;
+static QaPointerStateFn s_pointerState = nullptr;
 static QaPointerSetHoverTargetFn s_pointerSetHoverTarget = nullptr;
 static QaPointerConsumeClickFn s_pointerConsumeClick = nullptr;
 static f32 s_pointerLayoutW = 0.0f;
@@ -820,6 +828,9 @@ void quick_access_edit_pointer_install(const HookService* hook_svc, ModContext* 
     }
     resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::begin_context", &s_pointerBeginContext);
     resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::hit_rect", &s_pointerHitRect);
+    if (s_pointerHitRect == nullptr) {
+        resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::state", &s_pointerState);
+    }
     resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::set_hover_target",
                        &s_pointerSetHoverTarget);
     resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::consume_click", &s_pointerConsumeClick);
@@ -845,12 +856,21 @@ void qa_pointer_set_menu_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 ancho
     s_menuHintValid = true;
 }
 
+static bool pointer_hit_rect(f32 left, f32 top, f32 right, f32 bottom) {
+    if (s_pointerHitRect != nullptr) {
+        return s_pointerHitRect(left, top, right, bottom, 0.0f);
+    }
+    const QaPointerState& state = s_pointerState();
+    return state.valid && state.x >= left && state.x <= right && state.y >= top &&
+           state.y <= bottom;
+}
+
 static bool pointer_hits_cell(f32 cx, f32 cy, f32 halfW, f32 halfH, f32 anchorX, f32 anchorY,
                               f32 scale) {
     const f32 x = anchorX + (cx - anchorX) * scale;
     const f32 y = anchorY + (cy - anchorY) * scale;
-    return s_pointerHitRect(x - halfW * scale, y - halfH * scale, x + halfW * scale,
-                            y + halfH * scale, 0.0f);
+    return pointer_hit_rect(x - halfW * scale, y - halfH * scale, x + halfW * scale,
+                            y + halfH * scale);
 }
 
 static bool pointer_hits_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 anchorY, f32 scale) {
@@ -876,7 +896,8 @@ static void menu_hint_pointer_update() {
 }
 
 void quick_access_edit_pointer_update() {
-    if (s_pointerBeginContext == nullptr || s_pointerHitRect == nullptr ||
+    if (s_pointerBeginContext == nullptr ||
+        (s_pointerHitRect == nullptr && s_pointerState == nullptr) ||
         s_pointerSetHoverTarget == nullptr || s_pointerConsumeClick == nullptr) {
         return;
     }
