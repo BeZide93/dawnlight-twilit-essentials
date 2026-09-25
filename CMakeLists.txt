@@ -33,6 +33,7 @@ add_mod(twilit_essentials
         SOURCES
             src/mod.cpp
             src/util.cpp
+            src/compat/twilight_hd.cpp
             src/sdk_compat.cpp
             src/general/general.cpp
             src/general/skip_cutscenes.cpp

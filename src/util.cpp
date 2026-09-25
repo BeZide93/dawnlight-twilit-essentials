@@ -63,6 +63,13 @@ bool mod_config_bool(std::string_view modId, std::string_view name, bool fallbac
     return var != nullptr ? static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue() : fallback;
 }
 
+s64 mod_config_int(std::string_view modId, std::string_view name, s64 fallback) {
+    const auto getVar = host_get_config_var();
+    if (getVar == nullptr) return fallback;
+    const auto* var = getVar(mod_cvar_name(modId, name));
+    return var != nullptr ? static_cast<const dusk::config::ConfigVar<s64>*>(var)->getValue() : fallback;
+}
+
 static void normalizeArcName(const char* src, char* dst, size_t dstSize) {
     if (src == nullptr || dst == nullptr || dstSize == 0) return;
     std::strncpy(dst, src, dstSize - 1);

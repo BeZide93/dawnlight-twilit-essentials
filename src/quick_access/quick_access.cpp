@@ -40,6 +40,7 @@
 #include "mods/svc/save.h"
 #include "mods/svc/hook.hpp"
 #include "../boss_rush/boss_rush.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include <dolphin/gx.h>
 #include <dolphin/gx/GXVert.h>
@@ -49,6 +50,8 @@
 #include <cstring>
 
 bool g_configQuickAccessEnabled = false;
+
+int g_qaSelectOverrideDepth[4] = {0, 0, 0, 0};
 int g_configQuickAccessAppearance = QA_APPEARANCE_RADIAL;
 
 extern const ResourceService* get_resource_service();
@@ -257,7 +260,7 @@ static void sync_ooccoo_assignment() {
 }
 
 static void sync_wheel_down_assignment() {
-    if (g_configCustomZButtonEnabled) {
+    if (g_configCustomZButtonEnabled || twilight_hd_third_item_slot()) {
         return;
     }
     const u8 slot = dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN);
@@ -1002,6 +1005,7 @@ static void qa_keep_ooccoo_select(daAlink_c* link) {
 }
 
 static bool qa_start_ooccoo(daAlink_c* link, u8 itemNo) {
+    QaSelectSlotScope slot2Scope(2);
     const u8 prevSelect = dComIfGp_getSelectItem(2);
     g_dComIfG_gameInfo.play.setSelectItem(2, itemNo);
     const int proc_type = link->checkNewItemChange(2);
@@ -1104,6 +1108,7 @@ static bool qa_boots_in_water(daAlink_c* link) {
 }
 
 static void qa_toggle_boots_underwater(daAlink_c* link, bool equipped) {
+    QaSelectSlotScope slot2Scope(2);
     u8 oldGpItem = dComIfGp_getSelectItem(2);
     g_dComIfG_gameInfo.play.setSelectItem(2, dItemNo_HVY_BOOTS_e);
     const int procType = link->checkNewItemChange(2);
@@ -1167,6 +1172,7 @@ static void execute_iron_boots() {
 }
 
 static void execute_horse_call() {
+    QaSelectSlotScope slot2Scope(2);
     daAlink_c* alink = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     if (alink == nullptr) return;
 
@@ -1198,6 +1204,7 @@ static void execute_horse_call() {
 static bool s_qaLanternLit = false;
 
 static void execute_lantern() {
+    QaSelectSlotScope slot2Scope(2);
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
 
@@ -1236,6 +1243,7 @@ static void execute_lantern() {
 }
 
 static void execute_fishing_rod() {
+    QaSelectSlotScope slot2Scope(2);
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
 
@@ -1290,6 +1298,7 @@ static void qa_restore_down_slot() {
 }
 
 static void execute_bomb_item(daAlink_c* link, u8 itemNo) {
+    QaSelectSlotScope slot2Scope(2);
     if (s_qaBombItem != QA_ITEM_NONE) {
         return;
     }
@@ -1526,6 +1535,7 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
 }
 
 static void execute_generic_item(u8 itemNo) {
+    QaSelectSlotScope slot2Scope(2);
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr) return;
 
@@ -1716,6 +1726,7 @@ static void qa_cancel_item_aim(daAlink_c* link) {
 }
 
 static void qa_enter_item_aim(u8 itemNo) {
+    QaSelectSlotScope slot2Scope(2);
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     if (link == nullptr || !qa_is_item_available(itemNo)) {
         play_error_se();
@@ -1732,6 +1743,7 @@ static void qa_enter_item_aim(u8 itemNo) {
 }
 
 static void qa_run_item_repress(daAlink_c* link, u8 itemNo) {
+    QaSelectSlotScope slot2Scope(2);
     if (link->checkEquipAnime() || link->checkKandelaarSwingAnime() ||
         link->checkCopyRodThrowAnime() || link->checkBoomerangThrowAnime()) {
         return;
@@ -1750,7 +1762,24 @@ static void qa_run_item_repress(daAlink_c* link, u8 itemNo) {
     }
 }
 
+static bool s_hdShoulderLatch = false;
+
+static bool qa_owns_shoulders() {
+    return s_menuOpen || s_editMode || quick_access_bottles_menu_open();
+}
+
+static bool qa_twilight_hd_shoulders_blocked() {
+    return twilight_hd_third_item_slot() && (qa_owns_shoulders() || s_hdShoulderLatch);
+}
+
 static void on_set_stick_data_qa_post(ModContext*, void* args, void*, void*) {
+    if (args != nullptr && qa_twilight_hd_shoulders_blocked()) {
+        daAlink_c* blockedLink = mods::arg<daAlink_c*>(args, 0);
+        if (blockedLink != nullptr) {
+            blockedLink->mItemTrigger &= ~daAlink_c::BTN_Z;
+            blockedLink->mItemButton &= ~daAlink_c::BTN_Z;
+        }
+    }
     if (!g_configQuickAccessEnabled || args == nullptr) {
         return;
     }
@@ -1806,6 +1835,24 @@ void qa_strip_tap_action() {
         qa_enter_item_aim(s_assignedItem);
     } else {
         qa_execute_item(s_assignedItem);
+    }
+}
+
+static void on_pad_read_qa_twilight_hd_post(ModContext*, void*, void*, void*) {
+    if (!twilight_hd_third_item_slot()) {
+        s_hdShoulderLatch = false;
+        return;
+    }
+    JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
+    const bool shoulderHeld =
+        gamePad != nullptr && (gamePad->getButton() & (PAD_TRIGGER_L | PAD_TRIGGER_R)) != 0;
+    if (qa_owns_shoulders()) {
+        s_hdShoulderLatch = true;
+    } else if (!shoulderHeld) {
+        s_hdShoulderLatch = false;
+    }
+    if (qa_twilight_hd_shoulders_blocked()) {
+        swallow_shoulder_triggers(mDoCPd_c::getCpadInfo(PAD_1));
     }
 }
 
@@ -2357,6 +2404,9 @@ void qa_hud_scale_end() {
 }
 
 static void draw_strip_hud_icon(J2DScreen* screen) {
+    if (controls_binding_blocked(CTRL_BIND_QUICK_ACCESS)) {
+        return;
+    }
     u8 assigned = s_assignedItem;
     if (assigned == QA_ITEM_NONE || !qa_is_item_available(assigned)) {
         return;
@@ -2487,16 +2537,47 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
     quick_access_strip_draw(screenW, screenH, alpha, glow);
 }
 
+DEFINE_HOOK(&dComIfGp_getSelectItem, QaGetSelectItemHook);
+DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, QaMidnaTalkTriggerHook);
+
+static HookAction on_qa_midna_talk_trigger_pre(ModContext*, void*, void* retval, void*) {
+    if (retval == nullptr || !qa_twilight_hd_shoulders_blocked()) {
+        return HOOK_CONTINUE;
+    }
+    *static_cast<BOOL*>(retval) = FALSE;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction on_qa_get_select_item_pre(ModContext*, void* args, void* retval, void*) {
+    const int index = mods::arg<int>(args, 0);
+    if (retval == nullptr || (index != 2 && index != 3) || !twilight_hd_third_item_slot()) {
+        return HOOK_CONTINUE;
+    }
+    const bool owned = g_qaSelectOverrideDepth[index] > 0 ||
+                       (index == 2 && (s_aimItem != QA_ITEM_NONE ||
+                                       s_qaOoccooActive != QA_ITEM_NONE || s_qaBombSlotHeld));
+    if (!owned) {
+        return HOOK_CONTINUE;
+    }
+    *static_cast<u8*>(retval) = g_dComIfG_gameInfo.play.getSelectItem(index);
+    return HOOK_SKIP_ORIGINAL;
+}
+
 ModResult init_quick_access(const HookService* hook_svc, const SaveService* save_svc,
                             ModContext* mod_ctx, ModError*) {
     if (hook_svc) {
-        mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_quick_access_post);
+        const HookOptions afterTwilightHd = twilight_hd_hook_order(kTwilightHdRunAfter);
+        const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+        mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_quick_access_post, &beforeTwilightHd);
+        mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_qa_twilight_hd_post, &afterTwilightHd);
+        mods::hook::add_pre<QaMidnaTalkTriggerHook>(hook_svc, on_qa_midna_talk_trigger_pre, &beforeTwilightHd);
         mods::hook::add_post<Meter2DrawRadialMenuHook>(hook_svc, on_meter2_draw_quick_access_post);
-        mods::hook::add_post<QaSetStickDataHook>(hook_svc, on_set_stick_data_qa_post);
+        mods::hook::add_post<QaSetStickDataHook>(hook_svc, on_set_stick_data_qa_post, &afterTwilightHd);
+        mods::hook::add_pre<QaGetSelectItemHook>(hook_svc, on_qa_get_select_item_pre, &beforeTwilightHd);
         mods::hook::add_post<QaCheckReadyItemHook>(hook_svc, on_check_ready_item_qa_post);
         mods::hook::add_pre<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_pre);
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
-        mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre);
+        mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre, &beforeTwilightHd);
         mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
     }
 
@@ -2510,6 +2591,7 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
                 static_cast<dusk::config::ConfigVar<f32>*>(
                     reinterpret_cast<QaGetConfigVarFn>(addr)("game.hudScale"));
         }
+        quick_access_edit_pointer_install(hook_svc, s_modCtx);
     }
     if (save_svc != nullptr && mod_ctx != nullptr) {
         save_svc->observe_saves(mod_ctx, on_new_save_reset_items,
@@ -2523,6 +2605,7 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
 void update_quick_access(const LogService*, ModContext* mod_ctx) {
     s_modCtx = mod_ctx;
     update_quick_access_itemwheel();
+    quick_access_edit_pointer_update();
 }
 
 ModContext* qa_mod_ctx() {

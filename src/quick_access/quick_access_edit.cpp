@@ -773,8 +773,100 @@ static void draw_hint_row(f32 centerX, f32 y, u8 alpha) {
     }
 }
 
+using QaPointerBeginContextFn = void (*)(int);
+using QaPointerHitRectFn = bool (*)(f32, f32, f32, f32, f32);
+using QaPointerSetHoverTargetFn = void (*)(u16);
+using QaPointerConsumeClickFn = bool (*)();
+
+static QaPointerBeginContextFn s_pointerBeginContext = nullptr;
+static QaPointerHitRectFn s_pointerHitRect = nullptr;
+static QaPointerSetHoverTargetFn s_pointerSetHoverTarget = nullptr;
+static QaPointerConsumeClickFn s_pointerConsumeClick = nullptr;
+static f32 s_pointerLayoutW = 0.0f;
+
+static const int kQaPointerContext = 0x5141;
+static const u16 kQaPointerSlotTarget = 0x100;
+static const f32 kQaPointerSlotHalf = 26.0f;
+
+template <class Fn>
+static void resolve_pointer_fn(const HookService* hook_svc, ModContext* mod_ctx, const char* name,
+                               Fn* out) {
+    void* addr = nullptr;
+    if (hook_svc->resolve == nullptr ||
+        hook_svc->resolve(mod_ctx, name, &addr, nullptr) != MOD_OK || addr == nullptr) {
+        return;
+    }
+    *out = reinterpret_cast<Fn>(addr);
+}
+
+void quick_access_edit_pointer_install(const HookService* hook_svc, ModContext* mod_ctx) {
+    if (hook_svc == nullptr || mod_ctx == nullptr) {
+        return;
+    }
+    resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::begin_context", &s_pointerBeginContext);
+    resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::hit_rect", &s_pointerHitRect);
+    resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::set_hover_target",
+                       &s_pointerSetHoverTarget);
+    resolve_pointer_fn(hook_svc, mod_ctx, "dusk::menu_pointer::consume_click", &s_pointerConsumeClick);
+}
+
+static bool pointer_hits_cell(f32 cx, f32 cy, f32 halfW, f32 halfH, f32 anchorX, f32 anchorY,
+                              f32 scale) {
+    const f32 x = anchorX + (cx - anchorX) * scale;
+    const f32 y = anchorY + (cy - anchorY) * scale;
+    return s_pointerHitRect(x - halfW * scale, y - halfH * scale, x + halfW * scale,
+                            y + halfH * scale, 0.0f);
+}
+
+void quick_access_edit_pointer_update() {
+    if (!s_editMode || s_menuAlpha < 0.01f || s_pointerLayoutW <= 0.0f ||
+        s_pointerBeginContext == nullptr || s_pointerHitRect == nullptr ||
+        s_pointerSetHoverTarget == nullptr || s_pointerConsumeClick == nullptr) {
+        return;
+    }
+    s_pointerBeginContext(kQaPointerContext);
+
+    const f32 scale = qa_user_hud_scale();
+    const f32 centerX = s_pointerLayoutW * 0.5f;
+    const f32 slotsSpan = (QA_QUICK_SLOTS - 1) * 56.0f;
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
+        const f32 cx = centerX - slotsSpan * 0.5f + static_cast<f32>(i) * 56.0f;
+        if (!pointer_hits_cell(cx, SLOTS_ROW_Y, kQaPointerSlotHalf, kQaPointerSlotHalf, centerX,
+                               0.0f, scale)) {
+            continue;
+        }
+        s_pointerSetHoverTarget(static_cast<u16>(kQaPointerSlotTarget + i));
+        if (s_editSlot != i) {
+            s_editSlot = i;
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        s_pointerConsumeClick();
+        return;
+    }
+
+    const f32 gridSpan = (QA_EDIT_COLS - 1) * CELL_SPACING_X;
+    for (int i = 0; i < s_editCount; i++) {
+        const f32 cx = centerX - gridSpan * 0.5f + static_cast<f32>(i % QA_EDIT_COLS) * CELL_SPACING_X;
+        const f32 cy = GRID_TOP_Y + static_cast<f32>(i / QA_EDIT_COLS) * CELL_SPACING_Y;
+        if (!pointer_hits_cell(cx, cy, CELL_SPACING_X * 0.5f, CELL_SPACING_Y * 0.5f, centerX, 0.0f,
+                               scale)) {
+            continue;
+        }
+        s_pointerSetHoverTarget(static_cast<u16>(i));
+        if (s_editCursor != i) {
+            s_editCursor = i;
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        if (s_pointerConsumeClick() && !quick_access_edit_toggle_current()) {
+            Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        return;
+    }
+}
+
 void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
+    s_pointerLayoutW = screenW;
     qa_hud_scale_begin(screenW * 0.5f, 0.0f);
 
     const f32 centerX = screenW * 0.5f;

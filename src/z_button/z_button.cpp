@@ -1,4 +1,5 @@
 #include "z_button.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include "z_common.cpp"
 #include "z_mobile.cpp"
@@ -54,11 +55,13 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<ChangeTextureItemXYHook>(hook_svc, on_change_texture_item_xy_pre);
     mods::hook::add_post<MoveButtonXYHook>(hook_svc, on_move_button_xy_post);
     mods::hook::add_post<OrderTalkHook>(hook_svc, on_order_talk_post);
-    mods::hook::add_pre<CheckItemSetButtonHook>(hook_svc, on_check_item_set_button_pre);
+    const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+    mods::hook::add_pre<CheckItemSetButtonHook>(hook_svc, on_check_item_set_button_pre, &beforeTwilightHd);
     mods::hook::add_pre<CheckSetItemTriggerHook>(hook_svc, on_check_set_item_trigger_pre);
     mods::hook::add_pre<SetHeavyBootsHook>(hook_svc, on_set_heavy_boots_pre);
     mods::hook::add_pre<CheckItemButtonChangeHook>(hook_svc, on_check_item_button_change_pre);
-    mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre);
+    mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre,
+                                                       &beforeTwilightHd);
     mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre);
     mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
     mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_post);
@@ -87,6 +90,8 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
     }
 
     g_zModCtx = mod_ctx;
+
+    g_configCustomZButtonEnabled = g_configZButtonEnabled && !twilight_hd_third_item_slot();
 
     static bool s_wasActive = false;
     if (!g_configCustomZButtonEnabled || isTitleOrMainMenu()) {

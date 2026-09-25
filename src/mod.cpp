@@ -40,6 +40,7 @@
 #include "collection_menu/collection_menu_shield.hpp"
 #include "controls/controls.hpp"
 #include "util.hpp"
+#include "compat/twilight_hd.hpp"
 
 #include "mods/svc/hook.hpp"
 #include "mods/service.hpp"
@@ -1005,13 +1006,9 @@ static void on_damage_numbers_changed(ModContext*, ConfigVarHandle, const Config
 
 static void on_custom_z_button_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
-        if (isNativeZButtonEngine()) {
-            g_configCustomZButtonEnabled = false;
-            g_configZButtonEnabled = false;
-            return;
-        }
-        g_configCustomZButtonEnabled = value->bool_value;
         g_configZButtonEnabled = value->bool_value;
+        g_configCustomZButtonEnabled =
+            value->bool_value && !isNativeZButtonEngine() && !twilight_hd_third_item_slot();
     }
 }
 
@@ -1360,6 +1357,11 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         svc_ui->pane_add_rml(mod_ctx, left,
             "<span style=\"color: #a8bcd4;\">This Dusklight build (Lazy Tweaks) already "
             "provides 3-slot Z-button support natively.</span>", nullptr);
+    } else if (twilight_hd_third_item_slot()) {
+        svc_ui->pane_add_rml(mod_ctx, left,
+            "<span style=\"color: #a8bcd4;\">Twilight HD provides the third item slot. "
+            "Turn off its \"Third Item Slot\" setting and restart to use this one instead.</span>",
+            nullptr);
     } else {
         ui_add_toggle(left, "Enabled", s_varCustomZButton,
             "<p>Enables a 3rd item slot on the Z button. Midna moves to a separate button - "
@@ -1613,6 +1615,11 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "is on, your bottles (and their contents) are hidden from the wheel as well. "
         "Disabling Quick Access restores them.</p>",
         is_quick_access_sub_disabled);
+    if (controls_binding_blocked(CTRL_BIND_QUICK_ACCESS)) {
+        svc_ui->pane_add_rml(mod_ctx, left,
+            "<span style=\"color: #a8bcd4;\">Twilight HD uses this D-Pad direction. Choose "
+            "another Quick Access button in the Controls tab.</span>", nullptr);
+    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
     ui_add_toggle(left, "Bottle quick access", s_varBottlesQuickAccess,
@@ -1864,6 +1871,12 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>Remap the controller buttons of the mod's features. A binding is grayed out "
         "while its feature is disabled.</p>", nullptr);
+    if (twilight_hd_dpad_shortcuts()) {
+        svc_ui->pane_add_rml(mod_ctx, left,
+            "<span style=\"color: #a8bcd4;\">Twilight HD's D-Pad Shortcuts use the D-Pad. "
+            "Bindings on a D-Pad direction are ignored; pick another button or turn off "
+            "Twilight HD's \"D-Pad Shortcuts\" setting.</span>", nullptr);
+    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
     ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],
@@ -2480,11 +2493,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         descZ.type = CONFIG_VAR_BOOL;
         descZ.default_bool = false;
         if (svc_config->register_var(mod_ctx, &descZ, &s_varCustomZButton) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varCustomZButton, &g_configCustomZButtonEnabled);
-            if (isNativeZButtonEngine()) {
-                g_configCustomZButtonEnabled = false;
-            }
-            g_configZButtonEnabled = g_configCustomZButtonEnabled;
+            svc_config->get_bool(mod_ctx, s_varCustomZButton, &g_configZButtonEnabled);
+            g_configCustomZButtonEnabled =
+                g_configZButtonEnabled && !isNativeZButtonEngine() && !twilight_hd_third_item_slot();
             svc_config->subscribe(mod_ctx, s_varCustomZButton, on_custom_z_button_changed, nullptr, nullptr);
         }
 

@@ -29,3 +29,4 @@ void ensure_system_heap_capacity();
 
 bool is_mod_enabled(std::string_view id);
 bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback);
+s64 mod_config_int(std::string_view modId, std::string_view name, s64 fallback);

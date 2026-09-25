@@ -2,6 +2,7 @@
 #include "boss_rush_gamemode.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include "mods/svc/flow.hpp"
 
@@ -909,7 +910,7 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
 
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
 
-    bool triggered = link->midnaTalkTrigger() || g_dpadLeftTrig;
+    bool triggered = link->midnaTalkTrigger() || (g_configCustomZButtonEnabled && g_dpadLeftTrig);
     // The z-button mod captures dpad-left only while no menu/event state is
     // up; while those states are active the raw button stays untouched in the
     // pad info, so read it here to keep the call working in every state.
@@ -918,7 +919,7 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
             (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
     }
 #if PLATFORM_GCN
-    triggered = triggered || mDoCPd_c::getTrigZ(PAD_1);
+    triggered = triggered || (!twilight_hd_third_item_slot() && mDoCPd_c::getTrigZ(PAD_1));
 #endif
 
     if (triggered) {

@@ -1,4 +1,5 @@
 #include "stamina.hpp"
+#include "../compat/twilight_hd.hpp"
 #include "stamina_internal.hpp"
 #include "sprint_human.hpp"
 #include "sprint_wolf.hpp"
@@ -582,6 +583,31 @@ static JUtility::TColor lerp(JUtility::TColor a, JUtility::TColor b, f32 t) {
         static_cast<u8>(a.a + (b.a - a.a) * t));
 }
 
+static f32 s_hdStackShift = 0.0f;
+static f32 s_hdFrameHeight = 16.0f;
+static f32 s_hdBottom = 0.0f;
+
+f32 stamina_twilight_hd_bottom() {
+    return s_hdBottom;
+}
+
+f32 stamina_twilight_hd_frame_height() {
+    return s_hdFrameHeight;
+}
+
+static void place_stamina_twilight_hd(dMeter2Draw_c* draw, J2DPane* parentPane) {
+    f32 left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+    if (!twilight_hd_meter_frame_bounds(draw->mpKanteraScreen, left, top, right, bottom)) {
+        return;
+    }
+    s_hdFrameHeight = bottom - top;
+    const f32 centerX = (mDoGph_gInf_c::getSafeMinXF() + mDoGph_gInf_c::getSafeMaxXF()) * 0.5f;
+    const f32 centerY = twilight_hd_top_meter_center_y() + s_hdStackShift;
+    parentPane->translate(parentPane->getTranslateX() + centerX - (left + right) * 0.5f,
+                          parentPane->getTranslateY() + centerY - (top + bottom) * 0.5f);
+    s_hdBottom = centerY + s_hdFrameHeight * 0.5f;
+}
+
 static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     CPaneMgr* meter  = draw->mpMagicMeter;
     CPaneMgr* base   = draw->mpMagicBase;
@@ -615,7 +641,20 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
 
     const f32 origTX = parent->getTranslateX();
     const f32 origTY = parent->getTranslateY();
-    parent->translate(origTX + g_configStaminaBarX, origTY + s_stackShift + g_configStaminaBarY);
+    J2DPane* parentPane = parent->getPanePtr();
+    const bool twilightHd = twilight_hd_enabled() && parentPane != nullptr;
+    const f32 origSX = twilightHd ? parentPane->getScaleX() : 1.0f;
+    const f32 origSY = twilightHd ? parentPane->getScaleY() : 1.0f;
+    if (twilightHd) {
+        const f32 hdScale = twilight_hd_overall_scale();
+        parentPane->scale(origSX * hdScale, origSY * hdScale);
+        parent->translate(origTX, origTY);
+        place_stamina_twilight_hd(draw, parentPane);
+        parentPane->translate(parentPane->getTranslateX() + g_configStaminaBarX,
+                              parentPane->getTranslateY() + g_configStaminaBarY);
+    } else {
+        parent->translate(origTX + g_configStaminaBarX, origTY + s_stackShift + g_configStaminaBarY);
+    }
 
     J2DGrafContext* graf = dComIfGp_getCurrentGrafPort();
     if (graf) graf->setup2D();
@@ -628,14 +667,23 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
         s_drawnY = frameL->getInitPosY();
         s_drawnMeasured = true;
     }
-    qa_hud_scale_begin(frameL->getInitPosX() + kStaminaScaleAnchorBlendX * (s_drawnX - frameL->getInitPosX()),
-                       frameL->getInitPosY() + kStaminaScaleAnchorBlendY * (s_drawnY - frameL->getInitPosY()));
+    if (twilightHd) {
+        qa_hud_scale_begin((mDoGph_gInf_c::getSafeMinXF() + mDoGph_gInf_c::getSafeMaxXF()) * 0.5f,
+                           mDoGph_gInf_c::getSafeMinYF());
+    } else {
+        qa_hud_scale_begin(frameL->getInitPosX() + kStaminaScaleAnchorBlendX * (s_drawnX - frameL->getInitPosX()),
+                           frameL->getInitPosY() + kStaminaScaleAnchorBlendY * (s_drawnY - frameL->getInitPosY()));
+    }
     draw->mpKanteraScreen->draw(0.0f, 0.0f, graf);
     qa_hud_scale_end();
 
-    const JGeometry::TBox2<f32>& drawn = frameL->getPanePtr()->getGlbBounds();
-    s_drawnX = drawn.i.x;
-    s_drawnY = drawn.i.y;
+    if (!twilightHd) {
+        const JGeometry::TBox2<f32>& drawn = frameL->getPanePtr()->getGlbBounds();
+        s_drawnX = drawn.i.x;
+        s_drawnY = drawn.i.y;
+    } else {
+        parentPane->scale(origSX, origSY);
+    }
 
     parent->translate(origTX, origTY);
 }
@@ -643,6 +691,10 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
 static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     dMeter2Draw_c* draw = args ? mods::arg<dMeter2Draw_c*>(args, 0) : nullptr;
     if (!draw || !draw->mpKanteraScreen) return;
+
+    s_hdBottom = 0.0f;
+    const f32 hdStackTarget = twilight_hd_gauge_visible(draw) ? s_hdFrameHeight + 4.0f : 0.0f;
+    s_hdStackShift += (hdStackTarget - s_hdStackShift) * 0.15f;
 
     if (s_staminaBarPreviewFrames > 0) {
         draw_stamina_meter(draw, 1.0f, 1.0f);
@@ -652,7 +704,8 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     if (!g_configStaminaEnabled || s_alpha < 0.01f) return;
     if (!in_gameplay_for_draw()) return;
 
-    const f32 stackTarget = (draw->getMeterGaugeAlphaRate(1) > 0.02f) ? 16.0f : 0.0f;
+    const f32 stackTarget =
+        (!twilight_hd_enabled() && draw->getMeterGaugeAlphaRate(1) > 0.02f) ? 16.0f : 0.0f;
     s_stackShift += (stackTarget - s_stackShift) * 0.15f;
 
     f32 a = s_alpha;

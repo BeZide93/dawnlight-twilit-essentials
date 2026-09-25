@@ -1,5 +1,6 @@
 #include "collection_menu.hpp"
 #include "../util.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include <collection_lib/collection_lib.hpp>
 
@@ -11,12 +12,6 @@ bool g_configCollectionOrdonHeroAlways = false;
 static cl::Page* s_ordonHeroPage = nullptr;
 
 constexpr const char* kLinkleModId = "com.ditrey.linkle";
-constexpr const char* kTwilightHdModId = "org.twilight.hd_hud";
-
-// Twilight HD builds its own Collection screen while its "TPHD Collection Screen" setting is on.
-static bool twilight_hd_collection_active() {
-    return is_mod_enabled(kTwilightHdModId) && mod_config_bool(kTwilightHdModId, "collection-screen", true);
-}
 
 static bool player_has_hero_clothes() {
     return dComIfGs_isCollectClothes(KOKIRI_CLOTHES_FLAG) ||
@@ -136,7 +131,7 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     sync_collection_ordon_hero_page();
 
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
-    collectionlib_set_hd_layout_policy(&twilight_hd_collection_active);
+    collectionlib_set_hd_layout_policy(&twilight_hd_collection);
 
     collectionlib_set_register_callback([]() {
         register_starter_gear();

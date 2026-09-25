@@ -34,6 +34,16 @@ extern int s_selectedSlot;
 extern f32 s_menuAlpha;
 extern f32 s_glowTimer;
 
+extern int g_qaSelectOverrideDepth[4];
+
+struct QaSelectSlotScope {
+    explicit QaSelectSlotScope(int index) : mIndex(index) { ++g_qaSelectOverrideDepth[mIndex]; }
+    ~QaSelectSlotScope() { --g_qaSelectOverrideDepth[mIndex]; }
+    QaSelectSlotScope(const QaSelectSlotScope&) = delete;
+    QaSelectSlotScope& operator=(const QaSelectSlotScope&) = delete;
+    int mIndex;
+};
+
 int qa_custom_count();
 u8 qa_custom_item(int idx);
 bool qa_custom_contains(u8 itemNo);
@@ -123,3 +133,5 @@ int quick_access_edit_cursor();
 u8 quick_access_edit_item(int idx);
 void quick_access_edit_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow);
 void quick_access_edit_shutdown();
+void quick_access_edit_pointer_install(const HookService* hook_svc, ModContext* mod_ctx);
+void quick_access_edit_pointer_update();

@@ -24,6 +24,7 @@
 #include "Z2AudioLib/Z2SeMgr.h"
 #include "../z_button/z_common.hpp"
 #include "../controls/controls.hpp"
+#include "../compat/twilight_hd.hpp"
 #include "mods/svc/save.h"
 
 #include <dolphin/gx.h>
@@ -271,6 +272,10 @@ bool quick_access_bottles_hotkey_active() {
     return s_hotkeyActive;
 }
 
+bool quick_access_bottles_menu_open() {
+    return s_bottleMenuOpen;
+}
+
 static const int QB_ITEM_PROC_KANDELAAR_POUR = 8;
 static const int QB_ITEM_PROC_COMMON_CHANGE_ITEM = 12;
 static const int QB_ITEM_PROC_BOTTLE_SWING = 13;
@@ -330,6 +335,7 @@ static void bottles_finish_pending() {
 }
 
 static void bottles_use_bottle(int slotIdx) {
+    QaSelectSlotScope bottleScope(SELECT_ITEM_B);
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     if (link == nullptr) {
         return;
@@ -839,7 +845,8 @@ static void on_meter2_draw_bottles_post(ModContext*, void* args, void*, void*) {
 ModResult init_quick_access_bottles(const HookService* hook_svc, const SaveService* save_svc,
                                     ModContext* mod_ctx, ModError*) {
     if (hook_svc) {
-        mods::hook::add_post<PadReadBottlesHook>(hook_svc, on_pad_read_bottles_post);
+        const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+        mods::hook::add_post<PadReadBottlesHook>(hook_svc, on_pad_read_bottles_post, &beforeTwilightHd);
         mods::hook::add_post<Meter2DrawBottlesHook>(hook_svc, on_meter2_draw_bottles_post);
     }
 

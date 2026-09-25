@@ -2,6 +2,7 @@
 
 #include "boss_rush.hpp"
 #include "../quick_access/quick_access.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include "mods/hook.hpp"
 #include "mods/service.hpp"
@@ -183,9 +184,26 @@ static void dpad_meter_post(ModContext*, void* args, void*, void*) {
     s_labelIsCustom = true;
 }
 
+DEFINE_HOOK(&J2DScreen::draw, BossRushDpadScreenDrawHook);
+
+static HookAction dpad_screen_draw_pre(ModContext*, void* args, void*, void*) {
+    if (!twilight_hd_dpad_shortcuts() || !fight_label_live()) return HOOK_CONTINUE;
+    J2DScreen* screen = mods::arg<J2DScreen*>(args, 0);
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    dMeter2Draw_c* draw = (meter != nullptr) ? meter->getMeterDrawPtr() : nullptr;
+    if (screen == nullptr || draw == nullptr || screen != draw->getMainScreenPtr()) {
+        return HOOK_CONTINUE;
+    }
+    set_subtree_strings(screen->search(MULTI_CHAR('m_text_n')), "RETRY");
+    return HOOK_CONTINUE;
+}
+
 ModResult init_boss_rush_dpad(const HookService* hook_svc, const LogService*, ModContext*) {
     if (!hook_svc) return MOD_OK;
-    mods::hook::add_post<BossRushDpadReadHook>(hook_svc, dpad_read_post);
+    const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+    const HookOptions afterTwilightHd = twilight_hd_hook_order(kTwilightHdRunAfter);
+    mods::hook::add_post<BossRushDpadReadHook>(hook_svc, dpad_read_post, &beforeTwilightHd);
+    mods::hook::add_pre<BossRushDpadScreenDrawHook>(hook_svc, dpad_screen_draw_pre, &afterTwilightHd);
     mods::hook::add_pre<BossRushDpadMeterHook>(hook_svc, dpad_meter_pre);
     mods::hook::add_post<BossRushDpadMeterHook>(hook_svc, dpad_meter_post);
     mods::hook::add_pre<BossRushMapOpenCheckHook>(hook_svc, boss_rush_map_open_check_pre);

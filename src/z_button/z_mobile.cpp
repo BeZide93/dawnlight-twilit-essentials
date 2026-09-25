@@ -151,6 +151,17 @@ void sync_z_button_meter(void* button) {
         return;
     }
 
+    if (twilight_hd_third_item_slot()) {
+        if (!s_meterRml.empty() && s_meterContainer != nullptr) {
+            std::string empty;
+            s_rmlSetInnerRML(s_meterContainer, &empty);
+        }
+        s_meterRml.clear();
+        s_meterButton = nullptr;
+        s_meterContainer = nullptr;
+        return;
+    }
+
     void* container = s_rmlGetChild(button, 1);
     if (container == nullptr) {
         return;

@@ -20,6 +20,8 @@ extern float g_configStaminaBarX;
 extern float g_configStaminaBarY;
 
 int stamina_effective_max();
+float stamina_twilight_hd_bottom();
+float stamina_twilight_hd_frame_height();
 
 void stamina_bar_preview_request();
 void stamina_bar_preview_cancel();

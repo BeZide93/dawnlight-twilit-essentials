@@ -1,4 +1,5 @@
 #include "controls.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 
@@ -33,8 +34,23 @@ static int clamp_button_index(int idx, int binding) {
     return idx;
 }
 
+bool controls_binding_blocked(int b) {
+    if (b < 0 || b >= CTRL_BIND_COUNT || !twilight_hd_dpad_shortcuts()) {
+        return false;
+    }
+    switch (clamp_button_index(g_controlsBinding[b], b)) {
+    case CTRL_BTN_DPAD_UP:
+    case CTRL_BTN_DPAD_DOWN:
+    case CTRL_BTN_DPAD_LEFT:
+    case CTRL_BTN_DPAD_RIGHT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 u32 controls_binding_bit(int b) {
-    if (b < 0 || b >= CTRL_BIND_COUNT) {
+    if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return 0;
     }
     switch (clamp_button_index(g_controlsBinding[b], b)) {
@@ -92,7 +108,7 @@ static void controls_pad_read_post(ModContext*, void*, void*, void*) {
 }
 
 bool controls_binding_held(int b) {
-    if (b < 0 || b >= CTRL_BIND_COUNT) {
+    if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return false;
     }
     const int button = clamp_button_index(g_controlsBinding[b], b);
@@ -109,7 +125,7 @@ bool controls_binding_held(int b) {
 }
 
 bool controls_binding_pressed(int b) {
-    if (b < 0 || b >= CTRL_BIND_COUNT) {
+    if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return false;
     }
     const u32 bit = controls_binding_bit(b);

@@ -46,6 +46,7 @@ extern ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT];
 
 /* PAD_* flag bit of the button currently bound to `b`; 0 for buttons that never reach the
  * game's button masks (stick clicks). */
+bool controls_binding_blocked(int b);
 u32 controls_binding_bit(int b);
 bool controls_binding_held(int b);
 bool controls_binding_pressed(int b);

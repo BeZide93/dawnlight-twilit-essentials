@@ -13,3 +13,4 @@ ModResult init_quick_access_bottles(const HookService* hook_svc, const SaveServi
 void shutdown_quick_access_bottles();
 
 bool quick_access_bottles_hotkey_active();
+bool quick_access_bottles_menu_open();

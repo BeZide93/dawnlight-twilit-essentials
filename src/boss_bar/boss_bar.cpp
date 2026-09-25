@@ -1,6 +1,7 @@
 #include "boss_bar.hpp"
 #include "boss_internals.hpp"
 #include "../stamina/stamina.hpp"
+#include "../compat/twilight_hd.hpp"
 
 void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
 void qa_hud_scale_end();
@@ -19,7 +20,9 @@ void qa_hud_scale_end();
 
 #define private public
 #define protected public
+#include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
+#include "d/d_meter2_info.h"
 #undef private
 #undef protected
 #include "d/d_pane_class.h"
@@ -1514,6 +1517,34 @@ static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a) {
     base->resize(svBW, svBH);
 }
 
+static f32 s_twilightHdShift = 0.0f;
+
+static f32 boss_bar_twilight_hd_shift(f32 baseBarY) {
+    f32 target = 0.0f;
+    if (twilight_hd_enabled()) {
+        f32 stackBottom = stamina_twilight_hd_bottom();
+        dMeter2_c* meter = g_meter2_info.getMeterClass();
+        dMeter2Draw_c* meterDraw = (meter != nullptr) ? meter->getMeterDrawPtr() : nullptr;
+        if (twilight_hd_gauge_visible(meterDraw)) {
+            const f32 gaugeBottom =
+                twilight_hd_top_meter_center_y() + stamina_twilight_hd_frame_height() * 0.5f;
+            if (gaugeBottom > stackBottom) {
+                stackBottom = gaugeBottom;
+            }
+        }
+        constexpr f32 kBossBarLabelSpace = 22.0f;
+        const f32 frameTop = baseBarY - 4.0f - kBossBarLabelSpace;
+        if (stackBottom > 0.0f && stackBottom + 4.0f > frameTop) {
+            target = stackBottom + 4.0f - frameTop;
+        }
+    }
+    s_twilightHdShift += (target - s_twilightHdShift) * 0.15f;
+    if (s_twilightHdShift < 0.05f && target == 0.0f) {
+        s_twilightHdShift = 0.0f;
+    }
+    return s_twilightHdShift;
+}
+
 static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     if (a < 0.01f) return;
     if (a > 1.0f) a = 1.0f;
@@ -1533,7 +1564,7 @@ static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     if (barW < 280.0f) barW = 280.0f;
     const f32 barH = 10.0f;
     const f32 barX = centreX - barW * 0.5f + g_configBossBarX;
-    const f32 barY = topY + 41.0f + g_configBossBarY;
+    const f32 barY = topY + 41.0f + g_configBossBarY + boss_bar_twilight_hd_shift(topY + 41.0f + g_configBossBarY);
 
     constexpr f32 kBossBarScaleAnchorBlendX = 1.0f;
     constexpr f32 kBossBarScaleAnchorBlendY = 1.0f;
