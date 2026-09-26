@@ -20,6 +20,10 @@ void boss_bar_preview_request();
 void boss_bar_preview_cancel();
 
 extern ConfigVarHandle g_bossBarVars[2];
+extern ConfigVarHandle g_bossBarStyleVar;
+extern int g_configBossBarStyle;
+extern const char* const kBossBarStyleLabels[];
+extern const size_t kBossBarStyleCount;
 ModResult init_boss_bar_config(const ConfigService* cfg, ModContext* ctx);
 
 bool boss_bar_is_boss_name(int16_t name);

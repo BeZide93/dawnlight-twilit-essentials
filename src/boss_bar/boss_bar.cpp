@@ -61,6 +61,24 @@ void boss_bar_preview_request() { s_bossBarPreviewFrames = kBossBarPreviewFrames
 void boss_bar_preview_cancel() { s_bossBarPreviewFrames = 0; }
 
 ConfigVarHandle g_bossBarVars[2] = {};
+ConfigVarHandle g_bossBarStyleVar = 0;
+int g_configBossBarStyle = 0;
+
+enum BossBarStyle {
+    kBossBarStyleDefault = 0,
+    kBossBarStyleEldenRing,
+};
+
+const char* const kBossBarStyleLabels[] = {"Default", "Elden Ring"};
+const size_t kBossBarStyleCount = sizeof(kBossBarStyleLabels) / sizeof(kBossBarStyleLabels[0]);
+
+static void on_boss_bar_style_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+                                      const ConfigVarValue*, void*) {
+    if (value == nullptr) return;
+    g_configBossBarStyle = static_cast<int>(value->int_value);
+    boss_bar_preview_request();
+    stamina_bar_preview_cancel();
+}
 
 static void on_boss_bar_pos_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
                                     const ConfigVarValue*, void* user_data) {
@@ -98,6 +116,17 @@ ModResult init_boss_bar_config(const ConfigService* cfg, ModContext* ctx) {
             cfg->subscribe(ctx, g_bossBarVars[i], on_boss_bar_pos_changed,
                            reinterpret_cast<void*>(static_cast<intptr_t>(vars[i].isX)), nullptr);
         }
+    }
+
+    ConfigVarDesc styleDesc = CONFIG_VAR_DESC_INIT;
+    styleDesc.name = "bossBarStyle";
+    styleDesc.type = CONFIG_VAR_INT;
+    styleDesc.default_int = kBossBarStyleDefault;
+    if (cfg->register_var(ctx, &styleDesc, &g_bossBarStyleVar) == MOD_OK) {
+        int64_t style = 0;
+        cfg->get_int(ctx, g_bossBarStyleVar, &style);
+        g_configBossBarStyle = static_cast<int>(style);
+        cfg->subscribe(ctx, g_bossBarStyleVar, on_boss_bar_style_changed, nullptr, nullptr);
     }
     return MOD_OK;
 }
@@ -1545,9 +1574,150 @@ static f32 boss_bar_twilight_hd_shift(f32 baseBarY) {
     return s_twilightHdShift;
 }
 
+static void draw_text_soft(const char* text, f32 x, f32 y, f32 charW, f32 charH,
+                           JUtility::TColor top, JUtility::TColor bot, JUtility::TColor shadow,
+                           f32 radius) {
+    JUTFont* font = boss_name_font();
+    if (!font) return;
+    font->setGX();
+    if (shadow.a > 0 && radius > 0.0f) {
+        static const f32 kDir[8][2] = {
+            { 1.0f, 0.0f}, {-1.0f, 0.0f}, {0.0f,  1.0f}, {0.0f, -1.0f},
+            { 0.7f, 0.7f}, {0.7f, -0.7f}, {-0.7f, 0.7f}, {-0.7f, -0.7f},
+        };
+        font->setCharColor(shadow);
+        for (const auto& d : kDir) {
+            font->drawString_scale(x + d[0] * radius, y + d[1] * radius, charW, charH, text, true);
+        }
+    }
+    font->setGradColor(top, bot);
+    font->drawString_scale(x, y, charW, charH, text, true);
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port) port->setup2D();
+}
+
+static void copy_boss_name(const char* src, char* out, size_t outSize, bool upper) {
+    if (!src) src = "Boss";
+    size_t i = 0;
+    for (; src[i] != '\0' && i < outSize - 1; i++) {
+        const char c = src[i];
+        out[i] = (upper && c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    out[i] = '\0';
+}
+
+static const char* elden_ring_title(const char* label) {
+    static const struct { const char* label; const char* title; } kTitles[] = {
+        {"Diababa",          "Diababa, the Twilit Parasite"},
+        {"Fyrus",            "Fyrus, the Twilit Igniter"},
+        {"Morpheel",         "Morpheel, the Twilit Aquatic"},
+        {"Stallord",         "Stallord, the Twilit Fossil"},
+        {"Blizzeta",         "Blizzeta, the Twilit Ice Mass"},
+        {"Armogohma",        "Armogohma, the Twilit Arachnid"},
+        {"Argorok",          "Argorok, the Twilit Dragon"},
+        {"Zant",             "Zant, the Usurper King"},
+        {"Phantom Zant",     "Phantom Zant, the False King"},
+        {"Puppet Zelda",     "Zelda, the Puppet Princess"},
+        {"Ganondorf",        "Ganondorf, the Dark Lord"},
+        {"Dark Beast Ganon", "Ganon, the Dark Beast"},
+        {"King Bulblin",     "King Bulblin, the Warlord"},
+        {"Death Sword",      "Death Sword, the Cursed Blade"},
+        {"Darkhammer",       "Darkhammer, the Iron Wall"},
+        {"Deku Toad",        "Deku Toad, the Tunnel Dweller"},
+        {"Dangoro",          "Dangoro, the Goron Guardian"},
+        {"Ook",              "Ook, the Forest Thief"},
+        {"Darknut",          "Darknut, the Iron Knight"},
+        {"Aeralfos",         "Aeralfos, the Sky Guard"},
+    };
+    if (label) {
+        for (const auto& t : kTitles) {
+            if (std::strcmp(label, t.label) == 0) return t.title;
+        }
+    }
+    return label ? label : "Boss";
+}
+
+struct BossBarScreen {
+    f32 usableW;
+    f32 centreX;
+    f32 topY;
+    f32 bottomY;
+};
+
+static BossBarScreen boss_bar_screen() {
+    BossBarScreen s;
+    f32 minX = mDoGph_gInf_c::getMinXF();
+    f32 maxX = mDoGph_gInf_c::getMaxXF();
+    if (maxX <= minX + 1.0f) { minX = 0.0f; maxX = 640.0f; }
+    const f32 sMin = mDoGph_gInf_c::getSafeMinXF();
+    const f32 sMax = mDoGph_gInf_c::getSafeMaxXF();
+    s.usableW = (sMax > sMin + 1.0f) ? (sMax - sMin) : (maxX - minX);
+    s.centreX = (minX + maxX) * 0.5f;
+    s.topY = mDoGph_gInf_c::getMinYF();
+    if (s.topY < 0.0f || s.topY > 200.0f) s.topY = 0.0f;
+    f32 bottom = mDoGph_gInf_c::getSafeMaxYF();
+    const f32 maxY = mDoGph_gInf_c::getMaxYF();
+    if (bottom <= s.topY + 100.0f) bottom = maxY;
+    if (bottom <= s.topY + 100.0f) bottom = 448.0f;
+    s.bottomY = bottom;
+    return s;
+}
+
+static f32 clampf(f32 v, f32 lo, f32 hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chip,
+                                     const BossBarScreen& scr) {
+    auto A = [a](u8 base) -> u8 { return static_cast<u8>(static_cast<f32>(base) * a); };
+
+    const f32 barW = clampf(scr.usableW * 0.54f, 340.0f, 600.0f);
+    const f32 barH = 4.5f;
+    const f32 barX = scr.centreX - barW * 0.5f + g_configBossBarX;
+    const f32 barY = scr.bottomY - 84.0f + g_configBossBarY;
+
+    qa_hud_scale_begin(barX + barW * 0.5f, barY);
+
+    fill_vgrad(barX - 4.0f, barY - 4.0f, barW + 8.0f, barH + 8.0f,
+               JUtility::TColor(0, 0, 0, A(55)), JUtility::TColor(0, 0, 0, A(55)));
+    fill_vgrad(barX - 2.0f, barY - 2.0f, barW + 4.0f, barH + 4.0f,
+               JUtility::TColor(0, 0, 0, A(215)), JUtility::TColor(0, 0, 0, A(215)));
+    fill_vgrad(barX - 1.0f, barY - 1.0f, barW + 2.0f, barH + 2.0f,
+               JUtility::TColor(118, 108, 92, A(210)), JUtility::TColor(70, 64, 56, A(210)));
+    fill_vgrad(barX, barY, barW, barH,
+               JUtility::TColor(28, 22, 22, A(240)), JUtility::TColor(12, 9, 9, A(240)));
+
+    if (chip > live + 0.001f) {
+        fill_vgrad(barX + barW * live, barY, barW * (chip - live), barH,
+                   JUtility::TColor(240, 212, 128, A(235)), JUtility::TColor(196, 150, 70, A(235)));
+    }
+    if (live > 0.0f) {
+        const f32 fw = barW * live;
+        fill_vgrad(barX, barY, fw, barH,
+                   JUtility::TColor(182, 34, 38, A(250)), JUtility::TColor(108, 12, 18, A(250)));
+        fill_vgrad(barX, barY, fw, 1.0f,
+                   JUtility::TColor(255, 128, 116, A(110)), JUtility::TColor(255, 128, 116, A(40)));
+    }
+
+    char nm[64];
+    copy_boss_name(elden_ring_title(label), nm, sizeof(nm), false);
+    draw_text_soft(nm, barX, barY - 6.0f, 11.5f, 13.5f,
+                   JUtility::TColor(240, 234, 218, A(255)), JUtility::TColor(206, 198, 180, A(255)),
+                   JUtility::TColor(0, 0, 0, A(150)), 1.0f);
+
+    qa_hud_scale_end();
+}
+
 static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     if (a < 0.01f) return;
     if (a > 1.0f) a = 1.0f;
+
+    if (g_configBossBarStyle == kBossBarStyleEldenRing) {
+        live = clampf(live, 0.0f, 1.0f);
+        chip = clampf(chip < live ? live : chip, 0.0f, 1.0f);
+        draw_boss_bar_elden_ring(a, label, live, chip, boss_bar_screen());
+        return;
+    }
 
     f32 minX = mDoGph_gInf_c::getMinXF();
     f32 maxX = mDoGph_gInf_c::getMaxXF();
