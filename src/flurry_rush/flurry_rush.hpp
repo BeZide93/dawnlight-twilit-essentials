@@ -9,6 +9,7 @@ extern int g_configFlurryRushPerfectFrames;
 extern int g_configFlurryRushSlowFactor;
 extern int g_configFlurryRushWindowTicks;
 extern int g_configFlurryRushHits;
+extern int g_configFlurryRushIdleFrames;
 
 bool flurry_rush_is_rush_active();
 

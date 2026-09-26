@@ -440,6 +440,7 @@ static ConfigVarHandle s_varFlurryRushPerfectFrames = 0;
 static ConfigVarHandle s_varFlurryRushSlowFactor = 0;
 static ConfigVarHandle s_varFlurryRushWindow = 0;
 static ConfigVarHandle s_varFlurryRushHits = 0;
+static ConfigVarHandle s_varFlurryRushIdleFrames = 0;
 static ConfigVarHandle s_varStamina = 0;
 static ConfigVarHandle s_varStaminaMax = 0;
 static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
@@ -730,6 +731,15 @@ static void on_flurry_rush_hits_changed(ModContext*, ConfigVarHandle, const Conf
         if (hits < 1) hits = 1;
         if (hits > 8) hits = 8;
         g_configFlurryRushHits = static_cast<int>(hits);
+    }
+}
+
+static void on_flurry_rush_idle_frames_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        int64_t frames = value->int_value;
+        if (frames < 10) frames = 10;
+        if (frames > 150) frames = 150;
+        g_configFlurryRushIdleFrames = static_cast<int>(frames);
     }
 }
 
@@ -1777,6 +1787,20 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = "s";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    if (s_varFlurryRushIdleFrames != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_NUMBER;
+        c.label = "End when not attacking";
+        c.help_rml = "<p>The flurry ends early if you don't attack for this long "
+                     "(default: 45 frames).</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varFlurryRushIdleFrames;
+        c.min = 10;
+        c.max = 150;
+        c.step = 5;
+        c.suffix = " frames";
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Puppet Zelda");
     ui_add_toggle(left, "Enabled", s_varPuppetZeldaPattern,
@@ -2627,6 +2651,19 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             if (v > 8) v = 8;
             g_configFlurryRushHits = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varFlurryRushHits, on_flurry_rush_hits_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descFlurryRushIdleFrames = CONFIG_VAR_DESC_INIT;
+        descFlurryRushIdleFrames.name = "flurryRushIdleFrames";
+        descFlurryRushIdleFrames.type = CONFIG_VAR_INT;
+        descFlurryRushIdleFrames.default_int = 45;
+        if (svc_config->register_var(mod_ctx, &descFlurryRushIdleFrames, &s_varFlurryRushIdleFrames) == MOD_OK) {
+            int64_t v = 45;
+            svc_config->get_int(mod_ctx, s_varFlurryRushIdleFrames, &v);
+            if (v < 10) v = 10;
+            if (v > 150) v = 150;
+            g_configFlurryRushIdleFrames = static_cast<int>(v);
+            svc_config->subscribe(mod_ctx, s_varFlurryRushIdleFrames, on_flurry_rush_idle_frames_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descFlurryRushPerfectFrames = CONFIG_VAR_DESC_INIT;

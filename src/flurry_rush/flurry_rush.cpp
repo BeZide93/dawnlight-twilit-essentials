@@ -1,6 +1,8 @@
 #include "flurry_rush.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_b_tn.h"
+#include "d/actor/d_a_b_gnd.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_cc_uty.h"
 #include "d/d_s_play.h"
@@ -22,6 +24,7 @@ int g_configFlurryRushPerfectFrames = 30;
 int g_configFlurryRushSlowFactor = 30;
 int g_configFlurryRushWindowTicks = 150;
 int g_configFlurryRushHits = 4;
+int g_configFlurryRushIdleFrames = 45;
 
 namespace {
 
@@ -42,6 +45,8 @@ constexpr int kSwingResolveTicks = 4;
 constexpr int kMaxAtp = 8;
 
 constexpr f32 kMaxRushDistance = 300.0f;
+constexpr f32 kDodgeSensorRadiusScale = 3.0f;
+constexpr f32 kDodgeSensorExtraHeight = 60.0f;
 constexpr u32 kDefaultHitMapInfo = 30;
 
 enum class State {
@@ -56,6 +61,7 @@ int s_cooldown = 0;
 u16 s_prevProc = 0;
 int s_hitCount = 0;
 int s_finishTicks = -1;
+int s_idleTicks = 0;
 fpc_ProcID s_targetId = fpcM_ERROR_PROCESS_ID_e;
 bool s_atHitPrev[5] = {};
 
@@ -156,7 +162,7 @@ fopAc_ac_c* find_enemy_attacker(daAlink_c* link) {
     for (int i = 0; i < 3; i++) {
         if (!link->mTgCyls[i].ChkTgHit()) continue;
         fopAc_ac_c* attacker = link->mTgCyls[i].GetTgHitAc();
-        if (attacker != nullptr && fopAcM_GetGroup(attacker) == fopAc_ENEMY_e) {
+        if (attacker != nullptr && attacker != link && fopAcM_GetGroup(attacker) != fopAc_PLAYER_e) {
             return attacker;
         }
     }
@@ -182,6 +188,7 @@ void clear_rush_state() {
     s_pendingBonusTicks = 0;
     s_pendingBonusAtp = 0;
     s_finishTicks = -1;
+    s_idleTicks = 0;
     s_targetId = fpcM_ERROR_PROCESS_ID_e;
     s_execAccumulator = 0.0f;
     for (int i = 0; i < 5; i++) {
@@ -387,6 +394,11 @@ constexpr char kSwingTurn[] = "spin";
 constexpr char kSwingHead[] = "helm split";
 constexpr char kSwingDown[] = "ending blow";
 
+bool is_dodge_proc(u16 proc) {
+    return proc == daAlink_c::PROC_SIDESTEP || proc == daAlink_c::PROC_BACK_JUMP ||
+           proc == daAlink_c::PROC_SIDESTEP_LAND || proc == daAlink_c::PROC_BACK_JUMP_LAND;
+}
+
 bool target_in_rush_range(daAlink_c* link) {
     fopAc_ac_c* target = link->mTargetedActor;
     return target != nullptr &&
@@ -423,21 +435,7 @@ static HookAction on_check_damage_action_pre(ModContext*, void* args, void* retv
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link == nullptr || link->checkDeadAction(0)) return HOOK_CONTINUE;
 
-    if (armed) {
-        const u16 proc = static_cast<u16>(link->mProcID);
-        if (proc != daAlink_c::PROC_SIDESTEP && proc != daAlink_c::PROC_BACK_JUMP &&
-            proc != daAlink_c::PROC_SIDESTEP_LAND && proc != daAlink_c::PROC_BACK_JUMP_LAND)
-        {
-            return HOOK_CONTINUE;
-        }
-    }
-
     if (find_enemy_attacker(link) == nullptr) return HOOK_CONTINUE;
-    if (armed && !target_in_rush_range(link)) {
-        flog("flurry: perfect dodge ignored, target too far away");
-        s_state = State::IDLE;
-        return HOOK_CONTINUE;
-    }
 
     reset_link_hit_flags(link);
 
@@ -520,7 +518,40 @@ static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
+bool s_sensorActive = false;
+f32 s_sensorBaseR[3] = {};
+
+void restore_dodge_sensor(daAlink_c* link) {
+    if (!s_sensorActive) return;
+    s_sensorActive = false;
+    if (link == nullptr) return;
+    for (int i = 0; i < 3; i++) {
+        link->mTgCyls[i].SetR(s_sensorBaseR[i]);
+    }
+}
+
+void apply_dodge_sensor(daAlink_c* link) {
+    if (!s_sensorActive) {
+        for (int i = 0; i < 3; i++) {
+            s_sensorBaseR[i] = link->mTgCyls[i].GetR();
+        }
+        s_sensorActive = true;
+    }
+    for (int i = 0; i < 3; i++) {
+        link->mTgCyls[i].SetR(s_sensorBaseR[i] * kDodgeSensorRadiusScale);
+        link->mTgCyls[i].SetH(link->mTgCyls[i].GetH() + kDodgeSensorExtraHeight);
+    }
+}
+
 static void on_link_execute_post(ModContext*, void* args, void*, void*) {
+    if (!s_reentering) {
+        daAlink_c* sensorLink = mods::arg<daAlink_c*>(args, 0);
+        if (sensorLink != nullptr && s_state == State::ARMED) {
+            apply_dodge_sensor(sensorLink);
+        } else {
+            restore_dodge_sensor(sensorLink);
+        }
+    }
     if (s_state != State::RUSH || s_reentering) return;
 
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
@@ -545,6 +576,87 @@ static void on_link_execute_post(ModContext*, void* args, void*, void*) {
     s_reentering = false;
 }
 
+DEFINE_HOOK(&daB_TN_c::damage_check, FlurryDarknutDamageCheckHook);
+DEFINE_HOOK(&daB_TN_c::setBodyShield, FlurryDarknutBodyShieldHook);
+
+u8 s_savedCutType = 0;
+bool s_cutTypeSwapped = false;
+
+bool darknut_rush_target(daB_TN_c* tn) {
+    if (s_state != State::RUSH || tn == nullptr) return false;
+    return s_targetId == fpcM_ERROR_PROCESS_ID_e || fopAcM_GetID(tn) == s_targetId;
+}
+
+void darknut_drop_guard(daB_TN_c* tn) {
+    tn->field_0xa91 = false;
+    tn->mTimer10 = 0;
+    if (tn->mActionMode1 > 1 && tn->mActionMode1 < 8 && tn->mTimer12 < 2) {
+        tn->mTimer12 = 2;
+    }
+}
+
+static HookAction on_darknut_damage_check_pre(ModContext*, void* args, void*, void*) {
+    daB_TN_c* tn = mods::arg<daB_TN_c*>(args, 0);
+    if (!darknut_rush_target(tn)) return HOOK_CONTINUE;
+    darknut_drop_guard(tn);
+    if (tn->mInvincibilityTimer > 2) tn->mInvincibilityTimer = 2;
+    auto* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
+    if (player != nullptr) {
+        const u8 cut = player->mCutType;
+        if (cut == daPy_py_c::CUT_TYPE_DASH_LEFT || cut == daPy_py_c::CUT_TYPE_DASH_RIGHT) {
+            s_savedCutType = cut;
+            s_cutTypeSwapped = true;
+            player->mCutType = cut == daPy_py_c::CUT_TYPE_DASH_LEFT ? daPy_py_c::CUT_TYPE_NM_LEFT
+                                                                    : daPy_py_c::CUT_TYPE_NM_RIGHT;
+        }
+    }
+    return HOOK_CONTINUE;
+}
+
+static void on_darknut_damage_check_post(ModContext*, void*, void*, void*) {
+    if (!s_cutTypeSwapped) return;
+    s_cutTypeSwapped = false;
+    auto* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
+    if (player != nullptr) player->mCutType = s_savedCutType;
+}
+
+static HookAction on_darknut_body_shield_pre(ModContext*, void* args, void*, void*) {
+    daB_TN_c* tn = mods::arg<daB_TN_c*>(args, 0);
+    if (darknut_rush_target(tn)) darknut_drop_guard(tn);
+    return HOOK_CONTINUE;
+}
+
+DEFINE_HOOK_SYMBOL("src/d/actor/d_a_b_gnd.cpp#damage_check", void(b_gnd_class*), FlurryGanondorfDamageCheckHook);
+
+constexpr int kGndHitGapFrames = 3;
+int s_gndHitGap = 0;
+
+bool ganondorf_duel_action(s16 mode) {
+    return mode == 10 || mode == 11 || mode == 12 || mode == 13 || mode == 14 || mode == 20;
+}
+
+static HookAction on_ganondorf_damage_check_pre(ModContext*, void* args, void*, void*) {
+    if (s_gndHitGap > 0) s_gndHitGap--;
+    b_gnd_class* gnd = mods::arg<b_gnd_class*>(args, 0);
+    if (gnd == nullptr || s_state != State::RUSH) return HOOK_CONTINUE;
+    if (s_targetId != fpcM_ERROR_PROCESS_ID_e && fopAcM_GetID(gnd) != s_targetId) return HOOK_CONTINUE;
+    if (gnd->mDrawHorse || !ganondorf_duel_action(gnd->mActionMode)) return HOOK_CONTINUE;
+
+    gnd->field_0xc79 = 0;
+    if (s_gndHitGap > 0) {
+        if (gnd->mDamageInvulnerabilityTimer < 1) gnd->mDamageInvulnerabilityTimer = 1;
+        return HOOK_CONTINUE;
+    }
+    gnd->mDamageInvulnerabilityTimer = 0;
+    for (int i = 0; i < 3; i++) {
+        if (gnd->mGndSph[i].ChkTgHit()) {
+            s_gndHitGap = kGndHitGapFrames;
+            break;
+        }
+    }
+    return HOOK_CONTINUE;
+}
+
 void install_hooks() {
     if (s_hooksInstalled || s_hookSvc == nullptr) return;
     mods::hook::add_post<FlurryRushSideStepInitHook>(s_hookSvc, on_sidestep_init_post);
@@ -558,6 +670,10 @@ void install_hooks() {
     mods::hook::add_post<FlurrySwingTurnHook>(s_hookSvc, on_swing_init_post<kSwingTurn>);
     mods::hook::add_post<FlurrySwingHeadHook>(s_hookSvc, on_swing_init_post<kSwingHead>);
     mods::hook::add_post<FlurrySwingDownHook>(s_hookSvc, on_swing_init_post<kSwingDown>);
+    mods::hook::add_pre<FlurryDarknutDamageCheckHook>(s_hookSvc, on_darknut_damage_check_pre);
+    mods::hook::add_post<FlurryDarknutDamageCheckHook>(s_hookSvc, on_darknut_damage_check_post);
+    mods::hook::add_pre<FlurryDarknutBodyShieldHook>(s_hookSvc, on_darknut_body_shield_pre);
+    mods::hook::add_pre<FlurryGanondorfDamageCheckHook>(s_hookSvc, on_ganondorf_damage_check_pre);
     s_hooksInstalled = true;
 }
 
@@ -629,7 +745,9 @@ void update_flurry_rush(const LogService*, ModContext*) {
     }
 
     if (s_state == State::ARMED) {
-        if (++s_stateTicks > g_configFlurryRushPerfectFrames) {
+        ++s_stateTicks;
+        const bool dodging = player != nullptr && is_dodge_proc(static_cast<u16>(player->mProcID));
+        if (s_stateTicks > g_configFlurryRushPerfectFrames && !dodging) {
             s_state = State::IDLE;
         }
         return;
@@ -680,6 +798,15 @@ void update_flurry_rush(const LogService*, ModContext*) {
         }
     }
 
+    if (link != nullptr && !is_attack_proc(static_cast<u16>(link->mProcID)) && !s_swingOpen) {
+        if (++s_idleTicks >= g_configFlurryRushIdleFrames) {
+            end_rush("no attack");
+            return;
+        }
+    } else {
+        s_idleTicks = 0;
+    }
+
     bool shouldEnd = !g_configFlurryRushEnabled;
     if (!shouldEnd) {
         int capTicks = g_configFlurryRushWindowTicks;
@@ -698,6 +825,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
 }
 
 void shutdown_flurry_rush() {
+    restore_dodge_sensor(static_cast<daAlink_c*>(dComIfGp_getPlayer(0)));
     end_rush();
     s_hookSvcSet = false;
     s_hookSvc = nullptr;
