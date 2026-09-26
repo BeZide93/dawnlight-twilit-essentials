@@ -2,6 +2,7 @@
 
 #include "midna_location.hpp"
 #include "z_mobile.hpp"
+#include "../controls/controls.hpp"
 
 DEFINE_HOOK(&dMeterButton_c::_execute, MeterButtonExecuteHook);
 
@@ -206,11 +207,23 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
     if (zbtnPic) {
         if (g_configCustomZButtonEnabled && !isNativeZButtonEngine()) {
             s_buttonPromptDirty = true;
-            ResTIMG* dpadTex = get_dpad_left_texture();
-            if (dpadTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != dpadTex) {
-                zbtnPic->changeTexture(dpadTex, 0);
+            if (controls_midna_on_l()) {
+                const ResTIMG* zTex = get_orig_z_button_texture();
+                if (zTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != zTex) {
+                    zbtnPic->changeTexture(zTex, 0);
+                }
+                zbtnPic->setMirror(J2DMirror_X);
+                if (s_hasOrigProps) {
+                    zbtnPic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
+                }
+            } else {
+                ResTIMG* dpadTex = get_dpad_left_texture();
+                if (dpadTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != dpadTex) {
+                    zbtnPic->changeTexture(dpadTex, 0);
+                }
+                zbtnPic->setMirror(MIRROR0);
+                zbtnPic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 255, 255, 255));
             }
-            zbtnPic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 255, 255, 255));
 
             if (z_btnl) {
                 z_btnl->hide();
@@ -230,6 +243,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
             if (origTex && zbtnPic->getTexture(0) && zbtnPic->getTexture(0)->getTexInfo() != origTex) {
                 zbtnPic->changeTexture(origTex, 0);
             }
+            zbtnPic->setMirror(MIRROR0);
             if (s_hasOrigProps) {
                 zbtnPic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
             }

@@ -47,6 +47,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_twilight_hd_ring_z_post, &afterTwilightHd);
     mods::hook::add_post<CheckStatusHook>(hook_svc, on_check_status_post);
     mods::hook::add_post<Meter2ExecuteHook>(hook_svc, on_meter2_execute_post);
+    mods::hook::add_pre<Meter2DrawDrawHook>(hook_svc, on_meter2_draw_draw_pre);
     mods::hook::add_post<Meter2DrawDrawHook>(hook_svc, on_meter2_draw_draw_post);
     mods::hook::add_pre<MidonaAlphaHook>(hook_svc, on_set_button_icon_midona_alpha_pre);
     mods::hook::add_post<MidonaAlphaHook>(hook_svc, on_set_button_icon_midona_alpha_post);
@@ -149,6 +150,7 @@ void shutdown_z_button() {
     }
 
     reset_ring_z_prompt();
+    midna_l_overlay_shutdown();
 
     z_mobile_shutdown();
 

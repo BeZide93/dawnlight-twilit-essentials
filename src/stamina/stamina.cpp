@@ -591,6 +591,12 @@ static void place_stamina_twilight_hd(dMeter2Draw_c* draw, J2DPane* parentPane) 
     s_hdBottom = centerY + s_hdFrameHeight * 0.5f;
 }
 
+f32 stamina_bar_alpha() {
+    if (s_staminaBarPreviewFrames > 0) return 1.0f;
+    if (!g_configStaminaEnabled || !in_gameplay_for_draw()) return 0.0f;
+    return s_alpha;
+}
+
 static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     CPaneMgr* meter  = draw->mpMagicMeter;
     CPaneMgr* base   = draw->mpMagicBase;

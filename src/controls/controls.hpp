@@ -39,6 +39,19 @@ enum ControlsBinding {
 extern int g_controlsBinding[CTRL_BIND_COUNT];
 extern ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT];
 
+enum ControlsMidnaButton {
+    CTRL_MIDNA_DPAD_LEFT = 0,
+    CTRL_MIDNA_L,
+    CTRL_MIDNA_COUNT,
+};
+
+extern const char* const kControlsMidnaLabels[CTRL_MIDNA_COUNT];
+extern ConfigVarHandle g_controlsMidnaVar;
+
+bool controls_midna_on_l();
+bool controls_l_shoulder_held();
+u32 controls_l_shoulder_pad_mask();
+
 bool controls_binding_blocked(int b);
 u32 controls_binding_bit(int b);
 bool controls_binding_held(int b);

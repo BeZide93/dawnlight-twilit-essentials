@@ -1,5 +1,6 @@
 #include "boss_rush_midna.hpp"
 #include "boss_rush_gamemode.hpp"
+#include "../controls/controls.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
 #include "../compat/twilight_hd.hpp"
@@ -911,7 +912,7 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
 
     bool triggered = link->midnaTalkTrigger() || (g_configCustomZButtonEnabled && g_dpadLeftTrig);
 
-    if (g_configCustomZButtonEnabled) {
+    if (g_configCustomZButtonEnabled && !controls_midna_on_l()) {
         triggered = triggered ||
             (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
     }

@@ -4,6 +4,12 @@
 #include "midna_location.hpp"
 #include "z_mobile.hpp"
 #include "../boss_rush/boss_rush_midna.hpp"
+#include "../controls/controls.hpp"
+#include "../stamina/stamina.hpp"
+#include "m_Do/m_Do_graphic.h"
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+
+#include <algorithm>
 
 f32 qa_user_hud_scale();
 
@@ -300,7 +306,214 @@ void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW
     }
 }
 
+static bool s_midnaLOverlay = false;
+static bool s_midnaLWasVisible = false;
+
+static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
+#if Z_MOBILE_BUILD
+    (void)draw;
+    return false;
+#else
+    return g_configCustomZButtonEnabled && !isNativeZButtonEngine() && controls_midna_on_l() &&
+           draw != nullptr && draw->getMainScreenPtr() != nullptr && !isTitleOrMainMenu();
+#endif
+}
+
+HookAction on_meter2_draw_draw_pre(ModContext*, void* args, void*, void*) {
+    s_midnaLOverlay = false;
+    if (!args) {
+        return HOOK_CONTINUE;
+    }
+    dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
+    if (!midna_l_overlay_wanted(draw)) {
+        return HOOK_CONTINUE;
+    }
+    J2DPane* midona = draw->getMainScreenPtr()->search(MULTI_CHAR('midona_n'));
+    if (midona == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    s_midnaLWasVisible = midona->isVisible();
+    midona->hide();
+    s_midnaLOverlay = true;
+    return HOOK_CONTINUE;
+}
+
+static bool midna_l_pane_box(J2DPane* pane, f32& x0, f32& y0, f32& x1, f32& y1) {
+    CPaneMgr mgr;
+    Mtx mtx;
+    for (u8 i = 0; i < 4; i++) {
+        const Vec v = mgr.getGlobalVtx(pane, &mtx, i, false, 0);
+        if (i == 0) {
+            x0 = x1 = v.x;
+            y0 = y1 = v.y;
+            continue;
+        }
+        x0 = std::min(x0, v.x);
+        x1 = std::max(x1, v.x);
+        y0 = std::min(y0, v.y);
+        y1 = std::max(y1, v.y);
+    }
+    return x1 > x0 + 1.0f && y1 > y0 + 1.0f;
+}
+
+struct MidnaLPicture {
+    J2DPicture* pic = nullptr;
+    const ResTIMG* tex = nullptr;
+};
+
+static MidnaLPicture s_midnaLBase;
+static MidnaLPicture s_midnaLShadow;
+static MidnaLPicture s_midnaLFace;
+
+static void midna_l_release(MidnaLPicture& p) {
+    if (p.pic != nullptr) {
+        JKR_DELETE(p.pic);
+    }
+    p = MidnaLPicture{};
+}
+
+void midna_l_overlay_shutdown() {
+    midna_l_release(s_midnaLBase);
+    midna_l_release(s_midnaLShadow);
+    midna_l_release(s_midnaLFace);
+}
+
+static J2DPicture* midna_l_picture(MidnaLPicture& p, J2DPicture* src) {
+    if (src == nullptr || src->getTexture(0) == nullptr) {
+        return nullptr;
+    }
+    const ResTIMG* tex = src->getTexture(0)->getTexInfo();
+    if (tex == nullptr) {
+        return nullptr;
+    }
+    if (p.pic == nullptr || p.tex != tex) {
+        midna_l_release(p);
+        JKRHeap* rootHeap = JKRHeap::getRootHeap();
+        JKRHeap* oldHeap = rootHeap != nullptr ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
+        p.pic = JKR_NEW J2DPicture(tex);
+        if (oldHeap != nullptr) {
+            mDoExt_setCurrentHeap(oldHeap);
+        }
+        p.tex = tex;
+        if (p.pic == nullptr) {
+            p.tex = nullptr;
+            return nullptr;
+        }
+    }
+    p.pic->setBlackWhite(src->getBlack(), src->getWhite());
+    p.pic->setCornerColor(src->corner(0), src->corner(1), src->corner(2), src->corner(3));
+    return p.pic;
+}
+
+static void midna_l_draw(J2DPicture* pic, f32 x, f32 y, f32 w, f32 h, u8 alpha, bool mirrorX) {
+    if (pic == nullptr) {
+        return;
+    }
+    pic->setAlpha(alpha);
+    pic->mColorAlpha = alpha;
+    pic->draw(x, y, w, h, mirrorX, false, false);
+}
+
+static bool midna_l_hearts_box(dMeter2Draw_c* draw, f32& x0, f32& y0, f32& x1, f32& y1) {
+    int hearts = dComIfGs_getMaxLife() / 5;
+    if (hearts < 1) hearts = 1;
+    if (hearts > 20) hearts = 20;
+    bool any = false;
+    for (int i = 0; i < hearts; i++) {
+        CPaneMgr* part = draw->mpLifeParts[i];
+        J2DPane* pane = part != nullptr ? part->getPanePtr() : nullptr;
+        if (pane == nullptr) {
+            continue;
+        }
+        f32 a0 = 0.0f, b0 = 0.0f, a1 = 0.0f, b1 = 0.0f;
+        if (!midna_l_pane_box(pane, a0, b0, a1, b1)) {
+            continue;
+        }
+        if (!any) {
+            x0 = a0; y0 = b0; x1 = a1; y1 = b1;
+            any = true;
+        } else {
+            x0 = std::min(x0, a0);
+            y0 = std::min(y0, b0);
+            x1 = std::max(x1, a1);
+            y1 = std::max(y1, b1);
+        }
+    }
+    return any;
+}
+
+static void draw_midna_l_overlay(dMeter2Draw_c* draw) {
+    J2DScreen* screen = draw->getMainScreenPtr();
+    J2DPane* midona = screen != nullptr ? screen->search(MULTI_CHAR('midona_n')) : nullptr;
+    if (midona == nullptr) {
+        return;
+    }
+    if (s_midnaLWasVisible) {
+        midona->show();
+    } else {
+        return;
+    }
+    if (is_pause_menu_open(draw)) {
+        return;
+    }
+
+    J2DPicture* zbtn = static_cast<J2DPicture*>(screen->search(MULTI_CHAR('zbtn')));
+    J2DPane* cont = screen->search(MULTI_CHAR('cont_n'));
+    if (zbtn == nullptr || cont == nullptr || !cont->isVisible()) {
+        return;
+    }
+
+    f32 a = static_cast<f32>(midona->getAlpha()) / 255.0f;
+    J2DPane* parent = midona->getParentPane();
+    if (parent != nullptr && midona->isInfluencedAlpha()) {
+        a *= static_cast<f32>(parent->mColorAlpha) / 255.0f;
+    }
+    if (a < 0.01f) {
+        return;
+    }
+
+    f32 zx0 = 0.0f, zy0 = 0.0f, zx1 = 0.0f, zy1 = 0.0f;
+    if (!midna_l_pane_box(zbtn, zx0, zy0, zx1, zy1)) {
+        return;
+    }
+    f32 hx0 = 0.0f, hy0 = 0.0f, hx1 = 0.0f, hy1 = 0.0f;
+    if (!midna_l_hearts_box(draw, hx0, hy0, hx1, hy1)) {
+        return;
+    }
+
+    static f32 s_gaugeShift = 0.0f;
+    const bool bothGauges = draw->getMeterGaugeAlphaRate(1) > 0.02f && stamina_bar_alpha() > 0.01f;
+    s_gaugeShift += ((bothGauges ? 16.0f : 0.0f) - s_gaugeShift) * 0.15f;
+
+    const f32 w = zx1 - zx0;
+    const f32 h = zy1 - zy0;
+    const f32 x = hx0;
+    const f32 y = hy1 + 6.0f + s_gaugeShift;
+    const u8 alpha = static_cast<u8>(255.0f * (a > 1.0f ? 1.0f : a));
+
+    J2DPicture* base = midna_l_picture(s_midnaLBase, zbtn);
+    J2DPicture* shadow = midna_l_picture(s_midnaLShadow,
+                                         static_cast<J2DPicture*>(screen->search(MULTI_CHAR('midona_s'))));
+    J2DPicture* face = midna_l_picture(s_midnaLFace,
+                                       static_cast<J2DPicture*>(screen->search(MULTI_CHAR('midona'))));
+
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port != nullptr) port->setup2D();
+    midna_l_draw(base, x, y, w, h, alpha, true);
+    //const f32 size = h * 1.05f;
+    const f32 size = h * 0.75f;
+    const f32 cx = x + w * 0.5f;
+    const f32 cy = y + h * 0.5f;
+    midna_l_draw(shadow, cx - size * 0.5f, cy - size * 0.5f, size, size, alpha, false);
+    midna_l_draw(face, cx - size * 0.5f, cy - size * 0.5f, size, size, alpha, false);
+    if (port != nullptr) port->setup2D();
+}
+
 void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
+    if (s_midnaLOverlay && args) {
+        s_midnaLOverlay = false;
+        draw_midna_l_overlay(mods::arg<dMeter2Draw_c*>(args, 0));
+    }
     if (!g_configCustomZButtonEnabled || !args || isTitleOrMainMenu()) {
         return;
     }

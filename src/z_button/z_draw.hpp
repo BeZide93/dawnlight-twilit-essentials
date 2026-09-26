@@ -15,6 +15,8 @@ void update_z_item_texture(dMeter2Draw_c* draw = nullptr);
 void draw_z_ammo_digits(dMeter2Draw_c* draw, f32 baseX, f32 baseY, f32 iconW, f32 iconH, f32 alphaRate);
 void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW, f32 iconH, f32 alphaRate);
 
+void midna_l_overlay_shutdown();
+HookAction on_meter2_draw_draw_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 void on_meter2_draw_draw_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 void on_draw_button_z_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_set_button_icon_midona_alpha_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);

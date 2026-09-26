@@ -1063,6 +1063,10 @@ static bool is_swim_sprint_speed_disabled(ModContext*, void*) {
     return !g_configStaminaSwimSprint;
 }
 
+static bool is_controls_midna_disabled(ModContext*, void*) {
+    return !g_configCustomZButtonEnabled;
+}
+
 static bool is_controls_sprint_disabled(ModContext*, void*) {
     return !g_configStaminaSprint && !g_configStaminaWolfSprint && !g_configStaminaSwimSprint;
 }
@@ -1832,6 +1836,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
         "into the Boss Rush chamber.</p>");
 
+#if 0
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;
@@ -1840,6 +1845,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         ctrl.on_pressed = on_kill_current_boss_pressed;
         svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
     }
+#endif
 
     svc_ui->pane_add_section(mod_ctx, left, "Master Rush");
     static const char* const kMasterRushRetryModes[] = {"At beginning", "Current boss"};
@@ -1882,6 +1888,13 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
             "A binding on a D-Pad direction takes priority over Twilight HD's shortcut on "
             "that direction.</span>", nullptr);
     }
+
+    svc_ui->pane_add_section(mod_ctx, left, "Midna");
+    ui_add_select(left, "Midna button", g_controlsMidnaVar,
+        "<p>Button that calls Midna while the Z-Button is enabled. <b>D-Pad Left</b> is the "
+        "default. <b>L</b> uses the left shoulder button (L1 / LB) of the controller; Midna is "
+        "then shown top left on a mirrored Z button and D-Pad Left does nothing.</p>",
+        kControlsMidnaLabels, CTRL_MIDNA_COUNT, is_controls_midna_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
     ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],

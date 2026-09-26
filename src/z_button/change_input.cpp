@@ -4,6 +4,7 @@
 #include "z_mobile.hpp"
 #include "z_item_actions.hpp"
 #include "../quick_access/quick_access.hpp"
+#include "../controls/controls.hpp"
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadHook);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
@@ -23,6 +24,12 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
     const u32 midnaBit = PAD_BUTTON_LEFT;
 
+    static bool s_lShoulderPrev = false;
+    const bool midnaOnL = controls_midna_on_l();
+    const bool lShoulderHeld = midnaOnL && controls_l_shoulder_held();
+    const bool lShoulderTrig = lShoulderHeld && !s_lShoulderPrev;
+    s_lShoulderPrev = lShoulderHeld;
+
     u8 windowStatus = dMeter2Info_getWindowStatus();
     bool isMenuOrPause = (windowStatus != 0) || dMeter2Info_getPauseStatus() != 0 || dComIfGp_isPauseFlag()
                          || dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag() || dMsgObject_isTalkNowCheck();
@@ -34,12 +41,24 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     }
 
     const bool quickAccessOpen = quick_access_is_active();
-    g_dpadLeftHeld = !quickAccessOpen && (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
-    g_dpadLeftTrig = !quickAccessOpen && (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
+    const bool dpadLeftHeld = (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
+    const bool dpadLeftTrig = (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
+    if (midnaOnL) {
+        g_dpadLeftHeld = !quickAccessOpen && lShoulderHeld;
+        g_dpadLeftTrig = !quickAccessOpen && lShoulderTrig;
+    } else {
+        g_dpadLeftHeld = !quickAccessOpen && dpadLeftHeld;
+        g_dpadLeftTrig = !quickAccessOpen && dpadLeftTrig;
+    }
 
     if (!quickAccessOpen) {
-        if (g_dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;
-        if (g_dpadLeftTrig) pad.mPressedButtonFlags &= ~midnaBit;
+        if (dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;
+        if (dpadLeftTrig) pad.mPressedButtonFlags &= ~midnaBit;
+        if (midnaOnL && lShoulderHeld) {
+            const u32 lMask = controls_l_shoulder_pad_mask();
+            pad.mButtonFlags &= ~lMask;
+            pad.mPressedButtonFlags &= ~lMask;
+        }
     }
 
     JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);

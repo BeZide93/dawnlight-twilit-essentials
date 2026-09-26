@@ -3,6 +3,12 @@
 
 #include "m_Do/m_Do_controller_pad.h"
 
+#include <dolphin/pad.h>
+
+#include "mods/svc/ui.h"
+
+struct SDL_Gamepad;
+
 #include "mods/hook.hpp"
 #include "mods/svc/hook.h"
 
@@ -26,6 +32,71 @@ int g_controlsBinding[CTRL_BIND_COUNT] = {
 };
 
 ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT] = {};
+
+const char* const kControlsMidnaLabels[CTRL_MIDNA_COUNT] = {"D-Pad Left", "L"};
+ConfigVarHandle g_controlsMidnaVar = 0;
+static int s_midnaButton = CTRL_MIDNA_DPAD_LEFT;
+
+constexpr s32 kSdlLeftShoulderButton = 9;
+using GetSdlGamepadButtonFn = bool (*)(SDL_Gamepad*, int);
+static GetSdlGamepadButtonFn s_getSdlGamepadButton = nullptr;
+
+bool controls_midna_on_l() {
+    return s_midnaButton == CTRL_MIDNA_L;
+}
+
+static bool l_shoulder_raw_held() {
+    const s32 index = PADGetIndexForPort(PAD_1);
+    SDL_Gamepad* gamepad = index < 0 ? nullptr : PADGetSDLGamepadForIndex(static_cast<u32>(index));
+    if (gamepad != nullptr && s_getSdlGamepadButton != nullptr) {
+        return s_getSdlGamepadButton(gamepad, kSdlLeftShoulderButton);
+    }
+    return PADGetNativeButtonPressed(PAD_1) == kSdlLeftShoulderButton;
+}
+
+static bool ui_blocks_game_input() {
+    bool visible = true;
+    if (svc_ui == nullptr || svc_ui->is_any_document_visible == nullptr ||
+        svc_ui->is_any_document_visible(mod_ctx, &visible) != MOD_OK) {
+        return true;
+    }
+    return visible;
+}
+
+static bool s_lShoulderSwallowed = false;
+
+bool controls_l_shoulder_held() {
+    const bool raw = l_shoulder_raw_held();
+    if (ui_blocks_game_input()) {
+        s_lShoulderSwallowed = raw;
+        return false;
+    }
+    if (!raw) {
+        s_lShoulderSwallowed = false;
+    }
+    return raw && !s_lShoulderSwallowed;
+}
+
+u32 controls_l_shoulder_pad_mask() {
+    u32 count = 0;
+    PADButtonMapping* mappings = PADGetButtonMappings(PAD_1, &count);
+    u32 mask = 0;
+    for (u32 i = 0; mappings != nullptr && i < count; ++i) {
+        if (mappings[i].nativeButton == static_cast<u32>(kSdlLeftShoulderButton)) {
+            mask |= mappings[i].padButton;
+        }
+    }
+    return mask;
+}
+
+static void on_controls_midna_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+                                      const ConfigVarValue*, void*) {
+    if (value == nullptr) {
+        return;
+    }
+    const int v = static_cast<int>(value->int_value);
+    s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? v : CTRL_MIDNA_DPAD_LEFT;
+}
 
 static int clamp_button_index(int idx, int binding) {
     if (idx < 0 || idx >= CTRL_BTN_COUNT) {
@@ -141,9 +212,29 @@ ModResult init_controls_config(const ConfigService* cfg, const HookService* hook
                                ModContext* ctx) {
     if (hook_svc) {
         mods::hook::add_post<ControlsPadRead>(hook_svc, controls_pad_read_post);
+        void* addr = nullptr;
+        if (hook_svc->resolve != nullptr &&
+            hook_svc->resolve(ctx, "SDL_GetGamepadButton", &addr, nullptr) == MOD_OK &&
+            addr != nullptr) {
+            s_getSdlGamepadButton = reinterpret_cast<GetSdlGamepadButtonFn>(addr);
+        }
     }
     if (cfg == nullptr) {
         return MOD_OK;
+    }
+
+    {
+        ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
+        d.name = "controlsMidnaButton";
+        d.type = CONFIG_VAR_INT;
+        d.default_int = CTRL_MIDNA_DPAD_LEFT;
+        if (cfg->register_var(ctx, &d, &g_controlsMidnaVar) == MOD_OK) {
+            int64_t v = CTRL_MIDNA_DPAD_LEFT;
+            cfg->get_int(ctx, g_controlsMidnaVar, &v);
+            s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? static_cast<int>(v)
+                                                              : CTRL_MIDNA_DPAD_LEFT;
+            cfg->subscribe(ctx, g_controlsMidnaVar, on_controls_midna_changed, nullptr, nullptr);
+        }
     }
 
     for (int i = 0; i < CTRL_BIND_COUNT; i++) {
