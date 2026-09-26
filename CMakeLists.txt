@@ -74,6 +74,7 @@ add_mod(twilit_essentials
             src/z_button/z_button.cpp
             src/controls/controls.cpp
             src/quick_access/quick_access.cpp
+            src/quick_access/quick_access_mobile.cpp
             src/quick_access/quick_access_radial.cpp
             src/quick_access/quick_access_strip.cpp
             src/quick_access/quick_access_bottles.cpp

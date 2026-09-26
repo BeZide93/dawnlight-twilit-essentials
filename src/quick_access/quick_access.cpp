@@ -2,6 +2,7 @@
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
 #include "quick_access_itemwheel.hpp"
+#include "quick_access_mobile.hpp"
 #include "../z_button/z_button.hpp"
 #include "../z_button/z_mobile.hpp"
 #include "../controls/controls.hpp"
@@ -2592,6 +2593,7 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
         mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre, &beforeTwilightHd);
         mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
+        quick_access_mobile_init(hook_svc);
     }
 
     s_saveSvc = save_svc;
@@ -2638,4 +2640,5 @@ void shutdown_quick_access() {
     s_lastDraw = nullptr;
     s_lastScreen = nullptr;
     shutdown_quick_access_itemwheel();
+    quick_access_mobile_shutdown();
 }
