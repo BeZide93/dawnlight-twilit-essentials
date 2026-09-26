@@ -83,7 +83,9 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
     if (!link->checkEquipAnime()) {
         if (link->mEquipItem == 0x103) {
             link->swordUnequip();
-        } else if (link->mEquipItem != dItemNo_NONE_e) {
+        } else if (link->mEquipItem != dItemNo_NONE_e &&
+                   link->mEquipItem != dItemNo_KANTERA_e &&
+                   link->mEquipItem != dItemNo_KANTERA2_e) {
             link->deleteEquipItem(FALSE, TRUE);
         }
     }
@@ -277,12 +279,30 @@ static HookAction sprint_jump_attack_pre(ModContext*, void* args, void* retval, 
     return HOOK_SKIP_ORIGINAL;
 }
 
+DEFINE_HOOK(&daAlink_c::itemEquip, SprintHumanItemEquip);
+
+static HookAction sprint_item_equip_pre(ModContext*, void* args, void*, void*) {
+    if (!s_sprintLatched || args == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    const u16 itemId = mods::arg<u16>(args, 1);
+    if (link == nullptr || itemId != dItemNo_KANTERA_e) {
+        return HOOK_CONTINUE;
+    }
+    if (link->mEquipItem == dItemNo_NONE_e && link->checkNoResetFlg2(daPy_py_c::FLG2_UNK_1)) {
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
 ModResult init_sprint_human(const HookService* hook_svc) {
     if (!hook_svc) return MOD_OK;
     mods::hook::add_pre<SprintHumanRunAnm>(hook_svc, sprint_run_pre);
     mods::hook::add_post<SprintHumanRunAnm>(hook_svc, sprint_run_post);
     mods::hook::add_post<SprintHumanPadRead>(hook_svc, sprint_pad_read_post);
     mods::hook::add_pre<SprintHumanJumpAttack>(hook_svc, sprint_jump_attack_pre);
+    mods::hook::add_pre<SprintHumanItemEquip>(hook_svc, sprint_item_equip_pre);
     return MOD_OK;
 }
 
