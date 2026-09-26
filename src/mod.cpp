@@ -1984,7 +1984,7 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
     svc_ui->pane_add_section(mod_ctx, left, "Boss Bar");
     ui_add_select(left, "Style", g_bossBarStyleVar,
         "<p><b>Default</b>: Twilight Princess style with brass frame. "
-        "<b>Elden Ring</b>: long thin bar at the bottom with the boss's full title.</p>",
+        "<b>Thinner</b>: long thin bar at the bottom with the boss's full title.</p>",
         kBossBarStyleLabels, kBossBarStyleCount);
     ui_add_number(left, "X Offset", g_bossBarVars[0],
         "<p>Horizontal position of the boss bar as an offset.</p>");

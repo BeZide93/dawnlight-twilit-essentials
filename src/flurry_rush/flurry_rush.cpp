@@ -4,6 +4,8 @@
 #include "d/actor/d_a_b_tn.h"
 #include "d/actor/d_a_b_gnd.h"
 #include "d/actor/d_a_b_gg.h"
+#include "d/actor/d_a_e_th.h"
+#include "d/actor/d_a_e_rdb.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_cc_uty.h"
 #include "d/d_s_play.h"
@@ -32,6 +34,7 @@ namespace {
 
 constexpr int kCooldownTicks = 45;
 constexpr int kPostRushGraceTicks = 30;
+constexpr s16 kFlourishAfterRushTicks = 300;
 constexpr int kMinRushTicks = 30;
 constexpr int kFinishGraceTicks = 15;
 constexpr f32 kFlurryApproachRange = 150.0f;
@@ -48,6 +51,7 @@ constexpr int kSwingResolveTicks = 4;
 constexpr int kMaxAtp = 8;
 
 constexpr f32 kMaxRushDistance = 300.0f;
+constexpr f32 kRushLeaveMargin = 80.0f;
 constexpr f32 kDodgeSensorRadiusScale = 3.0f;
 constexpr f32 kSwingSnapDistance = 125.0f;
 constexpr f32 kSwingMinDistance = 95.0f;
@@ -66,6 +70,7 @@ State s_state = State::IDLE;
 int s_stateTicks = 0;
 int s_cooldown = 0;
 int s_postRushGrace = 0;
+f32 s_rushStartDist = 0.0f;
 u16 s_prevProc = 0;
 int s_hitCount = 0;
 int s_finishTicks = -1;
@@ -218,6 +223,11 @@ void end_rush(const char* reason = "disabled") {
         restore_time();
         s_cooldown = kCooldownTicks;
         s_postRushGrace = kPostRushGraceTicks;
+        auto* rushLink = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+        if (rushLink != nullptr && !rushLink->checkWolf() &&
+            rushLink->mSwordFlourishTimer < kFlourishAfterRushTicks) {
+            rushLink->mSwordFlourishTimer = kFlourishAfterRushTicks;
+        }
     }
     s_state = State::IDLE;
     s_stateTicks = 0;
@@ -234,6 +244,7 @@ void start_rush() {
                      ? fopAcM_GetID(player->mTargetedActor)
                      : fpcM_ERROR_PROCESS_ID_e;
     fopAc_ac_c* target = player != nullptr ? player->mTargetedActor : nullptr;
+    s_rushStartDist = -1.0f;
     flog("flurry: rush start, target actor %d (id %u) hp %d",
          target ? fopAcM_GetName(target) : -1, target ? fopAcM_GetID(target) : 0u,
          target ? target->health : -1);
@@ -606,7 +617,34 @@ static HookAction on_throw_damage_pre(ModContext*, void*, void* retval, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
+constexpr dCcG_At_Spl kNoGuardSpl = static_cast<dCcG_At_Spl>(12);
+bool s_noGuardApplied = false;
+
+void apply_no_guard(daAlink_c* link) {
+    for (int i = 0; i < 3; i++) {
+        if (link->mAtCps[i].GetAtSpl() == dCcG_At_Spl_UNK_0) {
+            link->mAtCps[i].SetAtSpl(kNoGuardSpl);
+            s_noGuardApplied = true;
+        }
+    }
+}
+
+void clear_no_guard(daAlink_c* link) {
+    if (!s_noGuardApplied || link == nullptr) return;
+    s_noGuardApplied = false;
+    for (int i = 0; i < 3; i++) {
+        if (link->mAtCps[i].GetAtSpl() == kNoGuardSpl) {
+            link->mAtCps[i].SetAtSpl(dCcG_At_Spl_UNK_0);
+        }
+    }
+}
+
 void magnet_sword(daAlink_c* link) {
+    if (s_state == State::RUSH) {
+        apply_no_guard(link);
+    } else {
+        clear_no_guard(link);
+    }
     if (s_state != State::RUSH || !s_swingOpen || s_swingLanded) return;
     if (!link->mAtCps[0].ChkAtSet()) return;
     fopAc_ac_c* target = rush_target(link);
@@ -764,6 +802,34 @@ static HookAction on_aeralfos_cut_chk_pre(ModContext*, void* args, void*, void*)
     return is_rush_target_actor(mods::arg<daB_GG_c*>(args, 0)) ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
 }
 
+DEFINE_HOOK(&cc_pl_cut_bit_get, FlurryCutBitHook);
+DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_th.cpp#damage_check", void(e_th_class*), FlurryDarkhammerDamageCheckHook);
+DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_rdb.cpp#damage_check", void(e_rdb_class*), FlurryKingBulblinDamageCheckHook);
+
+static void on_cut_bit_post(ModContext*, void*, void* retval, void*) {
+    if (s_state == State::RUSH && retval != nullptr) *static_cast<u16*>(retval) = 0;
+}
+
+static HookAction on_darkhammer_damage_check_pre(ModContext*, void* args, void*, void*) {
+    e_th_class* th = mods::arg<e_th_class*>(args, 0);
+    if (!is_rush_target_actor(th)) return HOOK_CONTINUE;
+    th->field_0x6ea = 0;
+    for (int i = 0; i < 3; i++) {
+        th->mCcSph[i].OffTgShield();
+    }
+    if (th->field_0x6a4 > 2) th->field_0x6a4 = 2;
+    return HOOK_CONTINUE;
+}
+
+static HookAction on_king_bulblin_damage_check_pre(ModContext*, void* args, void*, void*) {
+    e_rdb_class* rdb = mods::arg<e_rdb_class*>(args, 0);
+    if (rdb == nullptr || !is_rush_target_actor(&rdb->enemy)) return HOOK_CONTINUE;
+    rdb->field_0xe64.ClrTgHit();
+    rdb->field_0x6c2 = 0;
+    if (rdb->field_0x6c0 > 2) rdb->field_0x6c0 = 2;
+    return HOOK_CONTINUE;
+}
+
 void install_hooks() {
     if (s_hooksInstalled || s_hookSvc == nullptr) return;
     mods::hook::add_post<FlurryRushSideStepInitHook>(s_hookSvc, on_sidestep_init_post);
@@ -785,6 +851,9 @@ void install_hooks() {
     mods::hook::add_pre<FlurryGanondorfDamageCheckHook>(s_hookSvc, on_ganondorf_damage_check_pre);
     mods::hook::add_post<FlurryAeralfosExecuteHook>(s_hookSvc, on_aeralfos_execute_post);
     mods::hook::add_pre<FlurryAeralfosCutChkHook>(s_hookSvc, on_aeralfos_cut_chk_pre);
+    mods::hook::add_post<FlurryCutBitHook>(s_hookSvc, on_cut_bit_post);
+    mods::hook::add_pre<FlurryDarkhammerDamageCheckHook>(s_hookSvc, on_darkhammer_damage_check_pre);
+    mods::hook::add_pre<FlurryKingBulblinDamageCheckHook>(s_hookSvc, on_king_bulblin_damage_check_pre);
     s_hooksInstalled = true;
 }
 
@@ -877,6 +946,16 @@ void update_flurry_rush(const LogService*, ModContext*) {
             end_rush("target gone");
             return;
         }
+        if (player != nullptr) {
+            const f32 dist = (target->current.pos - player->current.pos).absXZ();
+            if (s_rushStartDist < 0.0f) {
+                if (!is_dodge_proc(static_cast<u16>(player->mProcID))) s_rushStartDist = dist;
+            } else if (dist > (s_rushStartDist > kMaxRushDistance ? s_rushStartDist : kMaxRushDistance) +
+                                  kRushLeaveMargin) {
+                end_rush("moved away");
+                return;
+            }
+        }
     }
 
     if (link != nullptr) {
@@ -938,6 +1017,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
 
 void shutdown_flurry_rush() {
     restore_dodge_sensor(static_cast<daAlink_c*>(dComIfGp_getPlayer(0)));
+    clear_no_guard(static_cast<daAlink_c*>(dComIfGp_getPlayer(0)));
     end_rush();
     s_postRushGrace = 0;
     s_hookSvcSet = false;

@@ -17,7 +17,6 @@ void qa_hud_scale_end();
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
 #include "mods/svc/config.h"
-#include "mods/svc/resource.h"
 
 #define private public
 #define protected public
@@ -67,10 +66,10 @@ int g_configBossBarStyle = 0;
 
 enum BossBarStyle {
     kBossBarStyleDefault = 0,
-    kBossBarStyleEldenRing,
+    kBossBarStyleThinner,
 };
 
-const char* const kBossBarStyleLabels[] = {"Default", "Elden Ring"};
+const char* const kBossBarStyleLabels[] = {"Default", "Thinner"};
 const size_t kBossBarStyleCount = sizeof(kBossBarStyleLabels) / sizeof(kBossBarStyleLabels[0]);
 
 static void on_boss_bar_style_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
@@ -1474,7 +1473,8 @@ static void draw_rail(f32 x, f32 y, f32 w, f32 h, f32 a) {
 
 static dMeter2Draw_c* s_meter2 = nullptr;
 
-static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a) {
+static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a, f32 endScale = 1.15f,
+                             f32 leftDx = 0.0f, f32 rightDx = 0.0f, f32 endDy = 0.0f) {
     if (!s_meter2 || !s_meter2->mpKanteraScreen) return;
     J2DScreen* screen = s_meter2->mpKanteraScreen;
 
@@ -1488,10 +1488,11 @@ static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a) {
     J2DPane* frPane = frameR->getPanePtr();
     if (!flPane || !frPane) return;
 
-    const f32 kEndScale    = 1.15f;
-    const f32 kEndOverhang = 2.0f;
-    const f32 kEndXAdj     = 23.0f;
-    const f32 kEndYAdj     = 2.0f;
+    const f32 kEndScale    = endScale;
+    const f32 kEndRel      = endScale / 1.15f;
+    const f32 kEndOverhang = 2.0f * kEndRel;
+    const f32 kEndXAdj     = 23.0f * kEndRel;
+    const f32 kEndYAdj     = 2.0f * kEndRel;
 
     const f32 svPScX = parent->getScaleX(), svPScY = parent->getScaleY();
     const f32 svPA = parent->getAlphaRate();
@@ -1523,9 +1524,9 @@ static void draw_bar_endcaps(f32 barX, f32 barW, f32 barY, f32 barH, f32 a) {
     const f32 ew = flPane->getGlbBounds().getWidth()  * kEndScale;
     const f32 eh = flPane->getGlbBounds().getHeight() * kEndScale;
 
-    const f32 ty = barY + barH * 0.5f - eh * 0.5f + kEndYAdj;
-    const f32 lxOff = (barX          - ew * 0.5f - kEndOverhang + kEndXAdj) - flx;
-    const f32 rxOff = (barX + barW   - ew * 0.5f + kEndOverhang + kEndXAdj) - frx;
+    const f32 ty = barY + barH * 0.5f - eh * 0.5f + kEndYAdj + endDy;
+    const f32 lxOff = (barX          - ew * 0.5f - kEndOverhang + kEndXAdj + leftDx) - flx;
+    const f32 rxOff = (barX + barW   - ew * 0.5f + kEndOverhang + kEndXAdj + rightDx) - frx;
 
     frameL->setAlphaRate(a);
     frameR->setAlphaRate(0.0f);
@@ -1607,7 +1608,7 @@ static void copy_boss_name(const char* src, char* out, size_t outSize, bool uppe
     out[i] = '\0';
 }
 
-static const char* elden_ring_title(const char* label) {
+static const char* boss_full_title(const char* label) {
     static const struct { const char* label; const char* title; } kTitles[] = {
         {"Diababa",          "Diababa, the Twilit Parasite"},
         {"Fyrus",            "Fyrus, the Twilit Igniter"},
@@ -1675,59 +1676,7 @@ static void fill_hgrad(f32 x, f32 y, f32 w, f32 h, JUtility::TColor left, JUtili
     g.fillBox(JGeometry::TBox2<f32>(x, y, x + w, y + h));
 }
 
-extern const ResourceService* get_resource_service();
-extern "C" ModContext* mod_ctx;
-
-static ResourceBuffer s_erLeftBti = RESOURCE_BUFFER_INIT;
-static ResourceBuffer s_erRightBti = RESOURCE_BUFFER_INIT;
-static J2DPicture* s_erLeftPic = nullptr;
-static J2DPicture* s_erRightPic = nullptr;
-static bool s_erTexTried = false;
-
-static J2DPicture* make_er_picture(ResourceBuffer& buf) {
-    if (buf.data == nullptr) return nullptr;
-    ResTIMG* img = reinterpret_cast<ResTIMG*>(buf.data);
-    img->alphaEnabled = 1;
-    JKRHeap* rootHeap = JKRHeap::getRootHeap();
-    JKRHeap* oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
-    J2DPicture* pic = JKR_NEW J2DPicture(img);
-    if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
-    return pic;
-}
-
-static void load_er_ornaments() {
-    if (s_erTexTried) return;
-    s_erTexTried = true;
-    const ResourceService* res = get_resource_service();
-    if (res == nullptr || mod_ctx == nullptr) return;
-    res->load(mod_ctx, "textures/boss_bar/er_ornament_left.bti", &s_erLeftBti);
-    res->load(mod_ctx, "textures/boss_bar/er_ornament_right.bti", &s_erRightBti);
-    s_erLeftPic = make_er_picture(s_erLeftBti);
-    s_erRightPic = make_er_picture(s_erRightBti);
-}
-
-static void free_er_ornaments() {
-    JKR_DELETE(s_erLeftPic);
-    JKR_DELETE(s_erRightPic);
-    s_erLeftPic = nullptr;
-    s_erRightPic = nullptr;
-    s_erTexTried = false;
-    const ResourceService* res = get_resource_service();
-    if (res != nullptr && mod_ctx != nullptr) {
-        res->free(mod_ctx, &s_erLeftBti);
-        res->free(mod_ctx, &s_erRightBti);
-    }
-}
-
-static void draw_er_picture(J2DPicture* pic, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
-    if (pic == nullptr) return;
-    pic->setAlpha(alpha);
-    pic->draw(x, y, w, h, false, false, false);
-    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
-    if (port) port->setup2D();
-}
-
-static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chip,
+static void draw_boss_bar_thinner(f32 a, const char* label, f32 live, f32 chip,
                                      const BossBarScreen& scr) {
     auto A = [a](u8 base) -> u8 { return static_cast<u8>(static_cast<f32>(base) * a); };
 
@@ -1736,13 +1685,10 @@ static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chi
     const f32 barX = scr.centreX - barW * 0.5f + g_configBossBarX;
     const f32 barY = scr.bottomY - 84.0f + g_configBossBarY;
 
-    constexpr f32 kOrnScale = 0.42f;
-    constexpr f32 kTexLineCenterY = 26.0f;
-    const f32 lineH = 4.0f * kOrnScale;
+    constexpr f32 kThinEndScale = 0.62f;
+    const f32 lineH = 1.7f;
     const f32 lineY = barY + barH + 0.6f;
-    const f32 lineCenterY = lineY + lineH * 0.5f;
 
-    load_er_ornaments();
     qa_hud_scale_begin(barX + barW * 0.5f, barY);
 
     fill_vgrad(barX - 1.0f, barY - 1.5f, barW + 2.0f, barH + 3.0f,
@@ -1769,21 +1715,13 @@ static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chi
     fill_vgrad(barX, lineY, barW, lineH,
                JUtility::TColor(236, 230, 196, A(235)), JUtility::TColor(128, 118, 76, A(235)));
 
-    const f32 leftW = 64.0f * kOrnScale;
-    const f32 leftH = 32.0f * kOrnScale;
-    draw_er_picture(s_erLeftPic, barX - 34.0f * kOrnScale, lineCenterY - kTexLineCenterY * kOrnScale,
-                    leftW, leftH, A(255));
-    const f32 rightW = 32.0f * kOrnScale;
-    const f32 rightH = 32.0f * kOrnScale;
-    draw_er_picture(s_erRightPic, barX + barW - 19.0f * kOrnScale + 2.0f,
-                    lineCenterY - kTexLineCenterY * kOrnScale, rightW, rightH, A(255));
-
     char nm[64];
-    copy_boss_name(elden_ring_title(label), nm, sizeof(nm), false);
+    copy_boss_name(boss_full_title(label), nm, sizeof(nm), false);
     draw_text_soft(nm, barX + 4.0f, barY - 7.0f, 11.5f, 13.5f,
                    JUtility::TColor(240, 234, 218, A(255)), JUtility::TColor(206, 198, 180, A(255)),
                    JUtility::TColor(0, 0, 0, A(150)), 1.0f);
 
+    draw_bar_endcaps(barX, barW, barY, lineY + lineH - barY, a, kThinEndScale, -27.0f, -34.0f, -9.0f);
     qa_hud_scale_end();
 }
 
@@ -1791,10 +1729,10 @@ static void draw_boss_bar_core(f32 a, const char* label, f32 live, f32 chip) {
     if (a < 0.01f) return;
     if (a > 1.0f) a = 1.0f;
 
-    if (g_configBossBarStyle == kBossBarStyleEldenRing) {
+    if (g_configBossBarStyle == kBossBarStyleThinner) {
         live = clampf(live, 0.0f, 1.0f);
         chip = clampf(chip < live ? live : chip, 0.0f, 1.0f);
-        draw_boss_bar_elden_ring(a, label, live, chip, boss_bar_screen());
+        draw_boss_bar_thinner(a, label, live, chip, boss_bar_screen());
         return;
     }
 
@@ -1959,7 +1897,6 @@ ModResult init_boss_bar(const HookService* hook_svc, ModError*) {
 }
 
 void shutdown_boss_bar() {
-    free_er_ornaments();
     reset_state();
     diababa_reset();
     s_diaActiveId = 0;
