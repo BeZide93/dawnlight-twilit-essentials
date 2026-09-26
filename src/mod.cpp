@@ -446,6 +446,7 @@ static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
 static ConfigVarHandle s_varStaminaPerHeart = 0;
 static ConfigVarHandle s_varStaminaRegen = 0;
 static ConfigVarHandle s_varStaminaRegenDelay = 0;
+static ConfigVarHandle s_varStaminaExhaustRecover = 0;
 static ConfigVarHandle s_varStaminaSlowHangRegen = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
@@ -786,6 +787,12 @@ static void on_stamina_regen_changed(ModContext*, ConfigVarHandle, const ConfigV
 static void on_stamina_regen_delay_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configStaminaRegenDelay = static_cast<int>(value->int_value);
+    }
+}
+
+static void on_stamina_exhaust_recover_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaExhaustRecover = static_cast<int>(value->int_value);
     }
 }
 
@@ -1461,6 +1468,21 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.max = 10;
         c.step = 1;
         c.suffix = "s";
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
+    if (s_varStaminaExhaustRecover != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_NUMBER;
+        c.label = "Exhaustion recovery";
+        c.help_rml = "<p>When stamina runs out, Link is exhausted: no attacks, rolls or "
+            "sprinting until stamina has refilled to this percentage (default: 35%).</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varStaminaExhaustRecover;
+        c.is_disabled = is_stamina_sub_disabled;
+        c.min = 5;
+        c.max = 100;
+        c.step = 5;
+        c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
     ui_add_toggle(left, "Slow regen while hanging", s_varStaminaSlowHangRegen,
@@ -2680,6 +2702,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varStaminaRegenDelay, &v);
             g_configStaminaRegenDelay = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varStaminaRegenDelay, on_stamina_regen_delay_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaExhaustRecover = CONFIG_VAR_DESC_INIT;
+        descStaminaExhaustRecover.name = "staminaExhaustRecover";
+        descStaminaExhaustRecover.type = CONFIG_VAR_INT;
+        descStaminaExhaustRecover.default_int = 35;
+        if (svc_config->register_var(mod_ctx, &descStaminaExhaustRecover, &s_varStaminaExhaustRecover) == MOD_OK) {
+            int64_t v = 35;
+            svc_config->get_int(mod_ctx, s_varStaminaExhaustRecover, &v);
+            g_configStaminaExhaustRecover = static_cast<int>(v);
+            svc_config->subscribe(mod_ctx, s_varStaminaExhaustRecover, on_stamina_exhaust_recover_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStaminaSlowHangRegen = CONFIG_VAR_DESC_INIT;

@@ -30,6 +30,7 @@
 #include "JSystem/JUtility/TColor.h"
 
 #include <cstdint>
+#include <cmath>
 
 void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
 void qa_hud_scale_end();
@@ -43,6 +44,7 @@ bool g_configStaminaScaleWithHearts = false;
 int  g_configStaminaPerHeart = 15;
 int  g_configStaminaRegen   = 100;
 int  g_configStaminaRegenDelay = 2;
+int  g_configStaminaExhaustRecover = 35;
 bool g_configStaminaSlowHangRegen = true;
 
 float g_configStaminaBarX = 0.0f;
@@ -124,6 +126,20 @@ static bool s_swungThisFrame = false;
 static int  s_suppressSwingCharge = 0;
 static int  s_jumpChargeCd = 0;
 static f32  s_extraDrain  = 0.0f;
+static bool s_exhausted   = false;
+static f32  s_regenRamp   = 0.0f;
+static f32  s_exhaustBlend = 0.0f;
+static int  s_exhaustPhase = 0;
+
+static constexpr int kExhaustMinDelayFrames = 30;
+static constexpr f32 kRegenRampStep = 1.0f / 20.0f;
+static constexpr f32 kGuardRegenFactor = 0.5f;
+static constexpr int kDenyCooldownFrames = 24;
+
+static bool s_lanternGaugeValid = false;
+static f32  s_lanternGaugeBottom = 0.0f;
+static bool s_staminaGaugeValid = false;
+static f32  s_staminaGaugeBottom = 0.0f;
 
 static constexpr f32 kStaminaScaleMinHearts = 3.0f;
 static constexpr f32 kStaminaScaleMaxHearts = 20.0f;
@@ -204,7 +220,18 @@ static f32 drain_rate(u16 proc) {
     }
 }
 
-static bool empty() { return s_stamina <= 0.5f; }
+static bool empty() { return s_exhausted; }
+static bool drained() { return s_stamina <= 0.5f; }
+
+static void check_exhaust() {
+    if (s_stamina > 0.0f) return;
+    s_stamina = 0.0f;
+    if (s_exhausted) return;
+    s_exhausted = true;
+    s_regenRamp = 0.0f;
+    if (s_regenDelay < kExhaustMinDelayFrames) s_regenDelay = kExhaustMinDelayFrames;
+    s_showTimer = 60;
+}
 
 namespace stamina_impl {
 f32 max_value() { return stamina_max(); }
@@ -285,7 +312,7 @@ static void tired_check_post(ModContext*, void* args, void* retval, void*) {
 
 static HookAction hang_drop_pre(ModContext*, void* args, void* retval, void*) {
     if (!g_configStaminaEnabled || !g_configStaminaSrcHang) return HOOK_CONTINUE;
-    if (!in_gameplay() || !empty()) return HOOK_CONTINUE;
+    if (!in_gameplay() || !drained()) return HOOK_CONTINUE;
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (!link || link->checkWolf()) return HOOK_CONTINUE;
     link->speed.y = 0.0f;
@@ -301,7 +328,7 @@ static void deny() {
     s_emptyFlash = 1.0f;
     if (!s_blockedThisFrame && s_denyCooldown <= 0) {
         s_blockedThisFrame = true;
-        s_denyCooldown = 24;
+        s_denyCooldown = kDenyCooldownFrames;
         Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     }
 }
@@ -322,8 +349,10 @@ static void spend_raw(f32 cost) {
     s_stamina -= cost;
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     s_regenDelay = regen_delay_frames();
+    s_regenRamp = 0.0f;
     s_showTimer = 50;
     s_pulse = 1.0f;
+    check_exhaust();
 }
 
 static void spend(f32 cost) {
@@ -409,34 +438,30 @@ static HookAction cut_finish_pre(ModContext*, void* args, void* retval, void*) {
     return HOOK_CONTINUE;
 }
 
-static HookAction sword_swing_pre(ModContext*, void*, void* retval, void*) {
-    if (!g_configStaminaEnabled || !g_configStaminaSrcAttacks) return HOOK_CONTINUE;
-    if (!in_gameplay() || s_hiddenSkillLock > 0 || !empty()) return HOOK_CONTINUE;
-    if (retval) *static_cast<int*>(retval) = 0;
-    deny();
-    return HOOK_SKIP_ORIGINAL;
-}
-
 static void sword_swing_post(ModContext*, void*, void* retval, void*) {
     if (!g_configStaminaEnabled || !in_gameplay()) return;
     if (!g_configStaminaSrcAttacks || s_hiddenSkillLock > 0) return;
+    if (retval == nullptr || *static_cast<int*>(retval) == 0) return;
     if (s_suppressSwingCharge > 0) { s_swungThisFrame = true; return; }
     if (s_swungThisFrame) return;
-    if (retval && *static_cast<int*>(retval) != 0) {
-        s_swungThisFrame = true;
-        spend(stamina_impl::cost_scaled(kSwingCost, g_configStaminaCostAttack));
+    if (empty()) {
+        *static_cast<int*>(retval) = 0;
+        deny();
+        return;
     }
+    s_swungThisFrame = true;
+    spend(stamina_impl::cost_scaled(kSwingCost, g_configStaminaCostAttack));
 }
 
 static HookAction jump_attack_pre(ModContext*, void*, void* retval, void*) {
     if (!g_configStaminaEnabled || !g_configStaminaSrcJumpSpin) return HOOK_CONTINUE;
     if (!in_gameplay() || s_hiddenSkillLock > 0) return HOOK_CONTINUE;
-    if (empty()) {
-        if (retval) *static_cast<int*>(retval) = 0;
-        deny();
-        return HOOK_SKIP_ORIGINAL;
-    }
     if (s_jumpChargeCd <= 0) {
+        if (empty()) {
+            if (retval) *static_cast<int*>(retval) = 0;
+            deny();
+            return HOOK_SKIP_ORIGINAL;
+        }
         const f32 already = s_swungThisFrame ? stamina_impl::cost_scaled(kSwingCost, g_configStaminaCostAttack) : 0.0f;
         const f32 extra = stamina_impl::cost_scaled(kJumpAttackCost, g_configStaminaCostJumpAttack) - already;
         if (extra > 0.0f) spend(extra);
@@ -497,6 +522,8 @@ void update_stamina(const LogService*, ModContext*) {
         s_stamina = s_display = stamina_max();
         s_regenDelay = s_showTimer = 0;
         s_alpha = s_pulse = s_emptyFlash = 0.0f;
+        s_exhausted = false;
+        s_regenRamp = s_exhaustBlend = 0.0f;
         s_hiddenSkillLock = 0;
         s_otherSpend = 0.0f;
         s_extraDrain = 0.0f;
@@ -516,6 +543,9 @@ void update_stamina(const LogService*, ModContext*) {
     if (s_hiddenSkillLock > 0 && link != nullptr && is_hidden_skill_proc_state(link)) {
         s_hiddenSkillLock = kHiddenSkillLockFrames;
     }
+    if (link != nullptr && link->mProcID == daAlink_c::PROC_CUT_LARGE_JUMP_CHARGE && s_jumpChargeCd < 2) {
+        s_jumpChargeCd = 2;
+    }
 
     const f32 extra = s_extraDrain;
     s_extraDrain = 0.0f;
@@ -523,25 +553,43 @@ void update_stamina(const LogService*, ModContext*) {
 
     if (rate > 0.0f) {
         s_stamina -= rate;
-        s_regenDelay = regen_delay_frames();
+        if (s_regenDelay < regen_delay_frames()) s_regenDelay = regen_delay_frames();
+        s_regenRamp = 0.0f;
         s_showTimer = 45;
         s_pulse = 1.0f;
+        check_exhaust();
     } else {
         if (s_regenDelay > 0) {
             s_regenDelay--;
+            s_regenRamp = 0.0f;
         } else {
+            s_regenRamp += kRegenRampStep;
+            if (s_regenRamp > 1.0f) s_regenRamp = 1.0f;
             f32 pct = static_cast<f32>(g_configStaminaRegen);
             if (pct < 10.0f) pct = 10.0f;
             f32 base = 1.3f;
             if (g_configStaminaSlowHangRegen && is_hang_rest_proc(link)) {
                 base = 1.3f * kHangRestRegenFactor;
+            } else if (link != nullptr && !link->checkWolf() && link->checkPlayerGuard()) {
+                base = 1.3f * kGuardRegenFactor;
             }
-            s_stamina += base * pct / 100.0f;
+            s_stamina += base * pct / 100.0f * s_regenRamp;
         }
         if (s_showTimer > 0) s_showTimer--;
     }
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     if (s_stamina > kMax) s_stamina = kMax;
+    f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
+    if (recoverFrac < 0.05f) recoverFrac = 0.05f;
+    if (recoverFrac > 1.0f) recoverFrac = 1.0f;
+    if (s_exhausted && s_stamina >= kMax * recoverFrac - 0.01f) {
+        s_exhausted = false;
+        s_pulse = 1.0f;
+    }
+    s_exhaustPhase++;
+    const f32 exhaustTarget = s_exhausted ? 1.0f : 0.0f;
+    s_exhaustBlend += (exhaustTarget - s_exhaustBlend) * 0.15f;
+    if (s_exhaustBlend < 0.003f) s_exhaustBlend = 0.0f;
 
     s_display += (s_stamina - s_display) * 0.28f;
     if (s_display < 0.0f) s_display = 0.0f;
@@ -597,6 +645,37 @@ f32 stamina_bar_alpha() {
     return s_alpha;
 }
 
+static bool kantera_gauge_bottom(dMeter2Draw_c* draw, f32& bottom) {
+    CPaneMgr* parts[] = {draw->mpMagicFrameL, draw->mpMagicFrameR, draw->mpMagicBase, draw->mpMagicMeter};
+    CPaneMgr mgr;
+    Mtx mtx;
+    bool any = false;
+    for (CPaneMgr* part : parts) {
+        J2DPane* pane = part != nullptr ? part->getPanePtr() : nullptr;
+        if (pane == nullptr) continue;
+        for (u8 i = 0; i < 4; i++) {
+            const Vec v = mgr.getGlobalVtx(pane, &mtx, i, false, 0);
+            if (!any || v.y > bottom) bottom = v.y;
+            any = true;
+        }
+    }
+    return any;
+}
+
+bool stamina_hud_gauges_bottom(dMeter2Draw_c* draw, f32& bottom) {
+    if (draw == nullptr || twilight_hd_enabled()) return false;
+    bool any = false;
+    if (s_lanternGaugeValid && draw->getMeterGaugeAlphaRate(1) > 0.02f) {
+        bottom = s_lanternGaugeBottom;
+        any = true;
+    }
+    if (s_staminaGaugeValid && stamina_bar_alpha() > 0.01f) {
+        if (!any || s_staminaGaugeBottom > bottom) bottom = s_staminaGaugeBottom;
+        any = true;
+    }
+    return any;
+}
+
 static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     CPaneMgr* meter  = draw->mpMagicMeter;
     CPaneMgr* base   = draw->mpMagicBase;
@@ -615,6 +694,9 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     lo = lerp(lo, JUtility::TColor(150, 45, 5, 255), drain);
     hi = lerp(hi, JUtility::TColor(224, 255, 214, 255), s_pulse * 0.6f);
     lo = lerp(lo, JUtility::TColor(120, 224, 128, 255), s_pulse * 0.6f);
+    const f32 breathe = 0.5f + 0.5f * std::sin(static_cast<f32>(s_exhaustPhase) * 0.12f);
+    hi = lerp(hi, lerp(JUtility::TColor(200, 40, 30, 255), JUtility::TColor(255, 96, 70, 255), breathe), s_exhaustBlend);
+    lo = lerp(lo, lerp(JUtility::TColor(90, 10, 8, 255), JUtility::TColor(150, 24, 16, 255), breathe), s_exhaustBlend);
     hi = lerp(hi, JUtility::TColor(255, 170, 120, 255), s_emptyFlash);
     lo = lerp(lo, JUtility::TColor(206, 40, 30, 255), s_emptyFlash);
 
@@ -666,6 +748,10 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, f32 a, f32 fill01) {
     draw->mpKanteraScreen->draw(0.0f, 0.0f, graf);
     qa_hud_scale_end();
 
+    if (!twilightHd && kantera_gauge_bottom(draw, s_staminaGaugeBottom)) {
+        s_staminaGaugeValid = true;
+    }
+
     if (!twilightHd) {
         const JGeometry::TBox2<f32>& drawn = frameL->getPanePtr()->getGlbBounds();
         s_drawnX = drawn.i.x;
@@ -682,6 +768,10 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     if (!draw || !draw->mpKanteraScreen) return;
 
     s_hdBottom = 0.0f;
+    if (!twilight_hd_enabled() && draw->getMeterGaugeAlphaRate(1) > 0.02f &&
+        kantera_gauge_bottom(draw, s_lanternGaugeBottom)) {
+        s_lanternGaugeValid = true;
+    }
     const f32 hdStackTarget = twilight_hd_gauge_visible(draw) ? s_hdFrameHeight + 4.0f : 0.0f;
     s_hdStackShift += (hdStackTarget - s_hdStackShift) * 0.15f;
 
@@ -712,6 +802,7 @@ static void hook_cost(const HookService* h, int cat, int cost_id) {
 
 static void on_stamina_save_activated(ModContext*, uint32_t, void*) {
     s_stamina = s_display = stamina_max();
+    s_exhausted = false;
 }
 
 ModResult init_stamina(const HookService* hook_svc, ModError*) {
@@ -736,7 +827,6 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<StamHangWallCatch>(hook_svc, hang_drop_pre);
     mods::hook::add_pre<StamLadderFall>(hook_svc, hang_drop_pre);
 
-    mods::hook::add_pre<StamSwordSwing>(hook_svc, sword_swing_pre);
     mods::hook::add_post<StamSwordSwing>(hook_svc, sword_swing_post);
 
     hook_cost<StamFrontRoll>(hook_svc, STAM_ROLLS, STAMC_ROLL);
@@ -768,6 +858,8 @@ void shutdown_stamina() {
     s_jumpChargeCd = 0;
     s_denyCooldown = 0;
     s_extraDrain = 0.0f;
+    s_exhausted = false;
+    s_regenRamp = s_exhaustBlend = 0.0f;
     s_hiddenSkillLock = 0;
     s_otherSpend = 0.0f;
 }

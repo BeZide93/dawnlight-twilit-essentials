@@ -7,6 +7,7 @@
 #include "mods/svc/hook.hpp"
 
 struct ConfigService;
+class dMeter2Draw_c;
 
 extern bool g_configStaminaEnabled;
 extern int  g_configStaminaMax;
@@ -14,6 +15,7 @@ extern bool g_configStaminaScaleWithHearts;
 extern int  g_configStaminaPerHeart;
 extern int  g_configStaminaRegen;
 extern int  g_configStaminaRegenDelay;
+extern int  g_configStaminaExhaustRecover;
 extern bool g_configStaminaSlowHangRegen;
 
 extern float g_configStaminaBarX;
@@ -23,6 +25,7 @@ int stamina_effective_max();
 float stamina_twilight_hd_bottom();
 float stamina_twilight_hd_frame_height();
 float stamina_bar_alpha();
+bool stamina_hud_gauges_bottom(dMeter2Draw_c* draw, float& bottom);
 
 void stamina_bar_preview_request();
 void stamina_bar_preview_cancel();

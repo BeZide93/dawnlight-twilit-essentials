@@ -74,10 +74,6 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     if (s_holdFrames < kSprintHoldFrames) return HOOK_CONTINUE;
-    if (drains && !wasLatched &&
-        stamina_impl::current_value() < 0.25f * stamina_impl::max_value()) {
-        return HOOK_CONTINUE;
-    }
     s_sprintLatched = true;
 
     if (!link->checkEquipAnime()) {
