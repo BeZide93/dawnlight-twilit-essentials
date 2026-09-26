@@ -10,6 +10,7 @@
 #include <string>
 
 #include "mods/svc/config.h"
+#include "../compat/dawnlight.hpp"
 
 extern const LogService* svc_log;
 extern const ConfigService* svc_config;
@@ -463,7 +464,7 @@ void sync_midna_button(void* zButton) {
     s_touchZShown = zButton != nullptr && !s_rmlIsPseudoClassSet(zButton, &hiddenClass);
     const bool wanted = s_touchZShown && touch_z_item_mode() &&
                         dMeter2Info_getWindowStatus() == 0 && !isTitleOrMainMenu() &&
-                        midna_callable();
+                        midna_callable() && !dawnlight_touch_ui_active();
     if (!wanted) {
         set_midna_button_shown(false);
         return;
@@ -688,7 +689,7 @@ void sync_editor_midna_button(void* editor, void* element) {
     }
 
     const std::string hiddenClass = "hidden";
-    if (!touch_z_item_mode()) {
+    if (!touch_z_item_mode() || dawnlight_touch_ui_active()) {
         if (existing != nullptr) {
             s_rmlSetPseudoClass(existing, &hiddenClass, true);
         }
