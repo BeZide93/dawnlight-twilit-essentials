@@ -3,10 +3,12 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_tn.h"
 #include "d/actor/d_a_b_gnd.h"
+#include "d/actor/d_a_b_gg.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_cc_uty.h"
 #include "d/d_s_play.h"
 #include "f_op/f_op_actor_mng.h"
+#include "SSystem/SComponent/c_math.h"
 #include "m_Do/m_Do_audio.h"
 #include "Z2AudioLib/Z2Creature.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -29,9 +31,10 @@ int g_configFlurryRushIdleFrames = 45;
 namespace {
 
 constexpr int kCooldownTicks = 45;
+constexpr int kPostRushGraceTicks = 30;
 constexpr int kMinRushTicks = 30;
 constexpr int kFinishGraceTicks = 15;
-constexpr f32 kFlurryApproachRange = 120.0f;
+constexpr f32 kFlurryApproachRange = 150.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
 constexpr int kMinWindowTicks = 90;
@@ -46,6 +49,10 @@ constexpr int kMaxAtp = 8;
 
 constexpr f32 kMaxRushDistance = 300.0f;
 constexpr f32 kDodgeSensorRadiusScale = 3.0f;
+constexpr f32 kSwingSnapDistance = 125.0f;
+constexpr f32 kSwingMinDistance = 95.0f;
+constexpr f32 kSwingMaxDistance = 150.0f;
+constexpr f32 kSwingSnapMaxDistance = 450.0f;
 constexpr f32 kDodgeSensorExtraHeight = 60.0f;
 constexpr u32 kDefaultHitMapInfo = 30;
 
@@ -58,6 +65,7 @@ enum class State {
 State s_state = State::IDLE;
 int s_stateTicks = 0;
 int s_cooldown = 0;
+int s_postRushGrace = 0;
 u16 s_prevProc = 0;
 int s_hitCount = 0;
 int s_finishTicks = -1;
@@ -209,6 +217,7 @@ void end_rush(const char* reason = "disabled") {
              s_swingCount, s_contactCount, s_realHitCount, s_bonusHitCount);
         restore_time();
         s_cooldown = kCooldownTicks;
+        s_postRushGrace = kPostRushGraceTicks;
     }
     s_state = State::IDLE;
     s_stateTicks = 0;
@@ -361,8 +370,29 @@ void close_swing() {
     s_pendingBonusAtp = s_swingAtp;
 }
 
+void snap_to_target(daAlink_c* link) {
+    fopAc_ac_c* target = rush_target(link);
+    if (target == nullptr || target->health <= 0) return;
+    const s16 angle = fopAcM_searchActorAngleY(link, target);
+    link->current.angle.y = angle;
+    link->shape_angle.y = angle;
+    cXyz diff = target->current.pos - link->current.pos;
+    const f32 dist = diff.absXZ();
+    if (dist > kSwingSnapMaxDistance) return;
+    if (dist < 1.0f) {
+        link->current.pos.x -= cM_ssin(link->shape_angle.y) * kSwingSnapDistance;
+        link->current.pos.z -= cM_scos(link->shape_angle.y) * kSwingSnapDistance;
+        return;
+    }
+    if (dist >= kSwingMinDistance && dist <= kSwingMaxDistance) return;
+    const f32 k = (dist - kSwingSnapDistance) / dist;
+    link->current.pos.x += diff.x * k;
+    link->current.pos.z += diff.z * k;
+}
+
 void on_swing_start(daAlink_c* link, const char* kind) {
     if (s_state != State::RUSH || link == nullptr) return;
+    snap_to_target(link);
     close_swing();
     s_swingOpen = true;
     s_swingLanded = false;
@@ -393,6 +423,17 @@ constexpr char kSwingJump[] = "jump";
 constexpr char kSwingTurn[] = "spin";
 constexpr char kSwingHead[] = "helm split";
 constexpr char kSwingDown[] = "ending blow";
+
+bool link_protected() {
+    return s_state == State::RUSH || s_postRushGrace > 0;
+}
+
+void make_link_untouchable(daAlink_c* link) {
+    for (int i = 0; i < 3; i++) {
+        link->mTgCyls[i].OffTgSetBit();
+        link->mTgCyls[i].ResetTgHit();
+    }
+}
 
 bool is_dodge_proc(u16 proc) {
     return proc == daAlink_c::PROC_SIDESTEP || proc == daAlink_c::PROC_BACK_JUMP ||
@@ -429,18 +470,24 @@ static void on_sidestep_init_post(ModContext*, void* args, void* retval, void*) 
 
 static HookAction on_check_damage_action_pre(ModContext*, void* args, void* retval, void*) {
     const bool armed = s_state == State::ARMED;
-    const bool rushing = s_state == State::RUSH;
-    if (!armed && !rushing) return HOOK_CONTINUE;
+    const bool shielded = link_protected();
+    if (!armed && !shielded) return HOOK_CONTINUE;
 
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link == nullptr || link->checkDeadAction(0)) return HOOK_CONTINUE;
 
-    if (find_enemy_attacker(link) == nullptr) return HOOK_CONTINUE;
+    bool anyHit = false;
+    for (int i = 0; i < 3; i++) {
+        if (link->mTgCyls[i].ChkTgHit()) anyHit = true;
+    }
+    if (!anyHit) return HOOK_CONTINUE;
+    if (armed && find_enemy_attacker(link) == nullptr) return HOOK_CONTINUE;
 
     reset_link_hit_flags(link);
 
     if (armed) {
         start_rush();
+        make_link_untouchable(link);
     }
 
     if (retval != nullptr) {
@@ -495,7 +542,7 @@ static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link != nullptr) clear_cut_recovery(link);
     if (s_reentering) return HOOK_CONTINUE;
-    if (link == nullptr || s_hitCount != 0) return HOOK_CONTINUE;
+    if (link == nullptr) return HOOK_CONTINUE;
     if (!link->mLinkAcch.ChkGroundHit()) return HOOK_CONTINUE;
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
@@ -503,7 +550,7 @@ static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
                            (pad.mPressedButtonFlags & PAD_BUTTON_B) != 0;
     if (!attacking) return HOOK_CONTINUE;
 
-    fopAc_ac_c* target = link->mTargetedActor;
+    fopAc_ac_c* target = rush_target(link);
     if (target == nullptr) return HOOK_CONTINUE;
 
     const cXyz toTarget = target->current.pos - link->current.pos;
@@ -543,7 +590,42 @@ void apply_dodge_sensor(daAlink_c* link) {
     }
 }
 
+DEFINE_HOOK(&daAlink_c::setDamagePoint, FlurryRushSetDamagePointHook);
+
+static HookAction on_set_damage_point_pre(ModContext*, void*, void* retval, void*) {
+    if (!link_protected()) return HOOK_CONTINUE;
+    if (retval != nullptr) *static_cast<int*>(retval) = 0;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+DEFINE_HOOK(&daAlink_c::setThrowDamage, FlurryRushThrowDamageHook);
+
+static HookAction on_throw_damage_pre(ModContext*, void*, void* retval, void*) {
+    if (!link_protected()) return HOOK_CONTINUE;
+    if (retval != nullptr) *static_cast<bool*>(retval) = false;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void magnet_sword(daAlink_c* link) {
+    if (s_state != State::RUSH || !s_swingOpen || s_swingLanded) return;
+    if (!link->mAtCps[0].ChkAtSet()) return;
+    fopAc_ac_c* target = rush_target(link);
+    if (target == nullptr || target->health <= 0) return;
+    cXyz center = (target->current.pos + target->eyePos) * 0.5f;
+    if ((center - link->current.pos).absXZ() > kSwingSnapMaxDistance) return;
+    cXyz start = link->current.pos;
+    start.y = center.y;
+    link->mAtCps[0].SetStartEnd(start, center);
+}
+
 static void on_link_execute_post(ModContext*, void* args, void*, void*) {
+    if (link_protected()) {
+        daAlink_c* rushLink = mods::arg<daAlink_c*>(args, 0);
+        if (rushLink != nullptr) {
+            make_link_untouchable(rushLink);
+            magnet_sword(rushLink);
+        }
+    }
     if (!s_reentering) {
         daAlink_c* sensorLink = mods::arg<daAlink_c*>(args, 0);
         if (sensorLink != nullptr && s_state == State::ARMED) {
@@ -574,6 +656,10 @@ static void on_link_execute_post(ModContext*, void* args, void*, void*) {
     }
     pad.mPressedButtonFlags = pressed;
     s_reentering = false;
+    if (link_protected()) {
+        make_link_untouchable(link);
+        magnet_sword(link);
+    }
 }
 
 DEFINE_HOOK(&daB_TN_c::damage_check, FlurryDarknutDamageCheckHook);
@@ -657,10 +743,33 @@ static HookAction on_ganondorf_damage_check_pre(ModContext*, void* args, void*, 
     return HOOK_CONTINUE;
 }
 
+DEFINE_HOOK(&daB_GG_c::Execute, FlurryAeralfosExecuteHook);
+DEFINE_HOOK(&daB_GG_c::CutChk, FlurryAeralfosCutChkHook);
+
+bool is_rush_target_actor(fopAc_ac_c* actor) {
+    if (s_state != State::RUSH || actor == nullptr) return false;
+    return s_targetId == fpcM_ERROR_PROCESS_ID_e || fopAcM_GetID(actor) == s_targetId;
+}
+
+static void on_aeralfos_execute_post(ModContext*, void* args, void*, void*) {
+    daB_GG_c* gg = mods::arg<daB_GG_c*>(args, 0);
+    if (!is_rush_target_actor(gg)) return;
+    gg->mCcCyl.OffTgShield();
+    gg->mCcShieldSph.OffTgShield();
+    gg->mCcShieldSph.OffTgSetBit();
+    if (gg->field_0x5cc > 3) gg->field_0x5cc = 3;
+}
+
+static HookAction on_aeralfos_cut_chk_pre(ModContext*, void* args, void*, void*) {
+    return is_rush_target_actor(mods::arg<daB_GG_c*>(args, 0)) ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
+}
+
 void install_hooks() {
     if (s_hooksInstalled || s_hookSvc == nullptr) return;
     mods::hook::add_post<FlurryRushSideStepInitHook>(s_hookSvc, on_sidestep_init_post);
     mods::hook::add_pre<FlurryRushDamageActionHook>(s_hookSvc, on_check_damage_action_pre);
+    mods::hook::add_pre<FlurryRushSetDamagePointHook>(s_hookSvc, on_set_damage_point_pre);
+    mods::hook::add_pre<FlurryRushThrowDamageHook>(s_hookSvc, on_throw_damage_pre);
     mods::hook::add_pre<FlurryRushExecuteHook>(s_hookSvc, on_link_execute_pre);
     mods::hook::add_post<FlurryRushExecuteHook>(s_hookSvc, on_link_execute_post);
     mods::hook::add_post<FlurrySwingNormalHook>(s_hookSvc, on_swing_init_post<kSwingNormal>);
@@ -674,6 +783,8 @@ void install_hooks() {
     mods::hook::add_post<FlurryDarknutDamageCheckHook>(s_hookSvc, on_darknut_damage_check_post);
     mods::hook::add_pre<FlurryDarknutBodyShieldHook>(s_hookSvc, on_darknut_body_shield_pre);
     mods::hook::add_pre<FlurryGanondorfDamageCheckHook>(s_hookSvc, on_ganondorf_damage_check_pre);
+    mods::hook::add_post<FlurryAeralfosExecuteHook>(s_hookSvc, on_aeralfos_execute_post);
+    mods::hook::add_pre<FlurryAeralfosCutChkHook>(s_hookSvc, on_aeralfos_cut_chk_pre);
     s_hooksInstalled = true;
 }
 
@@ -732,6 +843,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
     if (s_hookSvc == nullptr || s_setSimRate == nullptr) return;
 
     if (s_cooldown > 0) s_cooldown--;
+    if (s_postRushGrace > 0) s_postRushGrace--;
 
     auto* player = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
     if (s_state == State::IDLE && player != nullptr && s_cooldown == 0) {
@@ -827,6 +939,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
 void shutdown_flurry_rush() {
     restore_dodge_sensor(static_cast<daAlink_c*>(dComIfGp_getPlayer(0)));
     end_rush();
+    s_postRushGrace = 0;
     s_hookSvcSet = false;
     s_hookSvc = nullptr;
     s_frameInterpVar = nullptr;
