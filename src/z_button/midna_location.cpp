@@ -3,6 +3,9 @@
 #include "midna_location.hpp"
 #include "z_mobile.hpp"
 #include "../controls/controls.hpp"
+#include "m_Do/m_Do_ext.h"
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/JUtility/JUTFont.h"
 
 DEFINE_HOOK(&dMeterButton_c::_execute, MeterButtonExecuteHook);
 
@@ -277,6 +280,72 @@ void on_meter_button_execute_post(ModContext*, void* args, void*, void*) {
 }
 
 DEFINE_HOOK(&dMeterButton_c::draw, MeterButtonDrawHook);
+
+static f32 pane_chain_alpha(J2DPane* pane) {
+    f32 a = 1.0f;
+    for (J2DPane* p = pane; p != nullptr; p = p->getParentPane()) {
+        if (!p->isVisible()) return 0.0f;
+        a *= static_cast<f32>(p->getAlpha()) / 255.0f;
+    }
+    return a;
+}
+
+static void draw_prompt_l_letter(dMeterButton_c* meterButton) {
+    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !controls_midna_on_l()) return;
+    if (meterButton == nullptr || meterButton->mpButtonScreen == nullptr) return;
+    J2DPicture* zbtnPic = static_cast<J2DPicture*>(meterButton->mpButtonScreen->search('zbtn'));
+    if (zbtnPic == nullptr) return;
+    const f32 a = pane_chain_alpha(zbtnPic);
+    if (a < 0.02f) return;
+
+    CPaneMgr mgr;
+    Mtx mtx;
+    f32 x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    for (u8 i = 0; i < 4; i++) {
+        const Vec v = mgr.getGlobalVtx(zbtnPic, &mtx, i, false, 0);
+        if (i == 0) {
+            x0 = x1 = v.x;
+            y0 = y1 = v.y;
+            continue;
+        }
+        if (v.x < x0) x0 = v.x;
+        if (v.x > x1) x1 = v.x;
+        if (v.y < y0) y0 = v.y;
+        if (v.y > y1) y1 = v.y;
+    }
+    const f32 h = y1 - y0;
+    if (h < 2.0f || x1 - x0 < 2.0f) return;
+
+    JUTFont* font = mDoExt_getMesgFont();
+    if (font == nullptr) return;
+    const f32 charH = h * 0.42f;
+    const f32 charW = charH;
+    f32 base = static_cast<f32>(font->getWidth());
+    if (base <= 0.0f) base = 1.0f;
+    f32 glyphW = static_cast<f32>(font->getWidth('L'));
+    if (glyphW <= 0.0f) glyphW = base;
+    const f32 textW = glyphW * (charW / base);
+    const f32 tx = (x0 + x1) * 0.5f - textW * 0.5f;
+    const f32 ty = (y0 + y1) * 0.5f + charH * 0.36f;
+    const u8 alpha = static_cast<u8>(255.0f * (a > 1.0f ? 1.0f : a));
+
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port != nullptr) port->setup2D();
+    font->setGX();
+    font->setCharColor(JUtility::TColor(0, 0, 0, static_cast<u8>(alpha * 0.7f)));
+    static const f32 kOff[4][2] = {{1.0f, 0.0f}, {-1.0f, 0.0f}, {0.0f, 1.0f}, {0.0f, -1.0f}};
+    for (const auto& o : kOff) {
+        font->drawString_scale(tx + o[0], ty + o[1], charW, charH, "L", true);
+    }
+    font->setCharColor(JUtility::TColor(255, 255, 255, alpha));
+    font->drawString_scale(tx, ty, charW, charH, "L", true);
+    if (port != nullptr) port->setup2D();
+}
+
+void on_meter_button_draw_post(ModContext*, void* args, void*, void*) {
+    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return;
+    draw_prompt_l_letter(mods::arg<dMeterButton_c*>(args, 0));
+}
 
 HookAction on_meter_button_draw_pre(ModContext*, void* args, void*, void*) {
     if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;

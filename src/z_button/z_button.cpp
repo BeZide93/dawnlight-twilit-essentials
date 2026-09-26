@@ -83,6 +83,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_pre);
     mods::hook::add_post<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_post);
     mods::hook::add_pre<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_pre);
+    mods::hook::add_post<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_post);
 
     return MOD_OK;
 }

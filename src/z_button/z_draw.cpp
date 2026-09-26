@@ -308,6 +308,8 @@ void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW
 
 static bool s_midnaLOverlay = false;
 static bool s_midnaLWasVisible = false;
+static bool s_midnaLPikariHeld = false;
+static f32 s_midnaLPikariFrame = 0.0f;
 
 static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
 #if Z_MOBILE_BUILD
@@ -335,6 +337,9 @@ HookAction on_meter2_draw_draw_pre(ModContext*, void* args, void*, void*) {
     s_midnaLWasVisible = midona->isVisible();
     midona->hide();
     s_midnaLOverlay = true;
+    s_midnaLPikariFrame = draw->field_0x738;
+    s_midnaLPikariHeld = true;
+    draw->field_0x738 = 0.0f;
     return HOOK_CONTINUE;
 }
 
@@ -510,10 +515,20 @@ static void draw_midna_l_overlay(dMeter2Draw_c* draw) {
     const f32 cy = y + h * 0.5f;
     midna_l_draw(shadow, cx - size * 0.5f, cy - size * 0.5f, size, size, alpha, false);
     midna_l_draw(face, cx - size * 0.5f, cy - size * 0.5f, size, size, alpha, false);
+    if (draw->field_0x738 > 0.0f) {
+        draw->drawPikari(cx, cy, &draw->field_0x738, g_drawHIO.mMidnaIconPikariScale,
+                         g_drawHIO.mMidnaIconPikariFrontOuter, g_drawHIO.mMidnaIconPikariFrontInner,
+                         g_drawHIO.mMidnaIconPikariBackOuter, g_drawHIO.mMidnaIconPikariBackInner,
+                         g_drawHIO.mMidnaIconPikariAnimSpeed, 3);
+    }
     if (port != nullptr) port->setup2D();
 }
 
 void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
+    if (s_midnaLPikariHeld) {
+        s_midnaLPikariHeld = false;
+        if (args) mods::arg<dMeter2Draw_c*>(args, 0)->field_0x738 = s_midnaLPikariFrame;
+    }
     if (s_midnaLOverlay && args) {
         s_midnaLOverlay = false;
         draw_midna_l_overlay(mods::arg<dMeter2Draw_c*>(args, 0));
