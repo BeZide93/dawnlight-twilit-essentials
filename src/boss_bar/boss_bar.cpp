@@ -17,6 +17,7 @@ void qa_hud_scale_end();
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
 #include "mods/svc/config.h"
+#include "mods/svc/resource.h"
 
 #define private public
 #define protected public
@@ -1667,6 +1668,65 @@ static f32 clampf(f32 v, f32 lo, f32 hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+static void fill_hgrad(f32 x, f32 y, f32 w, f32 h, JUtility::TColor left, JUtility::TColor right) {
+    if (w <= 0.0f || h <= 0.0f) return;
+    J2DOrthoGraph g;
+    g.setColor(left, right, left, right);
+    g.fillBox(JGeometry::TBox2<f32>(x, y, x + w, y + h));
+}
+
+extern const ResourceService* get_resource_service();
+extern "C" ModContext* mod_ctx;
+
+static ResourceBuffer s_erLeftBti = RESOURCE_BUFFER_INIT;
+static ResourceBuffer s_erRightBti = RESOURCE_BUFFER_INIT;
+static J2DPicture* s_erLeftPic = nullptr;
+static J2DPicture* s_erRightPic = nullptr;
+static bool s_erTexTried = false;
+
+static J2DPicture* make_er_picture(ResourceBuffer& buf) {
+    if (buf.data == nullptr) return nullptr;
+    ResTIMG* img = reinterpret_cast<ResTIMG*>(buf.data);
+    img->alphaEnabled = 1;
+    JKRHeap* rootHeap = JKRHeap::getRootHeap();
+    JKRHeap* oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
+    J2DPicture* pic = JKR_NEW J2DPicture(img);
+    if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
+    return pic;
+}
+
+static void load_er_ornaments() {
+    if (s_erTexTried) return;
+    s_erTexTried = true;
+    const ResourceService* res = get_resource_service();
+    if (res == nullptr || mod_ctx == nullptr) return;
+    res->load(mod_ctx, "textures/boss_bar/er_ornament_left.bti", &s_erLeftBti);
+    res->load(mod_ctx, "textures/boss_bar/er_ornament_right.bti", &s_erRightBti);
+    s_erLeftPic = make_er_picture(s_erLeftBti);
+    s_erRightPic = make_er_picture(s_erRightBti);
+}
+
+static void free_er_ornaments() {
+    JKR_DELETE(s_erLeftPic);
+    JKR_DELETE(s_erRightPic);
+    s_erLeftPic = nullptr;
+    s_erRightPic = nullptr;
+    s_erTexTried = false;
+    const ResourceService* res = get_resource_service();
+    if (res != nullptr && mod_ctx != nullptr) {
+        res->free(mod_ctx, &s_erLeftBti);
+        res->free(mod_ctx, &s_erRightBti);
+    }
+}
+
+static void draw_er_picture(J2DPicture* pic, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
+    if (pic == nullptr) return;
+    pic->setAlpha(alpha);
+    pic->draw(x, y, w, h, false, false, false);
+    J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
+    if (port) port->setup2D();
+}
+
 static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chip,
                                      const BossBarScreen& scr) {
     auto A = [a](u8 base) -> u8 { return static_cast<u8>(static_cast<f32>(base) * a); };
@@ -1676,16 +1736,19 @@ static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chi
     const f32 barX = scr.centreX - barW * 0.5f + g_configBossBarX;
     const f32 barY = scr.bottomY - 84.0f + g_configBossBarY;
 
+    constexpr f32 kOrnScale = 0.42f;
+    constexpr f32 kTexLineCenterY = 26.0f;
+    const f32 lineH = 4.0f * kOrnScale;
+    const f32 lineY = barY + barH + 0.6f;
+    const f32 lineCenterY = lineY + lineH * 0.5f;
+
+    load_er_ornaments();
     qa_hud_scale_begin(barX + barW * 0.5f, barY);
 
-    fill_vgrad(barX - 4.0f, barY - 4.0f, barW + 8.0f, barH + 8.0f,
-               JUtility::TColor(0, 0, 0, A(55)), JUtility::TColor(0, 0, 0, A(55)));
-    fill_vgrad(barX - 2.0f, barY - 2.0f, barW + 4.0f, barH + 4.0f,
-               JUtility::TColor(0, 0, 0, A(215)), JUtility::TColor(0, 0, 0, A(215)));
-    fill_vgrad(barX - 1.0f, barY - 1.0f, barW + 2.0f, barH + 2.0f,
-               JUtility::TColor(118, 108, 92, A(210)), JUtility::TColor(70, 64, 56, A(210)));
+    fill_vgrad(barX - 1.0f, barY - 1.5f, barW + 2.0f, barH + 3.0f,
+               JUtility::TColor(0, 0, 0, A(120)), JUtility::TColor(0, 0, 0, A(150)));
     fill_vgrad(barX, barY, barW, barH,
-               JUtility::TColor(28, 22, 22, A(240)), JUtility::TColor(12, 9, 9, A(240)));
+               JUtility::TColor(26, 20, 20, A(200)), JUtility::TColor(12, 9, 9, A(200)));
 
     if (chip > live + 0.001f) {
         fill_vgrad(barX + barW * live, barY, barW * (chip - live), barH,
@@ -1697,11 +1760,27 @@ static void draw_boss_bar_elden_ring(f32 a, const char* label, f32 live, f32 chi
                    JUtility::TColor(182, 34, 38, A(250)), JUtility::TColor(108, 12, 18, A(250)));
         fill_vgrad(barX, barY, fw, 1.0f,
                    JUtility::TColor(255, 128, 116, A(110)), JUtility::TColor(255, 128, 116, A(40)));
+        const f32 glowW = fw < 10.0f ? fw : 10.0f;
+        fill_hgrad(barX + fw - glowW, barY, glowW, barH,
+                   JUtility::TColor(255, 170, 160, A(0)), JUtility::TColor(255, 196, 186, A(190)));
+        J2DFillBox(barX + fw - 1.5f, barY, 1.5f, barH, JUtility::TColor(255, 214, 204, A(235)));
     }
+
+    fill_vgrad(barX, lineY, barW, lineH,
+               JUtility::TColor(236, 230, 196, A(235)), JUtility::TColor(128, 118, 76, A(235)));
+
+    const f32 leftW = 64.0f * kOrnScale;
+    const f32 leftH = 32.0f * kOrnScale;
+    draw_er_picture(s_erLeftPic, barX - 34.0f * kOrnScale, lineCenterY - kTexLineCenterY * kOrnScale,
+                    leftW, leftH, A(255));
+    const f32 rightW = 32.0f * kOrnScale;
+    const f32 rightH = 32.0f * kOrnScale;
+    draw_er_picture(s_erRightPic, barX + barW - 19.0f * kOrnScale + 2.0f,
+                    lineCenterY - kTexLineCenterY * kOrnScale, rightW, rightH, A(255));
 
     char nm[64];
     copy_boss_name(elden_ring_title(label), nm, sizeof(nm), false);
-    draw_text_soft(nm, barX, barY - 6.0f, 11.5f, 13.5f,
+    draw_text_soft(nm, barX + 4.0f, barY - 7.0f, 11.5f, 13.5f,
                    JUtility::TColor(240, 234, 218, A(255)), JUtility::TColor(206, 198, 180, A(255)),
                    JUtility::TColor(0, 0, 0, A(150)), 1.0f);
 
@@ -1880,6 +1959,7 @@ ModResult init_boss_bar(const HookService* hook_svc, ModError*) {
 }
 
 void shutdown_boss_bar() {
+    free_er_ornaments();
     reset_state();
     diababa_reset();
     s_diaActiveId = 0;
