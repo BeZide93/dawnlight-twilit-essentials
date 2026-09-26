@@ -155,6 +155,8 @@ bool s_midnaButtonApiOk = false;
 void* s_midnaButton = nullptr;
 bool s_midnaButtonShown = false;
 bool s_midnaButtonFilled = false;
+int s_midnaGlowLevel = -1;
+int s_midnaPulseFrame = 0;
 std::string s_midnaButtonSource;
 bool s_midnaTouchActive = false;
 uint64_t s_midnaTouchFinger = 0;
@@ -383,10 +385,48 @@ void set_midna_button_shown(bool shown) {
 }
 
 std::string midna_button_rml(const std::string& source) {
-    return source.empty() ? "<span style=\"font-size:16dp;\">Midna</span>"
+    const std::string glow =
+        "<span style=\"position:absolute;left:0dp;top:0dp;width:100%;height:100%;"
+        "border-radius:23dp;background-color:rgba(150,255,170,65%);opacity:0;\"></span>";
+    return glow + (source.empty() ? "<span style=\"font-size:16dp;\">Midna</span>"
                           : "<img class=\"midna-icon visible\" style=\"left:50%;top:50%;width:40dp;"
                             "height:40dp;margin-left:-20dp;margin-top:-20dp;\" src=\"" +
-                                source + "\" />";
+                                source + "\" />");
+}
+
+bool midna_emphasis_active() {
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    dMeter2Draw_c* draw = meter != nullptr ? meter->getMeterDrawPtr() : nullptr;
+    return draw != nullptr && draw->field_0x738 > 0.0f;
+}
+
+void update_midna_button_pulse(void* button) {
+    if (button == nullptr || s_rmlGetChild == nullptr) {
+        return;
+    }
+    constexpr int kPulseFrames = 30;
+    int level = 0;
+    if (midna_emphasis_active()) {
+        const int phase = s_midnaPulseFrame % kPulseFrames;
+        if (phase == 0) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_HINT_BUTTON_BLINK, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        level = 10 - (phase * 10) / kPulseFrames;
+        s_midnaPulseFrame++;
+    } else {
+        s_midnaPulseFrame = 0;
+    }
+    if (level == s_midnaGlowLevel) {
+        return;
+    }
+    void* glow = s_rmlGetChild(button, 0);
+    if (glow == nullptr) {
+        return;
+    }
+    char value[16] = {};
+    std::snprintf(value, sizeof(value), "%.2f", static_cast<float>(level) / 10.0f);
+    set_property(glow, "opacity", value);
+    s_midnaGlowLevel = level;
 }
 
 bool touch_document_size(float& w, float& h) {
@@ -501,7 +541,9 @@ void sync_midna_button(void* zButton) {
         }
         s_midnaButtonSource = source;
         s_midnaButtonFilled = true;
+        s_midnaGlowLevel = -1;
     }
+    update_midna_button_pulse(button);
     set_midna_button_shown(true);
 }
 
