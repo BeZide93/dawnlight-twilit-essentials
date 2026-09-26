@@ -247,6 +247,8 @@ const size_t g_bossGalleryCount = sizeof(g_bossGalleryTable) / sizeof(g_bossGall
 
 bool g_configBossRushSuggestedItems = false;
 bool g_configMasterRushRetryFromStart = true;
+int g_configMasterRushDifficulty = 0;
+static void apply_master_rush_max_life();
 bool g_configBossRushRefillAfterFight = false;
 bool g_configBossRushSeparateGanon = false;
 
@@ -5029,6 +5031,7 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
         s_gauntletPhase = 0;
         boss_rush_timer_end_all_phases();
         apply_boss_rush_loadout(false);
+        apply_master_rush_max_life();
         dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
         sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()), dComIfGs_getMaxLife());
         boss_rush_timer_begin_chain_run();
@@ -5044,6 +5047,20 @@ void boss_rush_retry_current_fight(const LogService* log_svc, ModContext* mod_ct
 
     commit_boss_rush_fight_warp(static_cast<size_t>(idx), daAlink_getAlinkActorClass(),
                                 log_svc, mod_ctx);
+}
+
+static void apply_master_rush_max_life() {
+    if (!s_rushRunActive || g_configMasterRushDifficulty != 1) {
+        return;
+    }
+    constexpr u8 kHardMaxLife = 3 * 5;
+    if (dComIfGs_getMaxLife() != kHardMaxLife) {
+        dComIfGs_setMaxLife(kHardMaxLife);
+    }
+    const u16 full = full_life_for_max(kHardMaxLife);
+    if (dComIfGs_getLife() > full) {
+        dComIfGs_setLife(full);
+    }
 }
 
 static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_ctx) {
@@ -5065,6 +5082,7 @@ static void start_boss_rush_full_run(const LogService* log_svc, ModContext* mod_
 
     apply_boss_rush_loadout(false);
     reset_boss_rush_save_flags();
+    apply_master_rush_max_life();
     dComIfGs_setLife(full_life_for_max(dComIfGs_getMaxLife()));
     sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()), dComIfGs_getMaxLife());
     boss_rush_timer_begin_chain_run();
@@ -5556,6 +5574,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                 }
 
                 if (s_rushRunActive) {
+                    apply_master_rush_max_life();
                     const u16 life = std::min(runCarriedLife, full_life_for_max(dComIfGs_getMaxLife()));
                     dComIfGs_setLife(life);
                     sync_life_meter_instant(life, dComIfGs_getMaxLife());

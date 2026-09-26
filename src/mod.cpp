@@ -496,6 +496,7 @@ static ConfigVarHandle s_varBossRushChainBest = 0;
 static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
 static ConfigVarHandle s_varBossRushPortal = 0;
 static ConfigVarHandle s_varMasterRushRetryMode = 0;
+static ConfigVarHandle s_varMasterRushDifficulty = 0;
 
 static bool s_generalInitialized = false;
 static bool s_damageVignetteInitialized = false;
@@ -560,6 +561,12 @@ static void on_boss_rush_refill_after_fight_changed(ModContext*, ConfigVarHandle
 static void on_master_rush_retry_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configMasterRushRetryFromStart = value->int_value == 0;
+    }
+}
+
+static void on_master_rush_difficulty_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configMasterRushDifficulty = static_cast<int>(value->int_value);
     }
 }
 
@@ -1840,6 +1847,11 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         "<p><b>At beginning</b> restarts the whole Master Rush at Ook and resets the timer. "
         "<b>Current boss</b> restarts only the current fight and keeps the timer running.</p>",
         kMasterRushRetryModes, 2);
+    static const char* const kMasterRushDifficulties[] = {"Normal (20 hearts)", "Hard (3 hearts)"};
+    ui_add_select(left, "Difficulty", s_varMasterRushDifficulty,
+        "<p><b>Normal</b> starts the Master Rush with 20 hearts. "
+        "<b>Hard</b> starts it with only 3 hearts for the whole run.</p>",
+        kMasterRushDifficulties, 2);
 
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");
@@ -2876,6 +2888,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varMasterRushRetryMode, &mode);
             g_configMasterRushRetryFromStart = mode == 0;
             svc_config->subscribe(mod_ctx, s_varMasterRushRetryMode, on_master_rush_retry_mode_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descMasterRushDifficulty = CONFIG_VAR_DESC_INIT;
+        descMasterRushDifficulty.name = "masterRushDifficulty";
+        descMasterRushDifficulty.type = CONFIG_VAR_INT;
+        descMasterRushDifficulty.default_int = 0;
+        if (svc_config->register_var(mod_ctx, &descMasterRushDifficulty, &s_varMasterRushDifficulty) == MOD_OK) {
+            int64_t difficulty = 0;
+            svc_config->get_int(mod_ctx, s_varMasterRushDifficulty, &difficulty);
+            g_configMasterRushDifficulty = static_cast<int>(difficulty);
+            svc_config->subscribe(mod_ctx, s_varMasterRushDifficulty, on_master_rush_difficulty_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descBossRushSeparateGanon = CONFIG_VAR_DESC_INIT;

@@ -41,6 +41,7 @@ void boss_rush_debug_kill_current_boss();
 
 extern bool g_configBossRushSuggestedItems;
 extern bool g_configMasterRushRetryFromStart;
+extern int g_configMasterRushDifficulty;
 
 extern bool g_configBossRushRefillAfterFight;
 
