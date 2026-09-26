@@ -13,11 +13,11 @@
 #include "collection_nav.cpp"
 #include "collection_equip.cpp"
 
-IMPORT_OPTIONAL_SERVICE(ResourceService, cl_svc_resource);
-IMPORT_OPTIONAL_SERVICE(HostService, cl_svc_host);
+extern const ResourceService* svc_resource;
+extern const HostService* svc_host;
 
-const ResourceService* cl_resource_service() { return cl_svc_resource; }
-const HostService* cl_host_service() { return cl_svc_host; }
+const ResourceService* cl_resource_service() { return svc_resource; }
+const HostService* cl_host_service() { return svc_host; }
 
 static bool (*s_unequipPolicy)() = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
