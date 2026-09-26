@@ -381,8 +381,7 @@ void fill_tables(dMenu_Collect2D_c* c) {
         c->field_0x22d[3][1] = dComIfGs_isItemFirstBit(dItemNo_SHIELD_e) ? 1 : 0;
     }
 
-    if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e &&
-        layout_uses_base_item(dItemNo_WEAR_CASUAL_e)) {
+    if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e) {
         c->field_0x22d[3][2] = dComIfGs_isItemFirstBit(dItemNo_WEAR_KOKIRI_e) ? 1 : 0;
         c->field_0x22d[4][2] = dComIfGs_isItemFirstBit(dItemNo_WEAR_ZORA_e) ? 1 : 0;
         c->field_0x22d[5][2] = dComIfGs_isItemFirstBit(dItemNo_ARMOR_e) ? 1 : 0;
@@ -530,9 +529,10 @@ void on_menu_collect_wide_post(ModContext*, void* args, void*, void*) {
 }
 
 HookAction on_screen_draw_pre(ModContext*, void* args, void*, void*) {
-    if (args == nullptr || !s.built || s.hdRoot == nullptr) return HOOK_CONTINUE;
+    if (args == nullptr || !s.built) return HOOK_CONTINUE;
     if (mods::arg<J2DScreen*>(args, 0) != s.screen) return HOOK_CONTINUE;
-    screen_apply_layout(s.collect);
+    for (int r = 0; r < kClRows; r++) color_row_frames(r);
+    if (s.hdRoot != nullptr) screen_apply_layout(s.collect);
     return HOOK_CONTINUE;
 }
 
