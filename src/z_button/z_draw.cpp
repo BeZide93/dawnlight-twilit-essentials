@@ -482,8 +482,12 @@ static void draw_midna_l_overlay(dMeter2Draw_c* draw) {
     }
 
     static f32 s_gaugeShift = 0.0f;
-    const bool bothGauges = draw->getMeterGaugeAlphaRate(1) > 0.02f && stamina_bar_alpha() > 0.01f;
-    s_gaugeShift += ((bothGauges ? 16.0f : 0.0f) - s_gaugeShift) * 0.15f;
+    f32 gaugeTarget = 0.0f;
+    f32 gaugeBottom = 0.0f;
+    if (stamina_hud_gauges_bottom(draw, gaugeBottom) && gaugeBottom > hy1) {
+        gaugeTarget = gaugeBottom - hy1;
+    }
+    s_gaugeShift += (gaugeTarget - s_gaugeShift) * 0.15f;
 
     const f32 w = zx1 - zx0;
     const f32 h = zy1 - zy0;
