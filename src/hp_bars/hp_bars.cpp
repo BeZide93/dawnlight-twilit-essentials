@@ -50,6 +50,7 @@ struct DamagePopup {
     fpc_ProcID enemyId;
     s16 damageAmount;
     cXyz worldPos;
+    cXyz prevPos;
     f32 velY;
     f32 velX;
     f32 velZ;
@@ -57,6 +58,26 @@ struct DamagePopup {
     int maxFrames;
     bool isCritical;
 };
+
+// Render-frame interpolation for the popups: the engine's interp step
+// (fraction into the current game frame at draw time), resolved lazily.
+static float (*s_interpStepFn)() = nullptr;
+static bool s_interpStepResolved = false;
+static const HookService* s_hpHookSvc = nullptr;
+static ModContext* s_hpModCtx = nullptr;
+
+static f32 popup_interp_step() {
+    if (!s_interpStepResolved && s_hpHookSvc != nullptr && s_hpModCtx != nullptr) {
+        s_interpStepResolved = true;
+        void* addr = nullptr;
+        if (s_hpHookSvc->resolve(s_hpModCtx, "_ZN4dusk5interp21get_interpolation_stepEv", &addr,
+                                 nullptr) == MOD_OK &&
+            addr != nullptr) {
+            s_interpStepFn = reinterpret_cast<float (*)()>(addr);
+        }
+    }
+    return s_interpStepFn ? s_interpStepFn() : 1.0f;
+}
 
 static std::unordered_map<fpc_ProcID, s16> s_lastHealthMap;
 static std::vector<DamagePopup> s_damagePopups;
@@ -399,6 +420,7 @@ static void* trackEnemyDamageCallback(void* pActor, void*) {
                 popup.damageAmount = damage;
 
                 popup.worldPos = enemy_hp_anchor(actor, id);
+                popup.prevPos = popup.worldPos;
 
                 f32 randX = (static_cast<f32>(std::rand() % 20) - 10.0f);
                 f32 randZ = (static_cast<f32>(std::rand() % 20) - 10.0f);
@@ -435,6 +457,7 @@ void update_hp_bars(const LogService*, ModContext*) {
     fopAcIt_Judge(trackEnemyDamageCallback, nullptr);
 
     for (auto it = s_damagePopups.begin(); it != s_damagePopups.end();) {
+        it->prevPos = it->worldPos;
         it->currentFrame++;
         it->worldPos.y += it->velY;
         it->worldPos.x += it->velX;
@@ -454,10 +477,15 @@ static void draw_damage_popups() {
         return;
     }
 
+    const f32 step = popup_interp_step();
+
     J2DFillBox(0.0f, 0.0f, 0.0f, 0.0f, JUtility::TColor(0, 0, 0, 0));
 
     for (const auto& popup : s_damagePopups) {
-        cXyz pos = popup.worldPos;
+        cXyz pos;
+        pos.x = popup.prevPos.x + (popup.worldPos.x - popup.prevPos.x) * step;
+        pos.y = popup.prevPos.y + (popup.worldPos.y - popup.prevPos.y) * step;
+        pos.z = popup.prevPos.z + (popup.worldPos.z - popup.prevPos.z) * step;
         Vec screenPos;
         mDoLib_project(&pos, &screenPos);
 
@@ -501,10 +529,14 @@ static void draw_damage_popups() {
     }
 }
 
-static void on_meter2_draw_post(ModContext*, void*, void*, void*) {
+static void on_meter2_draw_post(ModContext* mod_ctx, void*, void*, void*) {
     if (!g_configHpBarsEnabled && !g_configDamageNumbersEnabled) {
         s_damagePopups.clear();
         return;
+    }
+
+    if (s_hpModCtx == nullptr) {
+        s_hpModCtx = mod_ctx;
     }
 
     // Only real pause menus hide the bars; keep drawing through hitstop
@@ -536,6 +568,7 @@ static void on_meter2_draw_post(ModContext*, void*, void*, void*) {
 }
 
 ModResult init_hp_bars(const HookService* hook_svc, ModError*) {
+    s_hpHookSvc = hook_svc;
     if (!hook_svc) {
         return MOD_OK;
     }

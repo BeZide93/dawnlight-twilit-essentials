@@ -19,6 +19,7 @@ namespace {
 constexpr float kZoomAmount = 0.08f;
 constexpr float kEaseInPerSecond = 9.0f;
 constexpr float kEaseOutPerSecond = 3.0f;
+constexpr float kFlashDecayPerSecond = 4.0f;
 
 const GfxService* s_gfx = nullptr;
 const ResourceService* s_res = nullptr;
@@ -35,6 +36,8 @@ WGPUSampler s_sampler = nullptr;
 
 double s_lastFrameSeconds = -1.0;
 float s_level = 0.0f;
+float s_flash = 0.0f;
+bool s_wasRushing = false;
 
 struct VignetteUniforms {
     float params[4];
@@ -66,7 +69,14 @@ float effect_level_now() {
     }
     s_lastFrameSeconds = now;
 
-    const float target = flurry_rush_is_rush_active() && gameplay_active() ? 1.0f : 0.0f;
+    const bool rushing = flurry_rush_is_rush_active() && gameplay_active();
+    if (rushing && !s_wasRushing) {
+        s_flash = 1.0f;
+    }
+    s_wasRushing = rushing;
+    s_flash = std::max(0.0f, s_flash - dt * kFlashDecayPerSecond);
+
+    const float target = rushing ? 1.0f : 0.0f;
     const float speed = target > s_level ? kEaseInPerSecond : kEaseOutPerSecond;
     s_level += (target - s_level) * std::min(dt * speed, 1.0f);
     return std::clamp(s_level, 0.0f, 1.0f);
@@ -137,6 +147,8 @@ void on_stage_frame(ModContext*, const GfxStageContext*, void*) {
     VignetteUniforms uniforms{};
     uniforms.params[0] = level;
     uniforms.params[1] = 1.0f + level * kZoomAmount;
+    uniforms.params[2] = static_cast<float>(std::fmod(now_seconds(), 1000.0));
+    uniforms.params[3] = s_flash;
 
     GfxRange uniformRange{0, 0};
     if (s_gfx->push_uniform(s_ctx, &uniforms, sizeof(uniforms), &uniformRange) != MOD_OK) {
@@ -300,4 +312,6 @@ void shutdown_flurry_vignette() {
     s_ctx = nullptr;
     s_lastFrameSeconds = -1.0;
     s_level = 0.0f;
+    s_flash = 0.0f;
+    s_wasRushing = false;
 }

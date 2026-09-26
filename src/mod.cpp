@@ -1616,11 +1616,6 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "is on, your bottles (and their contents) are hidden from the wheel as well. "
         "Disabling Quick Access restores them.</p>",
         is_quick_access_sub_disabled);
-    if (controls_binding_blocked(CTRL_BIND_QUICK_ACCESS)) {
-        svc_ui->pane_add_rml(mod_ctx, left,
-            "<span style=\"color: #a8bcd4;\">Twilight HD uses this D-Pad direction. Choose "
-            "another Quick Access button in the Controls tab.</span>", nullptr);
-    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
     ui_add_toggle(left, "Bottle quick access", s_varBottlesQuickAccess,
@@ -1694,10 +1689,10 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_toggle(left, "Enabled", s_varSheathedSpin,
         "<p>Allows performing a spin attack directly while the sword is sheathed.</p>");
 
-#if 0
     svc_ui->pane_add_section(mod_ctx, left, "Flurry Rush");
     ui_add_toggle(left, "Enabled", s_varFlurryRush,
-        "<p>Dodge through an enemy attack with perfect timing to slow down time and land extra hits.</p>");
+        "<p>Dodge an enemy attack with perfect timing (side hop or back flip) to slow down "
+        "time and land a rapid flurry of hits, like in Breath of the Wild.</p>");
     if (s_varFlurryRushPerfectFrames != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
@@ -1751,7 +1746,6 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = "s";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
-#endif
 
     svc_ui->pane_add_section(mod_ctx, left, "Puppet Zelda");
     ui_add_toggle(left, "Enabled", s_varPuppetZeldaPattern,
@@ -1875,8 +1869,8 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     if (twilight_hd_dpad_shortcuts()) {
         svc_ui->pane_add_rml(mod_ctx, left,
             "<span style=\"color: #a8bcd4;\">Twilight HD's D-Pad Shortcuts use the D-Pad. "
-            "Bindings on a D-Pad direction are ignored; pick another button or turn off "
-            "Twilight HD's \"D-Pad Shortcuts\" setting.</span>", nullptr);
+            "A binding on a D-Pad direction takes priority over Twilight HD's shortcut on "
+            "that direction.</span>", nullptr);
     }
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");

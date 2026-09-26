@@ -194,6 +194,7 @@ struct PaneRenderState {
     u8 alpha;
     bool visible;
 };
+constexpr u64 kTwilightHdMidnaBadgeTag = MULTI_CHAR('hd_mbtn');
 std::array<PaneRenderState, 32> s_forcedMidnaPanes{};
 size_t s_forcedMidnaPaneCount = 0;
 
@@ -542,11 +543,28 @@ void after_pad_read_midna_touch(ModContext*, void*, void*, void*) {
     s_midnaTouchPressed = false;
 }
 
-void force_pane_tree_visible(J2DPane* pane) {
+bool remember_midna_pane(J2DPane* pane) {
     if (pane == nullptr || s_forcedMidnaPaneCount >= s_forcedMidnaPanes.size()) {
-        return;
+        return false;
     }
     s_forcedMidnaPanes[s_forcedMidnaPaneCount++] = {pane, pane->getAlpha(), pane->isVisible()};
+    return true;
+}
+
+void hide_pane_for_capture(J2DPane* pane) {
+    if (pane != nullptr && pane->isVisible() && remember_midna_pane(pane)) {
+        pane->hide();
+    }
+}
+
+void force_pane_tree_visible(J2DPane* pane) {
+    if (pane != nullptr && pane->mInfoTag == kTwilightHdMidnaBadgeTag) {
+        hide_pane_for_capture(pane);
+        return;
+    }
+    if (!remember_midna_pane(pane)) {
+        return;
+    }
     pane->show();
     pane->setAlpha(255);
     for (J2DPane* child = pane->getFirstChildPane(); child != nullptr;
@@ -564,8 +582,13 @@ HookAction before_midona_alpha(ModContext*, void* args, void*, void*) {
     J2DPane* midona = (draw != nullptr && draw->mpButtonMidona != nullptr)
                           ? draw->mpButtonMidona->getPanePtr()
                           : nullptr;
-    if (midona != nullptr && !midona->isVisible()) {
+    if (midona == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    if (!midona->isVisible()) {
         force_pane_tree_visible(midona);
+    } else {
+        hide_pane_for_capture(midona->search(kTwilightHdMidnaBadgeTag));
     }
     return HOOK_CONTINUE;
 }
