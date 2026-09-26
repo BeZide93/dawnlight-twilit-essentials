@@ -369,9 +369,7 @@ void check_iron_boots_unequip_on_overwrite() {
 
         if (!assigned) {
             if (!dComIfGp_checkPlayerStatus1(0, 0x10000) || !link->checkHookshotRoofLv7Boss()) {
-                // Grounded: use the animated equip toggle so the boots come off
-                // like in the vanilla menu (the instant flag variant snaps Link
-                // upward). Airborne: instant, matching ITEM_PROC_SET_HVYBOOTS.
+
                 if (link->mLinkAcch.ChkGroundHit() && !link->checkBoardRide() &&
                     !link->checkEventRun() && !link->checkMetamorphose() &&
                     link->mProcID != daAlink_c::daAlink_PROC::PROC_BOOTS_EQUIP)

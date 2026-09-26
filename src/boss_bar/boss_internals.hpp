@@ -533,7 +533,7 @@ inline void ganondorf_force_ground_duel(fopAc_ac_c* a) {
     g->field_0x772  = 0;
     g->field_0xc44[0] = 200;
     if (g->mpModelMorf != nullptr) {
-        void* bck = dComIfG_getObjectRes("B_gnd", 0x5D /* B_GND_BCK_EGND_WALK */);
+        void* bck = dComIfG_getObjectRes("B_gnd", 0x5D );
         if (bck != nullptr) {
             g->mAnmID = 0x5D;
             g->mpModelMorf->setAnm(reinterpret_cast<J3DAnmTransform*>(bck), 2, 0.0f, 1.0f, 0.0f, -1.0f);

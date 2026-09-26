@@ -87,7 +87,7 @@ void stop_master_sword_emitter(u32& handle) {
     handle = 0;
 }
 
-}  // namespace
+}
 
 void update_boss_rush_master_sword_effects() {
     if (s_masterSwordModel == nullptr || !is_in_boss_rush_chamber()) {

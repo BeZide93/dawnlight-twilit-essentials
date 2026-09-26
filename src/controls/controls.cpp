@@ -69,18 +69,12 @@ u32 controls_binding_bit(int b) {
     }
 }
 
-/* Stick clicks are reported by the engine in PADStatus::extButton and never reach the game's
- * button masks (mButtonFlags / mPressedButtonFlags), so they are polled separately. */
 static u32 controls_ext_button_bit(int button) {
     if (button == CTRL_BTN_L3) return PAD_BUTTON_LEFT_STICK;
     if (button == CTRL_BTN_R3) return PAD_BUTTON_RIGHT_STICK;
     return 0;
 }
 
-/* L2/R2 are the analog trigger axes, read from the raw trigger values (0-255) instead of the
- * PAD_TRIGGER_L/R bits, so they stay bound to the physical triggers even when those bits are
- * digitally remapped in the controller settings. The pull threshold mirrors the trigger
- * activation zone configured per controller (full pull when unavailable, e.g. on keyboard). */
 static bool controls_trigger_held(bool left) {
     JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
     if (gamePad == nullptr) {
@@ -94,9 +88,6 @@ static bool controls_trigger_held(bool left) {
     return raw * 32767 > zone * 255;
 }
 
-/* Per-frame snapshot of the ext buttons, refreshed right after each pad read so
- * controls_binding_pressed() can report a rising edge for them. held-state queries do not
- * rely on it: PADStatus::extButton is refilled by every PADRead, so it is read directly. */
 DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
 
 static u32 s_extHeldPrev = 0;

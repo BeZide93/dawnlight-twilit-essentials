@@ -182,7 +182,7 @@ void on_collect3d_move_post(ModContext*, void* args, void*, void*) {
     s_maskScaleWritten = smaller;
 }
 
-}  // namespace
+}
 
 void hd_place(J2DPane* pane, f32 x, f32 y, f32 w, f32 h) {
     if (pane == nullptr || pane->getWidth() <= 0.0f || pane->getHeight() <= 0.0f) return;

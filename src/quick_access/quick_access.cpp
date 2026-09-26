@@ -665,10 +665,7 @@ static bool load_icon_entry(QaIconEntry& entry) {
     }
     if (entry.hasSecond && entry.pic2 != nullptr) {
         g_meter2_info.setItemColor(entry.itemNo, entry.pic, entry.pic2, nullptr, nullptr);
-        /* Bottle-content icons (pou fire, fairy, bee child, worm) load the
-           content overlay as the first texture and the bottle glass as the
-           second. The game modulates that overlay with the 2nd color, not
-           the 1st that setItemColor applies (dMeter2_ItemType 27..30). */
+
         const u8 itemType = g_meter2_info.getItemType(entry.itemNo);
         if (itemType >= 27 && itemType <= 30) {
             g_meter2_info.set2ndColor(itemType, entry.pic);
@@ -1043,8 +1040,6 @@ static void qa_tick_pending_ooccoo() {
     }
 }
 
-// Using a quick access item other than the lantern snuffs a burning lantern for
-// real (clear FLG2_UNK_1), so it does not come back lit when switching back to it.
 static void qa_extinguish_lantern_for_item() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     if (link == nullptr || link->checkWolf()) {

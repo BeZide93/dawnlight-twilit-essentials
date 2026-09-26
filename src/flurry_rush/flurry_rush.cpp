@@ -32,18 +32,15 @@ constexpr f32 kFlurryApproachRange = 120.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
 constexpr int kMinWindowTicks = 90;
-// A swing counts as landing on the rush target when it is this close.
+
 constexpr f32 kFlurryReachXZ = 260.0f;
 constexpr f32 kFlurryReachY = 200.0f;
-// Frames to wait for the enemy's own damage handling (cc_at_check) before a
-// swing without a real hit gets its bonus hit.
+
 constexpr int kBonusDelayTicks = 2;
-// A swing's own real hit arrives about one tick after it starts; long swings
-// (finish/spin) are resolved after this many ticks instead of waiting for the
-// next action.
+
 constexpr int kSwingResolveTicks = 4;
 constexpr int kMaxAtp = 8;
-// No flurry rush when the locked-on enemy is farther away than this.
+
 constexpr f32 kMaxRushDistance = 300.0f;
 constexpr u32 kDefaultHitMapInfo = 30;
 
@@ -70,10 +67,6 @@ bool s_hookSvcSet = false;
 bool s_hooksInstalled = false;
 const LogService* s_log = nullptr;
 
-// Enemies ignore hits for a few of their own frames after taking damage (e.g.
-// Bokoblin damage_timer = 6). In slow motion that window spans several of
-// Link's sped-up swings, so most swings of a flurry never register. Swings
-// that end without a real hit on the target deal their damage directly.
 int s_swingCount = 0;
 int s_contactCount = 0;
 int s_realHitCount = 0;
@@ -82,12 +75,9 @@ bool s_swingOpen = false;
 bool s_swingLanded = false;
 int s_swingAtp = 0;
 int s_swingTicks = 0;
-// Damage the target actually took from a real hit, per collider atp, so bonus
-// hits deal exactly what the enemy's own damage handling would.
+
 int s_observedPower[kMaxAtp] = {};
-// Bonus hits only land on an enemy that took a real sword hit in this rush,
-// which proves it uses the normal cc_at_check damage path; they replay that
-// hit's collision sound.
+
 bool s_targetProven = false;
 Z2Creature* s_hitSound = nullptr;
 u32 s_hitSeId = 0;
@@ -294,17 +284,11 @@ DEFINE_HOOK(&daAlink_c::checkDamageAction, FlurryRushDamageActionHook);
 DEFINE_HOOK(&daAlink_c::execute, FlurryRushExecuteHook);
 DEFINE_HOOK(&cc_at_check, FlurryRushAtCheckHook);
 
-// Every sword hit sets a 2-5 frame hit-stop (dScnPly_c pause timer, see
-// cc_at_check). At flurry speed that freezes the whole scene between hits, and
-// in slow motion a 5 frame stop lasts half a second.
 void clear_hit_stop() {
     dScnPly_c::nextPauseTimer = 0;
     dScnPly_c::pauseTimer = 0;
 }
 
-// The post-cut stop time (daAlink cut procs count field_0x3008 down after the
-// animation ends before the next action is allowed) is dropped so cuts chain
-// back to back.
 void clear_cut_recovery(daAlink_c* link) {
     if (is_attack_proc(static_cast<u16>(link->mProcID)) && link->mProcVar0.field_0x3008 > 0) {
         link->mProcVar0.field_0x3008 = 0;
@@ -316,9 +300,6 @@ fopAc_ac_c* rush_target(daAlink_c* link) {
     return link != nullptr ? link->mTargetedActor : nullptr;
 }
 
-// The collider atp is not the damage: at_power_get maps it (2 -> 10, 3 -> 30,
-// 6 -> 80, 4+ -> 200) and cc_at_check applies the sword multiplier. A real hit
-// seen earlier in this rush wins over the table.
 int sword_hit_power(daAlink_c* link, int atp) {
     if (atp >= 0 && atp < kMaxAtp && s_observedPower[atp] > 0) return s_observedPower[atp];
     int power = atp <= 1 ? 1 : atp == 2 ? 10 : atp == 3 ? 30 : atp == 6 ? 80 : 200;
@@ -348,8 +329,6 @@ void apply_bonus_hit(int atp) {
 
     int damage = sword_hit_power(link, atp);
 
-    // Never kill with a bonus hit: the enemy's own damage handling runs the
-    // death, so the next real hit finishes it.
     const s16 before = target->health;
     const int after = before - damage < 1 ? 1 : before - damage;
     target->health = static_cast<s16>(after);
@@ -494,7 +473,7 @@ static void on_at_check_post(ModContext*, void* args, void*, void*) {
                 static_cast<dCcD_GObjInf*>(info->mpCollider)->GetAtSe(), 0);
             s_hitMapInfo = info->field_0x18 != 0 ? info->field_0x18 : kDefaultHitMapInfo;
         }
-        // A real hit settles the oldest swing still waiting for its bonus first.
+
         if (s_pendingBonus > 0) {
             --s_pendingBonus;
             credited = "earlier swing";
@@ -591,9 +570,6 @@ bool flurry_rush_is_rush_active() {
 void flurry_rush_apply_enabled() {
     if (!s_hookSvcSet) return;
 
-    // Hooks stay installed once added and check the setting themselves:
-    // uninstalling detaches every hook this mod has on the same targets
-    // (daAlink_c::execute is shared with Quick Access and Boss Rush).
     if (g_configFlurryRushEnabled && s_setSimRate != nullptr) {
         install_hooks();
     } else {
@@ -606,8 +582,7 @@ ModResult init_flurry_rush(const HookService* hook_svc, const LogService* log_sv
     s_log = log_svc;
     s_hookSvc = hook_svc;
     s_hookSvcSet = true;
-    // Registered once and never uninstalled: uninstall detaches every hook this
-    // mod has on cc_at_check (Boss Rush uses it too). It only acts during a rush.
+
     mods::hook::add_post<FlurryRushAtCheckHook>(hook_svc, on_at_check_post);
 
     if (hook_svc->resolve(mod_ctx, "dusk::game_clock::set_sim_rate",

@@ -129,7 +129,6 @@ static constexpr f32 kStaminaScaleMinHearts = 3.0f;
 static constexpr f32 kStaminaScaleMaxHearts = 20.0f;
 static constexpr f32 kStaminaScaleBaseValue = 100.0f;
 
-// Share of the normal refill rate granted while hanging at rest.
 static constexpr f32 kHangRestRegenFactor = 0.15f;
 
 static f32 stamina_scaled_max_for_hearts() {
@@ -284,9 +283,6 @@ static void tired_check_post(ModContext*, void* args, void* retval, void*) {
     }
 }
 
-// Out of stamina: let go of ledges and ivy. This replicates the game's own
-// drop-input branch of changeHangEndProc (hangs), procHangWallCatch and
-// checkLadderFall (climb walls / ivy), so the release looks vanilla.
 static HookAction hang_drop_pre(ModContext*, void* args, void* retval, void*) {
     if (!g_configStaminaEnabled || !g_configStaminaSrcHang) return HOOK_CONTINUE;
     if (!in_gameplay() || !empty()) return HOOK_CONTINUE;
@@ -310,11 +306,6 @@ static void deny() {
     }
 }
 
-// A hidden skill move is made up of rolls, jumps and swings that each carry
-// their own charge. To keep the whole move at its single hidden-skill price,
-// recently spent stamina is refunded when the move starts and all other
-// charges are suppressed while the move runs. The lock is short - it only
-// bridges transitions - and stays alive through the hidden skill procs.
 static f32 s_otherSpend = 0.0f;
 
 static int  s_hiddenSkillLock = 0;
@@ -322,7 +313,6 @@ static int  s_hiddenSkillLock = 0;
 static constexpr int kHiddenSkillLockFrames = 20;
 static constexpr f32 kRecentSpendDecay       = 0.25f;
 
-// The game runs at 30 fps; the refill delay is configured in whole seconds.
 static int regen_delay_frames() {
     int frames = g_configStaminaRegenDelay * 30;
     return frames < 0 ? 0 : frames;
@@ -382,9 +372,7 @@ static HookAction action_cost_pre(ModContext*, void*, void* retval, void* userda
     const int cat = static_cast<int>(packed >> 16);
     if (!stam_cat_enabled(cat)) return HOOK_CONTINUE;
     if (cat == STAM_HIDDENSKILLS) {
-        // A proc init marks the start of a new move, so it always charges - the
-        // lock must never suppress it (spamming re-enters the same proc while
-        // the previous move's lock is still alive).
+
         if (empty()) {
             if (retval) *static_cast<int*>(retval) = 0;
             deny();
@@ -404,8 +392,6 @@ static HookAction action_cost_pre(ModContext*, void*, void* retval, void* userda
     return HOOK_CONTINUE;
 }
 
-// daAlink_CutFinishParamType from d_a_alink_cut.inc; Mortal Draw is the
-// procCutFinishInit variant of the hidden skills.
 static constexpr int kCutFinishMortalDrawA = 3;
 static constexpr int kCutFinishMortalDrawB = 4;
 
@@ -479,7 +465,6 @@ static bool is_hidden_skill_proc_state(daAlink_c* link) {
     }
 }
 
-// Static rest states while clinging to ivy or a ledge - no movement, no drain.
 static bool is_hang_rest_proc(daAlink_c* link) {
     if (!link) return false;
     switch (link->mProcID) {
@@ -528,8 +513,6 @@ void update_stamina(const LogService*, ModContext*) {
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
 
-    // Keep the charge lock alive while a hidden skill move is still running,
-    // so its follow-up swings and landings stay free.
     if (s_hiddenSkillLock > 0 && link != nullptr && is_hidden_skill_proc_state(link)) {
         s_hiddenSkillLock = kHiddenSkillLockFrames;
     }

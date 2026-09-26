@@ -123,7 +123,6 @@ static mods::flow::Event s_bossRushLeaveMidnaEvent;
 static mods::flow::Event s_bossRushRetryMidnaEvent;
 static mods::flow::Graph s_bossRushMidnaFlowGraph;
 
-
 static uint16_t read_be16(const uint8_t* bytes) {
     return mods::read_bits<uint16_t>(bytes);
 }
@@ -911,9 +910,7 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
 
     bool triggered = link->midnaTalkTrigger() || (g_configCustomZButtonEnabled && g_dpadLeftTrig);
-    // The z-button mod captures dpad-left only while no menu/event state is
-    // up; while those states are active the raw button stays untouched in the
-    // pad info, so read it here to keep the call working in every state.
+
     if (g_configCustomZButtonEnabled) {
         triggered = triggered ||
             (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
@@ -991,12 +988,7 @@ void update_boss_rush_midna(const LogService*, ModContext*) {
     }
 
     if (is_in_boss_rush_chamber()) {
-        // A fresh boss-rush save keeps the Midna availability bits unset
-        // (M_067 riding bit, 0x0540 back-ride bit) with F_0800 "Midna can't
-        // be called" set. The engine then fades the HUD Midna icon out while
-        // the z-button HUD keeps re-showing it, which flickers per frame.
-        // Hold the bits while waiting in the chamber, like the Ganon fight
-        // workaround does.
+
         dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
         dComIfGs_onEventBit(dSv_event_flag_c::M_067);
         dComIfGs_onEventBit(0x0540);
@@ -1004,7 +996,6 @@ void update_boss_rush_midna(const LogService*, ModContext*) {
 
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
 }
-
 
 ModResult init_boss_rush_midna(const HookService* hook_svc, const LogService*, ModContext*) {
     shutdown_boss_rush_midna();

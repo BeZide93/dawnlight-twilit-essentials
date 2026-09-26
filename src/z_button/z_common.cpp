@@ -37,7 +37,6 @@ bool g_zHasSecondLayer = false;
 J2DPicture* g_drawDigitPic[3] = { nullptr, nullptr, nullptr };
 dKantera_icon_c* g_zKanteraIcon = nullptr;
 
-
 void ensure_z_buffers() {
     g_zTexBufMain[0] = s_staticTexBufMain[0];
     g_zTexBufMain[1] = s_staticTexBufMain[1];

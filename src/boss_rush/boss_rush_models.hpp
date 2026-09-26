@@ -8,5 +8,4 @@ void draw_boss_rush_models(float floorY);
 
 void unload_boss_rush_models();
 
-
 bool boss_rush_get_ganondorf_cape_anchors(cXyz& outA, cXyz& outB);

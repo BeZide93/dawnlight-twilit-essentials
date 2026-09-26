@@ -16,9 +16,7 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     if (!hook_svc) return MOD_ERROR;
     init_skip_cutscenes(hook_svc, error);
 #if 1
-    /* Disabled for Dusklight 2.0: timescale-based fast forward no longer behaves correctly
-     * (game clock runs the simulation independently of the aurora timescale the mod sets).
-     * Re-enable together with the UI toggle in mod.cpp. */
+
     init_fast_forward_cutscenes(hook_svc, error);
 #endif
     init_dominion_sword(hook_svc, error);
@@ -33,22 +31,15 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     return MOD_OK;
 }
 
-/* M_031 (Goron Mines clear) without M_052 (Horseback battle clear) is a state
- * vanilla cannot produce: the King Bulblin joust fires on the Kakariko <-> Castle
- * Town road before the mines are reachable, and its ending cutscene cannot be
- * skipped (dEv_noFinishSkipProc returns 0 and d_a_e_wb never polls the skip
- * edge, so the flag is always set at demo_timer 90). Saves in that broken state
- * leave Barnes in his "making bombs" phase forever and the bomb shop never
- * opens, so repair the flag on sight. */
 static void repair_horseback_battle_flag(const LogService* log_svc, ModContext* mod_ctx) {
     const char* stage = dComIfGp_getStartStageName();
     if (stage == nullptr || std::strcmp(stage, "title") == 0 ||
         std::strcmp(stage, "F_SP102") == 0) {
-        return;  // Title / file select: no gameplay save to repair.
+        return;
     }
 
     if (is_boss_rush_active()) {
-        return;  // Boss rush sessions manage the save themselves and restore it from card on exit.
+        return;
     }
 
     if (!dComIfGs_isEventBit(dSv_event_flag_c::M_031) ||

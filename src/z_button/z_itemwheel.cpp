@@ -37,11 +37,6 @@ u8 get_ring_slot_for_item(dMenu_Ring_c* ring, u8 slotOrItem) {
     return 0xFF;
 }
 
-// Set by on_set_mix_item_pre when a combine/uncombine actually happened. Reset
-// every frame in on_set_active_cursor_pre. The Z-press path uses it to back off
-// when the engine's R handler already processed this frame (e.g. R1 bound to
-// both GC R and GC Z) - handling the Z press on top would instantly undo the
-// combine the R handler just performed.
 static bool s_engineMixItemActed = false;
 
 void trigger_ring_item_slide_z(dMenu_Ring_c* ring, u8 itemNo) {
@@ -74,14 +69,12 @@ static bool z_press_should_combine(dMenu_Ring_c* ring, u8 hoveredItem) {
         return false;
     }
 
-    // Bow sits directly on the Z slot: combine with it instead of overwriting it.
     if (g_zInventorySlot != 0xFF && g_zInventorySlot < 24 &&
         dComIfGs_getItem(g_zInventorySlot, false) == dItemNo_BOW_e)
     {
         return true;
     }
 
-    // Bomb/hawk arrows are already mixed on the Z slot: pressing again uncombines.
     if (ring != nullptr && g_zMixSlot == SLOT_4 &&
         ring->mItemSlots[ring->mCurrentSlot] == dComIfGs_getSelectItemIndex(2))
     {
@@ -523,7 +516,6 @@ HookAction on_set_select_item_index_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-
 HookAction on_set_mix_item_pre(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !args) {
         return HOOK_CONTINUE;
@@ -818,7 +810,6 @@ HookAction on_check_explain_force_pre(ModContext*, void* args, void* retval, voi
     *reinterpret_cast<bool*>(retval) = (ring->field_0x6c7[0] != 0xFF || ring->field_0x6c7[1] != 0xFF || ring->field_0x6c7[2] != 0xFF);
     return HOOK_SKIP_ORIGINAL;
 }
-
 
 void on_check_status_post(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || !args || isTitleOrMainMenu()) {

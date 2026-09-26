@@ -164,7 +164,7 @@ static void draw_debug_coords_overlay() {
 }
 
 static void on_debug_coords_draw_post(ModContext*, void*, void*, void*) {
-    //draw_debug_coords_overlay();
+
 }
 
 static bool s_titleModActive = true;
@@ -944,7 +944,6 @@ static void on_general_scene_transitions_changed(ModContext*, ConfigVarHandle, c
     }
 }
 
-
 static void on_boss_bar_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossBarEnabled = value->bool_value;
@@ -1527,8 +1526,7 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p><b>Fast</b> speeds up room, door and map transitions. "
         "<b>Vanilla</b> keeps the normal speed.</p>",
         kSceneTransitionModes, 2);
-    /*ui_add_toggle(left, "Two-handed sword carry (test)", s_varGeneralDominionSword,
-        "<p>Link holds his drawn sword with both hands.</p>");*/
+
     ui_add_toggle(left, "Horse camera: no auto-recenter", s_varHorseCamNoRecenter,
         "<p>On Epona, the camera stays where you point it with the C-Stick.</p>");
     ui_add_toggle(left, "No letterbox while lock-on", s_varGeneralLockonLetterbox,
@@ -1963,9 +1961,9 @@ extern "C" __declspec(dllimport) void* __stdcall ShellExecuteA(void* hwnd, const
 
 static void on_open_discord_channel(ModContext*, void*) {
 #ifdef _WIN32
-    ShellExecuteA(nullptr, "open", kDiscordChannelUrl, nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+    ShellExecuteA(nullptr, "open", kDiscordChannelUrl, nullptr, nullptr, 1 );
 #else
-    // Opening external URLs is only wired up for Windows builds.
+
 #endif
 }
 
@@ -1979,9 +1977,6 @@ struct Entry {
     std::vector<std::string> descriptionLines;
 };
 
-// Reads a single JSON string literal starting at `pos` (which must point at the
-// opening quote) and unescapes it. Returns the index just past the closing
-// quote, or npos on failure.
 static size_t read_json_string(std::string_view text, size_t pos, std::string* out) {
     if (pos >= text.size() || text[pos] != '"') return std::string_view::npos;
     ++pos;
@@ -2006,7 +2001,6 @@ static size_t read_json_string(std::string_view text, size_t pos, std::string* o
     return std::string_view::npos;
 }
 
-// Finds `"key": "value"` inside a JSON object substring and unescapes the string value.
 static bool extract_string_field(std::string_view object, std::string_view key, std::string* out) {
     const std::string needle = "\"" + std::string(key) + "\"";
     size_t pos = object.find(needle);
@@ -2018,9 +2012,6 @@ static bool extract_string_field(std::string_view object, std::string_view key, 
     return read_json_string(object, pos, out) != std::string_view::npos;
 }
 
-// Reads `"description"`, accepting either a plain string (one line) or an
-// array of strings (one paragraph per element), matching the website's
-// KnownIssue.description: string | string[].
 static bool extract_description_field(std::string_view object, std::vector<std::string>* out) {
     const std::string needle = "\"description\"";
     size_t pos = object.find(needle);
@@ -2056,7 +2047,6 @@ static bool extract_description_field(std::string_view object, std::vector<std::
     return !out->empty();
 }
 
-// Splits the top-level `{...}` objects out of a JSON array body.
 static std::vector<std::string_view> split_objects(std::string_view array) {
     std::vector<std::string_view> result;
     int depth = 0;
@@ -2195,7 +2185,7 @@ static void fetch() {
     pending.detach();
 }
 
-}  // namespace known_issues
+}
 
 static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     if (!svc_ui) return MOD_OK;
@@ -2378,7 +2368,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             g_configFasterTransitions = mode == 0;
             svc_config->subscribe(mod_ctx, s_varGeneralSceneTransitions, on_general_scene_transitions_changed, nullptr, nullptr);
         }
-
 
         ConfigVarDesc descHp = CONFIG_VAR_DESC_INIT;
         descHp.name = "hpBarsEnabled";
@@ -2958,7 +2947,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_epona_config(svc_config, mod_ctx);
     }
 
-
     if (svc_ui) {
         UiModsPanelDesc panelDesc = UI_MODS_PANEL_DESC_INIT;
         panelDesc.build = build_mod_ui_panel;
@@ -2993,7 +2981,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_flurry_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
-    //init_free_camera_toggle(svc_hook);
+
     s_hpBarsInitialized = init_hp_bars(svc_hook, error) == MOD_OK;
     log_init_result("hp_bars", s_hpBarsInitialized);
     s_bossBarInitialized = init_boss_bar(svc_hook, error) == MOD_OK;

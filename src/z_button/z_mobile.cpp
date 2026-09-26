@@ -192,9 +192,11 @@ EditorDrag s_editorDrag;
 struct PaneRenderState {
     J2DPane* pane;
     u8 alpha;
+    u8 colorAlpha;
     bool visible;
 };
 constexpr u64 kTwilightHdMidnaBadgeTag = MULTI_CHAR('hd_mbtn');
+constexpr u64 kMidnaGlowTag = MULTI_CHAR('j_light1');
 std::array<PaneRenderState, 32> s_forcedMidnaPanes{};
 size_t s_forcedMidnaPaneCount = 0;
 
@@ -381,7 +383,9 @@ void set_midna_button_shown(bool shown) {
 
 std::string midna_button_rml(const std::string& source) {
     return source.empty() ? "<span style=\"font-size:16dp;\">Midna</span>"
-                          : "<img class=\"midna-icon visible\" src=\"" + source + "\" />";
+                          : "<img class=\"midna-icon visible\" style=\"left:50%;top:50%;width:40dp;"
+                            "height:40dp;margin-left:-20dp;margin-top:-20dp;\" src=\"" +
+                                source + "\" />";
 }
 
 bool touch_document_size(float& w, float& h) {
@@ -547,7 +551,8 @@ bool remember_midna_pane(J2DPane* pane) {
     if (pane == nullptr || s_forcedMidnaPaneCount >= s_forcedMidnaPanes.size()) {
         return false;
     }
-    s_forcedMidnaPanes[s_forcedMidnaPaneCount++] = {pane, pane->getAlpha(), pane->isVisible()};
+    s_forcedMidnaPanes[s_forcedMidnaPaneCount++] = {pane, pane->getAlpha(), pane->mColorAlpha,
+                                                    pane->isVisible()};
     return true;
 }
 
@@ -557,38 +562,35 @@ void hide_pane_for_capture(J2DPane* pane) {
     }
 }
 
-void force_pane_tree_visible(J2DPane* pane) {
-    if (pane != nullptr && pane->mInfoTag == kTwilightHdMidnaBadgeTag) {
+void force_pane_tree_visible(J2DPane* pane, bool showHidden) {
+    if (pane != nullptr &&
+        (pane->mInfoTag == kTwilightHdMidnaBadgeTag || pane->mInfoTag == kMidnaGlowTag)) {
         hide_pane_for_capture(pane);
         return;
     }
-    if (!remember_midna_pane(pane)) {
+    if (pane == nullptr || (!showHidden && !pane->isVisible()) || !remember_midna_pane(pane)) {
         return;
     }
     pane->show();
     pane->setAlpha(255);
+    pane->mColorAlpha = 255;
     for (J2DPane* child = pane->getFirstChildPane(); child != nullptr;
          child = child->getNextChildPane()) {
-        force_pane_tree_visible(child);
+        force_pane_tree_visible(child, showHidden);
     }
 }
 
 HookAction before_midona_alpha(ModContext*, void* args, void*, void*) {
     s_forcedMidnaPaneCount = 0;
-    if (!s_touchZShown || !twilight_hd_touch_z() || !midna_callable() || args == nullptr) {
+    if (!s_touchZShown || !touch_z_item_mode() || !midna_callable() || args == nullptr) {
         return HOOK_CONTINUE;
     }
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
     J2DPane* midona = (draw != nullptr && draw->mpButtonMidona != nullptr)
                           ? draw->mpButtonMidona->getPanePtr()
                           : nullptr;
-    if (midona == nullptr) {
-        return HOOK_CONTINUE;
-    }
-    if (!midona->isVisible()) {
-        force_pane_tree_visible(midona);
-    } else {
-        hide_pane_for_capture(midona->search(kTwilightHdMidnaBadgeTag));
+    if (midona != nullptr) {
+        force_pane_tree_visible(midona, !midona->isVisible());
     }
     return HOOK_CONTINUE;
 }
@@ -597,6 +599,7 @@ void after_midona_alpha(ModContext*, void*, void*, void*) {
     while (s_forcedMidnaPaneCount > 0) {
         const PaneRenderState& state = s_forcedMidnaPanes[--s_forcedMidnaPaneCount];
         state.pane->setAlpha(state.alpha);
+        state.pane->mColorAlpha = state.colorAlpha;
         if (state.visible) {
             state.pane->show();
         } else {

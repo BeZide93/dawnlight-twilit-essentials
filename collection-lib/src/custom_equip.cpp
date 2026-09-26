@@ -54,7 +54,7 @@ constexpr int kMaxDefs = 32;
 struct Entry {
     CustomEquipDef def;
 
-    ResTIMG*       iconTex = nullptr;   // owned by the icon cache (collection_common.cpp)
+    ResTIMG*       iconTex = nullptr;
 
     ResourceBuffer arcBuf  = RESOURCE_BUFFER_INIT;
     JKRArchive*    arc     = nullptr;
@@ -884,7 +884,6 @@ HookAction on_set_water_drop_color_pre(ModContext*, void* args, void*, void*) {
 
 static void retarget_face_material_anims(daAlink_c* a);
 
-// Hide the body's boots while the Iron Boots are on (what changeLink() does for a new body).
 static void apply_heavy_boots_to_feet(daAlink_c* a) {
     if (a->field_0x06e0 == nullptr) return;
     if (a->checkEquipHeavyBoots()) {
@@ -895,7 +894,6 @@ static void apply_heavy_boots_to_feet(daAlink_c* a) {
     }
 }
 
-// Put Link's vanilla body, hat, face and hands back after a custom tunic swap.
 static void restore_original_link_models(daAlink_c* a) {
     a->mpLinkModel     = s_originalLinkModel;
     a->mpLinkHatModel  = s_originalHatModel;
@@ -910,7 +908,7 @@ static void restore_original_link_models(daAlink_c* a) {
     a->field_0x06ec    = s_origShape_06ec;
     a->field_0x06f0    = s_origShape_06f0;
     a->field_0x06e4    = s_origShape_06e4;
-    // The Iron Boots may have been put on while the custom body was worn.
+
     apply_heavy_boots_to_feet(a);
 
     a->mpLinkModel->setUserArea((uintptr_t)a);
@@ -944,7 +942,6 @@ static void save_custom_equip_state(CustomEquipKind kind, u8 item) {
         return;
     }
 
-    // Without the save service: spare bytes of the vanilla player status.
     if (!is_title_or_menu()) {
         dSv_player_status_a_c& st = g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA();
         if (kind == CE_SHIELD) {
@@ -984,7 +981,6 @@ static int find_entry(CustomEquipKind kind, u8 item) {
     return -1;
 }
 
-// Best vanilla item of a kind the player owns (backing for a custom item without base).
 static u8 best_owned(CustomEquipKind kind) {
     if (kind == CE_SWORD) {
         if (dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e)) return dItemNo_LIGHT_SWORD_e;
@@ -1027,8 +1023,6 @@ void custom_equip_restore_from_save() {
     }
 }
 
-// Unequip a slot and get its models off Link right away (not next frame), so its archive
-// can be freed.
 static void detach_entry(int id) {
     const CustomEquipKind kind = s_entries[id].def.kind;
     if (s_activeId[kind] != id) return;
@@ -1070,8 +1064,6 @@ void custom_equip_remove(int id) {
     layout_on_custom_removed(id);
 }
 
-// Registration is idempotent per (kind, column): a slot registered again keeps its loaded
-// model, icon and equipped state, so rebuilding the Collection screen costs nothing.
 int custom_equip_upsert(const CustomEquipDef& def) {
     const int existing = find_entry(def.kind, def.item);
     if (existing >= 0) {
@@ -1127,7 +1119,7 @@ static void refresh_sword_model(daAlink_c* pl) {
 }
 
 void custom_equip_activate(int id) {
-    // Slots without a model are their vanilla base item; nothing to activate.
+
     if (id < 0 || id >= s_count || !custom_equip_has_model(id)) return;
     CustomEquipKind kind = s_entries[id].def.kind;
     s_activeId[kind] = id;
@@ -1252,11 +1244,11 @@ static bool is_kind_item(CustomEquipKind kind, u8 item) {
 u8 custom_equip_resolved_base(const CustomEquipDef& def) {
     const u8 base = def.baseItem;
     if (def.kind == CE_TUNIC) {
-        // Clothes need a body to graft onto; the Hero's Clothes are the historic default.
+
         return is_kind_item(CE_TUNIC, base) ? base : static_cast<u8>(dItemNo_WEAR_KOKIRI_e);
     }
     if (!is_kind_item(def.kind, base)) return dItemNo_NONE_e;
-    // Like the native Master Sword cell: once it is the Light Sword, that one.
+
     if (base == dItemNo_MASTER_SWORD_e && dComIfGs_isItemFirstBit(dItemNo_LIGHT_SWORD_e)) {
         return dItemNo_LIGHT_SWORD_e;
     }
@@ -1307,7 +1299,7 @@ bool custom_equip_equipped(int id) {
     const CustomEquipDef* d = custom_equip_get(id);
     if (d == nullptr || s_customEquipSuppressed) return false;
     if (custom_equip_has_model(id)) return s_activeId[d->kind] == id;
-    // A slot without a model is its base item.
+
     const u8 base = custom_equip_resolved_base(*d);
     return s_activeId[d->kind] < 0 && base != dItemNo_NONE_e && current_vanilla(d->kind) == base;
 }
@@ -1319,7 +1311,7 @@ bool custom_equip_toggle(int id) {
     const u8 base = custom_equip_resolved_base(d);
 
     if (custom_equip_equipped(id)) {
-        // Native: A on the worn item does nothing. Clothes can never be taken off.
+
         if (!cl_unequip_enabled() || kind == CE_TUNIC) return false;
         s_equipDebounce = 8;
         if (s_activeId[kind] == id) custom_equip_clear(kind);
@@ -1339,7 +1331,7 @@ bool custom_equip_toggle(int id) {
     }
 
     if (kind != CE_TUNIC) {
-        // The vanilla item underneath first: activation rebuilds the models from it.
+
         u8 underneath = base;
         if (underneath == dItemNo_NONE_e && current_vanilla(kind) == dItemNo_NONE_e) underneath = best_owned(kind);
         if (underneath != dItemNo_NONE_e && underneath != current_vanilla(kind)) {
@@ -1505,7 +1497,6 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     CL_HOOK_PRE(CeCollect3DCreateHook, on_collect_3d_create_pre);
     CL_HOOK_PRE(CeCollect3DDeleteHook, on_collect_3d_delete_pre);
     CL_HOOK_PRE(CeInitStatusWindowHook, on_alink_init_status_window_pre);
-
 
     CL_HOOK_REPLACE(CeWarpModelTexScrollHook, on_warp_model_tex_scroll_replace);
     CL_HOOK_REPLACE(CeChangeWarpMaterialHook, on_change_warp_material_replace);
@@ -1759,11 +1750,6 @@ void custom_equip_update() {
     }
 }
 
-// Link's code shows and hides parts of the body model through shape pointers: the hands
-// (swapped for held items), the boots (under the Iron Boots), belt, earring and the ear (the
-// helmet on the Zora Armor). Which material holds which part differs per body model
-// (changeLink() in d_a_alink_wolf.inc); the material names are shared by Link's models, so
-// a custom body is mapped by name.
 static J3DShape* body_shape(J3DModelData* data, const char* suffix) {
     JUTNameTab* names = data->getMaterialName();
     if (names == nullptr) return nullptr;
@@ -1799,10 +1785,10 @@ static void map_body_shapes(daAlink_c* a, const CustomEquipDef& def) {
         a->field_0x06ec = body_shape(data, "_beltS_m");
         a->field_0x06f0 = ear;
         if (a->field_0x06e4 != nullptr) a->field_0x06e4->hide();
-        // The Hero's Clothes body carries a skirt the game never shows.
+
         if (J3DShape* skirt = body_shape(data, "_skirt_m")) skirt->hide();
     } else if (data->getMaterialNum() > 16) {
-        // Unknown material names: assume the Hero's Clothes layout.
+
         data->getMaterialNodePointer(16)->getShape()->hide();
         a->field_0x06d8 = data->getMaterialNodePointer(11)->getShape();
         a->field_0x06dc = data->getMaterialNodePointer(12)->getShape();
@@ -1814,7 +1800,7 @@ static void map_body_shapes(daAlink_c* a, const CustomEquipDef& def) {
     }
 
     if (!def.ironBootsHideFeet && a->field_0x06e0 != nullptr) {
-        // setHeavyBoots() toggles the boots through this pointer only; without it they stay.
+
         a->field_0x06e0->show();
         a->field_0x06e0 = nullptr;
     }
@@ -2022,7 +2008,7 @@ void custom_equip_shutdown() {
              (e.hatModel  != nullptr && pl->mpLinkHatModel == e.hatModel) ||
              (e.faceModel != nullptr && pl->mpLinkFaceModel == e.faceModel) ||
              (e.handModel != nullptr && pl->mpLinkHandModel == e.handModel));
-        // A model Link still wears keeps its archive (it is only ever freed with the process).
+
         if (!inUse) release_entry(e);
         e = Entry{};
     }

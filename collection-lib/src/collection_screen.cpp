@@ -8,13 +8,6 @@
 
 #include <algorithm>
 
-// Puts the layout (collection_layout.cpp) onto dMenu_Collect2D_c.
-//
-// Native items keep their native panes, cells and code paths; the library only moves them.
-// Custom items get panes cloned from the native ones of their row, and every column that
-// is not native gets its cell in the screen's tables filled in. Positions are taken from the
-// screen's own panes, so patched layouts (.blo overlays) carry over.
-
 DEFINE_HOOK(&dMenu_Collect2D_c::_create, MenuCollect2DCreateHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::_delete, MenuCollect2DDeleteHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::screenSet, ScreenSetHook);
@@ -27,10 +20,10 @@ DEFINE_HOOK(&J2DScreen::draw, ClScreenDrawHook);
 namespace {
 
 struct ColPanes {
-    J2DPane*       icon = nullptr;    // native icon pane, or the library's container
-    J2DPicture*    pic = nullptr;     // custom slots: the icon picture
-    J2DPicture*    frame = nullptr;   // native frame (native cell) or a clone
-    const ResTIMG* tex = nullptr;     // texture currently shown by pic
+    J2DPane*       icon = nullptr;
+    J2DPicture*    pic = nullptr;
+    J2DPicture*    frame = nullptr;
+    const ResTIMG* tex = nullptr;
     J2DPicture*    flourish[2] = {};
 };
 
@@ -43,12 +36,11 @@ struct ScreenState {
     J2DScreen*         screen = nullptr;
     bool               built = false;
 
-    // Templates of a row: column-1 icon pane and its picture.
     J2DPane*    iconTmpl[kClRows] = {};
     J2DPicture* picTmpl[kClRows] = {};
     J2DPicture* frameTmpl = nullptr;
     J2DPicture* connTmpl = nullptr;
-    // A native icon pane: menuCollectWide() keeps its scale current (Wii menu scaling).
+
     J2DPane*    refIcon = nullptr;
 
     J2DPane*    nativeIcon[kClRows][3] = {};
@@ -56,16 +48,16 @@ struct ScreenState {
     Pos         nativeIconPos[kClRows][3];
     Pos         nativeFramePos[kClRows][3];
 
-    Pos iconCol1[kClRows];      // column 1 icon position
-    Pos frameCol1[kClRows];     // column 1 frame position
-    Pos leftConnPos[kClRows];   // connector left of column 1
-    Pos gap1ConnPos[kClRows];   // connector between columns 1 and 2
+    Pos iconCol1[kClRows];
+    Pos frameCol1[kClRows];
+    Pos leftConnPos[kClRows];
+    Pos gap1ConnPos[kClRows];
     f32 iconDx = 59.0f;
     f32 frameDx = 59.0f;
 
     ColPanes    cols[kClRows][kClMaxCols + 1];
     J2DPicture* leftConn[kClRows] = {};
-    J2DPicture* gapConn[kClRows][kClMaxCols] = {};     // [row][g]: joins columns g and g+1
+    J2DPicture* gapConn[kClRows][kClMaxCols] = {};
     bool        gapNative[kClRows][kClMaxCols] = {};
     Pos         gapNativePos[kClRows][kClMaxCols];
 
@@ -78,7 +70,6 @@ struct ScreenState {
 
     J2DPane* hdRoot = nullptr;
 
-    // The native tables as screenSet() left them, before the library changed any cell.
     bool snap = false;
     u8   native22d[7][6] = {};
     u16  native184[7][6] = {};
@@ -97,9 +88,6 @@ J2DPane* find(u64 tag) { return s.screen->search(tag); }
 
 J2DPicture* find_pic(u64 tag) { return static_cast<J2DPicture*>(s.screen->search(tag)); }
 
-// Same local rectangle, anchor and position as `tmpl`. The J2DPane constructors take the
-// bounds as a rectangle in parent space and move the origin to its top-left corner, so
-// the template's bounds must be set again afterwards.
 void copy_geometry(J2DPane* pane, J2DPane* tmpl) {
     pane->mBounds = tmpl->mBounds;
     pane->setBasePosition(static_cast<J2DBasePosition>(tmpl->mBasePosition));
@@ -107,23 +95,12 @@ void copy_geometry(J2DPane* pane, J2DPane* tmpl) {
     pane->translate(tmpl->getTranslateX(), tmpl->getTranslateY());
 }
 
-// J2DPicture keeps its texture coordinates protected. A pointer to a base member formed
-// through a derived class works on any J2DPicture.
 struct PictureTexCoords : J2DPicture {
     using Member = JGeometry::TVec2<s16> (J2DPicture::*)[4];
     static Member member() { return &PictureTexCoords::field_0x10a; }
 };
 
-// ---------------------------------------------------------------------------
-// Exact copies of layout pictures
-//
-// The layout's pictures are J2DPictureEx: their look comes from a material (TEV stages,
-// colors, blending) that a plain J2DPicture only approximates. A copy is built the way
-// J2DScreen built the original: from the picture's block in the .blo, with a material of
-// its own created from the MAT1 block.
-// ---------------------------------------------------------------------------
-
-constexpr u32 kScreenFlags = 0x1020000;   // what dMenu_Collect2D_c::_create loads the screen with
+constexpr u32 kScreenFlags = 0x1020000;
 const char* const kScreenBlo = "zelda_collect_soubi_screen.blo";
 
 u32 be32(const u8* p) { return (u32(p[0]) << 24) | (u32(p[1]) << 16) | (u32(p[2]) << 8) | p[3]; }
@@ -131,8 +108,6 @@ u16 be16(const u8* p) { return static_cast<u16>((p[0] << 8) | p[1]); }
 
 u64 be64(const u8* p) { return (u64(be32(p)) << 32) | be32(p + 4); }
 
-// J2DPictureEx deletes its material only when a private flag says it owns it. An explicit
-// template instantiation may name a private member, which gives access to that flag.
 template <u8 J2DPictureEx::*Member>
 struct PictureExOwnsMaterial {
     friend u8 J2DPictureEx::*picture_ex_owns_material() { return Member; }
@@ -165,13 +140,12 @@ void find_blo() {
     }
 }
 
-// The PIC2 block of the picture with this tag.
 const u8* find_picture_block(u64 tag, u32* sizeOut) {
     for (u32 pos = 0x20; s_blo.data != nullptr && pos + 8 <= s_blo.size;) {
         const u8* block = s_blo.data + pos;
         const u32 blockSize = be32(block + 4);
         if (blockSize < 8 || pos + blockSize > s_blo.size) break;
-        // PIC2 = header, the embedded pane info (header, 4 bytes, flags, tag), picture data.
+
         if (std::memcmp(block, "PIC2", 4) == 0 && blockSize > 0x20 && be64(block + 8 + 0x10) == tag) {
             *sizeOut = blockSize;
             return block;
@@ -187,13 +161,12 @@ J2DPictureEx* clone_picture_ex(J2DPane* parent, u64 tag, J2DPicture* tmpl) {
     const u8* block = find_picture_block(tmpl->mInfoTag, &blockSize);
     if (block == nullptr) return nullptr;
 
-    // A copy of the block that points at material 0: the material made here.
     u8 copy[0x200];
     if (blockSize > sizeof(copy)) return nullptr;
     std::memcpy(copy, block, blockSize);
     const u32 paneSize = be32(copy + 8 + 4);
     if (8 + paneSize + 6 > blockSize) return nullptr;
-    u8* matIndex = copy + 8 + paneSize + 4;   // J2DScrnBlockPictureParameter::field_0x4
+    u8* matIndex = copy + 8 + paneSize + 4;
     const u16 index = be16(matIndex);
     matIndex[0] = 0;
     matIndex[1] = 0;
@@ -210,12 +183,11 @@ J2DPictureEx* clone_picture_ex(J2DPane* parent, u64 tag, J2DPicture* tmpl) {
         JKR_DELETE(material);
         return nullptr;
     }
-    pic->*picture_ex_owns_material() = 1;   // freed together with the pane
+    pic->*picture_ex_owns_material() = 1;
     pic->mInfoTag = tag;
     return pic;
 }
 
-// A picture that looks like `tmpl`, appended to `parent`, showing `tex`.
 J2DPicture* clone_picture(J2DPane* parent, u64 tag, J2DPicture* tmpl, const ResTIMG* tex) {
     if (parent == nullptr || tmpl == nullptr || tex == nullptr) return nullptr;
 
@@ -231,14 +203,12 @@ J2DPicture* clone_picture(J2DPane* parent, u64 tag, J2DPicture* tmpl, const ResT
                          kScreenBlo, static_cast<unsigned long long>(tmpl->mInfoTag));
     }
 
-    // Fallback: a plain picture with the template's colors.
     J2DPicture* pic = JKR_NEW J2DPicture(tag, tmpl->mBounds, tex, nullptr);
     if (pic == nullptr) return nullptr;
     parent->appendChild(pic);
     copy_geometry(pic, tmpl);
     pic->setBlackWhite(tmpl->getBlack(), tmpl->getWhite());
-    // The layout shades frames and connectors with vertex colors, and connectors only map a
-    // narrow strip of their texture.
+
     pic->setCornerColor(tmpl->corner(0), tmpl->corner(1), tmpl->corner(2), tmpl->corner(3));
     const PictureTexCoords::Member texCoords = PictureTexCoords::member();
     for (int i = 0; i < 4; i++) (pic->*texCoords)[i] = (tmpl->*texCoords)[i];
@@ -246,7 +216,6 @@ J2DPicture* clone_picture(J2DPane* parent, u64 tag, J2DPicture* tmpl, const ResT
     return pic;
 }
 
-// An empty pane with the geometry of `tmpl`, next to it in the tree.
 J2DPane* clone_container(J2DPane* tmpl, u64 tag) {
     J2DPane* parent = tmpl->getParentPane();
     if (parent == nullptr) return nullptr;
@@ -285,7 +254,6 @@ bool find_templates() {
         s.gap1ConnPos[r] = s.gapNativePos[r][1];
     }
 
-    // The clothes row has the third native column (and its connector, anchored top-left).
     s.gapConn[2][2] = find_pic(MULTI_CHAR('tunagi08'));
     if (s.gapConn[2][2] != nullptr) {
         s.gapNative[2][2] = true;
@@ -310,7 +278,6 @@ bool find_templates() {
     return true;
 }
 
-// The layout's own picture of a vanilla item, for slots that bring no icon.
 J2DPicture* native_item_picture(u8 itemNo) {
     u64 tag;
     switch (itemNo) {
@@ -349,7 +316,6 @@ void create_column_panes(int r, int col, const ClColumn& column) {
         if (tex != nullptr || nativePic != nullptr) p.pic->show(); else p.pic->hide();
     }
 
-    // A custom item in a native cell (the native item was replaced) uses that cell's frame.
     if (nativeCol != 0) {
         p.frame = s.nativeFrame[r][nativeCol - 1];
     } else {
@@ -387,15 +353,13 @@ void set_frame_color(J2DPicture* frame, bool on) {
     }
 }
 
-// Custom slots on top of what the native setEquipItemFrameColor* painted.
 void color_row_frames(int r) {
     for (int col = 1; col <= kClMaxCols; col++) {
         const ClColumn& column = layout_column(r, col);
         J2DPicture* frame = s.cols[r][col].frame;
         if (frame == nullptr) continue;
         if (column.type == ClColType::Native) {
-            // The native code also lights the frame for the vanilla item underneath a custom
-            // one, and for a Wooden Sword / Ordon Shield that has a column of its own.
+
             if (!native_cell_equipped(r, column.x)) set_frame_color(frame, false);
         } else if (column.type == ClColType::Custom) {
             set_frame_color(frame, custom_equip_unlocked(column.customId) &&
@@ -410,16 +374,13 @@ void fill_tables(dMenu_Collect2D_c* c) {
     std::memcpy(s.native1d8, c->field_0x1d8, sizeof(s.native1d8));
     s.snap = true;
 
-    // A Wooden Sword / Ordon Shield with a column of its own leaves the native cell that
-    // shows it until the Ordon Sword / Wooden Shield is owned.
     if (layout_has_stand_in(dItemNo_WOOD_STICK_e)) {
         c->field_0x22d[3][0] = dComIfGs_isItemFirstBit(dItemNo_SWORD_e) ? 1 : 0;
     }
     if (layout_has_stand_in(dItemNo_WOOD_SHIELD_e)) {
         c->field_0x22d[3][1] = dComIfGs_isItemFirstBit(dItemNo_SHIELD_e) ? 1 : 0;
     }
-    // The game empties the clothes row while the Ordon Clothes are worn (it has no cell to
-    // switch back from them). With a slot for them, the row stays.
+
     if (dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e &&
         layout_uses_base_item(dItemNo_WEAR_CASUAL_e)) {
         c->field_0x22d[3][2] = dComIfGs_isItemFirstBit(dItemNo_WEAR_KOKIRI_e) ? 1 : 0;
@@ -436,7 +397,7 @@ void fill_tables(dMenu_Collect2D_c* c) {
                 c->field_0x22d[x][r] = custom_equip_unlocked(column.customId) ? 1 : 0;
                 const CustomEquipDef* d = custom_equip_get(column.customId);
                 if (d != nullptr && d->name == nullptr && d->baseItem != dItemNo_NONE_e) {
-                    // No text of its own: the game's name and description of the base item.
+
                     c->field_0x184[x][r] = static_cast<u16>(kClItemNameMsg + d->baseItem);
                     c->field_0x1d8[x][r] = static_cast<u16>(kClItemNameMsg + 0x100 + d->baseItem);
                 } else {
@@ -454,7 +415,6 @@ void fill_tables(dMenu_Collect2D_c* c) {
     }
 }
 
-// The pane a cell's cursor manager must point at, nullptr for a cell outside the grid.
 J2DPane* cell_pane(int r, u8 x) {
     const int col = layout_col_of_cell(r, x);
     if (col != 0) {
@@ -467,9 +427,6 @@ J2DPane* cell_pane(int r, u8 x) {
     return nullptr;
 }
 
-// screenSet() creates the CPaneMgr of every cell from its own tag table (getItemTag is
-// inlined there), so cells the library added have none and replaced cells point at the
-// hidden native pane. The cursor and the pointer use these managers.
 void setup_cell_managers(dMenu_Collect2D_c* c) {
     JKRHeap* oldHeap = c->mpHeap != nullptr ? mDoExt_setCurrentHeap(c->mpHeap) : nullptr;
     for (int r = 0; r < kClRows; r++) {
@@ -487,7 +444,6 @@ void setup_cell_managers(dMenu_Collect2D_c* c) {
     if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
 }
 
-// screenSet() moves a restored cursor that sits on a cell unknown to its tag table.
 void restore_cursor(dMenu_Collect2D_c* c) {
     const u8 x = dMeter2Info_getCollectCursorPosX();
     const u8 y = dMeter2Info_getCollectCursorPosY();
@@ -524,10 +480,6 @@ bool screen_build(dMenu_Collect2D_c* c) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Hooks
-// ---------------------------------------------------------------------------
-
 void on_menu_collect_2d_create_post(ModContext*, void* args, void*, void*) {
     if (args == nullptr) return;
     s_currentCollect2D = mods::arg<dMenu_Collect2D_c*>(args, 0);
@@ -537,7 +489,7 @@ void on_menu_collect_2d_create_post(ModContext*, void* args, void*, void*) {
 HookAction on_menu_collect_2d_delete_pre(ModContext*, void*, void*, void*) {
     custom_equip_menu_doll_end();
     s_currentCollect2D = nullptr;
-    // The panes belong to the screen that is deleted now.
+
     s = ScreenState{};
     collection_page_teardown();
     return HOOK_CONTINUE;
@@ -548,8 +500,7 @@ HookAction on_screen_set_pre(ModContext*, void* args, void*, void*) {
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
     if (c == nullptr || c->mpScreen == nullptr) return HOOK_CONTINUE;
     collection_page_reset();
-    // Panes must exist before screenSet(): it creates the CPaneMgr of every cell getItemTag()
-    // names, the library's cells included.
+
     screen_build(c);
     return HOOK_CONTINUE;
 }
@@ -564,7 +515,7 @@ void on_screen_set_post(ModContext*, void* args, void*, void*) {
     setup_cell_managers(c);
     restore_cursor(c);
     screen_refresh_frames(c);
-    // screenSet() showed name and cursor with the native tables.
+
     c->setItemNameString(c->mCursorX, c->mCursorY);
     c->cursorPosSet();
 }
@@ -573,8 +524,7 @@ void on_menu_collect_wide_post(ModContext*, void* args, void*, void*) {
     if (args == nullptr) return;
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
     if (!screen_active(c)) return;
-    // menuCollectWide() puts the native panes back to their layout positions every frame,
-    // right before drawing.
+
     screen_apply_layout(c);
     collection_page_apply(c);
 }
@@ -661,11 +611,7 @@ void place_hd_column(int r, int col, const ClColumn& column, ColPanes& p) {
     hd_place_flourishes(p.flourish[0], p.flourish[1], pos);
 }
 
-}  // namespace
-
-// ---------------------------------------------------------------------------
-// Internal API
-// ---------------------------------------------------------------------------
+}
 
 bool screen_active(const dMenu_Collect2D_c* c) {
     return c != nullptr && s.built && s.collect == c && s.screen == c->mpScreen;
@@ -702,7 +648,7 @@ int screen_equip_row_at(u8 x, u8 y) {
 
 void screen_refresh_frames(dMenu_Collect2D_c* c) {
     if (!screen_active(c)) return;
-    // Force the native functions to repaint; their post hooks add the custom slots.
+
     c->mEquippedSword = 0xFF;
     c->mEquippedShield = 0xFF;
     c->mEquippedClothes = 0xFF;
@@ -734,7 +680,7 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
             if (p.icon != nullptr) {
                 bool visible;
                 if (column.type == ClColType::Native) {
-                    // Same rule screenSet() uses for native panes.
+
                     visible = c->field_0x22d[column.x][r] != 0;
                     nativeIconUsed[r][nativeCol - 1] = true;
                 } else {
@@ -762,7 +708,7 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
             Pos icon{s.iconCol1[r].x + (col - 1) * s.iconDx, s.iconCol1[r].y};
             Pos frame{s.frameCol1[r].x + (col - 1) * s.frameDx, s.frameCol1[r].y};
             if (nativeCol != 0 && nativeCol == col) {
-                // In its native column: exactly the native spot.
+
                 if (column.type == ClColType::Native) icon = s.nativeIconPos[r][nativeCol - 1];
                 frame = s.nativeFramePos[r][nativeCol - 1];
             }
@@ -776,7 +722,6 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
         }
         if (hd) continue;
 
-        // Connectors: one left of column 1, one between every two neighboring columns.
         if (layout_column(r, 1).type != ClColType::Empty) {
             cl_set_pane_pos(s.leftConn[r], s.leftConnPos[r].x + dx, s.leftConnPos[r].y);
             s.leftConn[r]->show();
@@ -810,8 +755,6 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
         return;
     }
 
-    // Rows longer than the native ones push the heart (behind the sword and shield rows) and
-    // the fused shadow (behind the heart and the clothes row) to the right.
     const int heartPush = std::max(0, std::max(layout_last_col(0) - native_col_count(0),
                                                layout_last_col(1) - native_col_count(1)));
     const int maskPush = std::max(heartPush, layout_last_col(2) - native_col_count(2));
@@ -824,12 +767,11 @@ void screen_apply_layout(dMenu_Collect2D_c* c) {
         if (s.modelbgn != nullptr) cl_set_pane_pos(s.modelbgn, s.modelbgnPos.x + push, s.modelbgnPos.y);
     }
 
-    // Heart / fused shadow whose cell went to a sword column and that no page hosts.
     if (!s.heartOnMain && !collection_page_claims_cell(5, 0) && s.heart != nullptr) {
         s.heart->hide();
     }
     if (!s.maskOnMain && !collection_page_claims_cell(6, 0)) {
-        // The 3D model follows the pane, so hiding is not enough: park both off screen.
+
         if (s.kamen != nullptr) s.kamen->translate(-4000.0f, s.kamen->getTranslateY());
         if (s.modelbgn != nullptr) s.modelbgn->translate(-4000.0f, s.modelbgn->getTranslateY());
     }
@@ -840,7 +782,7 @@ void screen_show_native_name(dMenu_Collect2D_c* c, u8 x, u8 y) {
         if (c != nullptr) c->setItemNameStringNull();
         return;
     }
-    // Cell (0,0) is never part of the grid: borrow it to run the native text code.
+
     const u8 saved22d = c->field_0x22d[0][0];
     const u16 saved184 = c->field_0x184[0][0];
     const u16 saved1d8 = c->field_0x1d8[0][0];

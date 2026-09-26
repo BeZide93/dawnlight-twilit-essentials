@@ -102,7 +102,6 @@ void stop_fast_forward() {
     s_active = false;
 }
 
-/* Diag: why the boss-rush hold path is currently swallowing the boost (0 = not holding). */
 int s_holdReasonDiag = 0;
 const char* hold_reason_name(int reason) {
     switch (reason) {
@@ -268,8 +267,6 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
 
 namespace {
 
-/* Diagnostics: log gate/boost state transitions so cutscene behavior can be followed in the
- * game log. Only fires when the event manager state actually changes, never per frame. */
 u32 s_diagKey = 0;
 
 void diag_log(const LogService* log_svc, const char* fmt, ...) {
@@ -344,7 +341,7 @@ void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
     }
 }
 
-}  // namespace
+}
 
 void update_hidden_run_watchdog();
 

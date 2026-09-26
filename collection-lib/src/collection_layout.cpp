@@ -1,10 +1,5 @@
 #include "collection_internal.hpp"
 
-// The equipment rows as data: every row is a list of columns, each holding a native item, a
-// custom item or nothing. Every column also owns one cell of dMenu_Collect2D_c's 7x6 tables
-// (unlock flag, name, description, CPaneMgr); native items keep their native cell wherever
-// they are shown, so the game's own code keeps handling them.
-
 namespace {
 
 const ClNativeCell kNativeCells[kClRows][3] = {
@@ -20,16 +15,13 @@ const ClNativeCell kNativeCells[kClRows][3] = {
 };
 const int kNativeColCount[kClRows] = {2, 2, 3};
 
-// Cells a row can give to added columns, in order of preference. (5,0) and (6,0) are the
-// heart and the fused shadow unless a page hosts them. Column x = 0 is never used: the
-// cursor on cell (0,0) makes the Link doll spin.
 const u8 kSpareCells[kClRows][6] = {
     {5, 6, 2, 1, 3, 4},
     {5, 6, 2, 1, 3, 4},
     {6, 2, 1, 3, 4, 5},
 };
 
-ClColumn s_cols[kClRows][kClMaxCols + 1];   // [row][column], column 0 unused
+ClColumn s_cols[kClRows][kClMaxCols + 1];
 void (*s_registerFn)() = nullptr;
 bool s_registering = false;
 
@@ -113,11 +105,7 @@ bool referenced(int id) {
     return false;
 }
 
-}  // namespace
-
-// ---------------------------------------------------------------------------
-// Internal queries
-// ---------------------------------------------------------------------------
+}
 
 int native_col_count(int r) { return (r >= 0 && r < kClRows) ? kNativeColCount[r] : 0; }
 
@@ -220,17 +208,12 @@ void collectionlib_run_slot_registration() {
     reset_native();
     if (s_registerFn != nullptr) s_registerFn();
 
-    // Custom slots the callback no longer registers are dropped.
     for (int id = custom_equip_count() - 1; id >= 0; --id) {
         if (!referenced(id)) custom_equip_remove(id);
     }
 
     s_registering = false;
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 void collectionlib_set_register_callback(void (*fn)()) { s_registerFn = fn; }
 

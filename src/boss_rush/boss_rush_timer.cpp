@@ -37,10 +37,6 @@ long long s_provisionalMs = 0;
 std::chrono::steady_clock::time_point s_lastTick;
 bool s_haveLastTick = false;
 
-// Chain-run mode (full boss rush): s_elapsedMs keeps accumulating across the
-// whole run and only ticks while a fight is actually running. Per-fight times
-// for the best-time records are measured relative to s_chainCheckpointMs, the
-// value the long timer had when the current fight engaged.
 bool s_chainRun = false;
 unsigned long long s_chainCheckpointMs = 0;
 
@@ -379,8 +375,6 @@ void boss_rush_timer_commit_chain_total() {
         Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     }
 
-    // Present the full-run total as the end-of-run result (golden panel on the
-    // chamber return when it was a record).
     s_state = FINISHED;
     s_finalCs = totalCs;
     s_isRecord = record;

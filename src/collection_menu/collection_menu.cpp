@@ -52,9 +52,6 @@ static bool starter_shield_unlocked() {
     return dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e) || (eq == dItemNo_WOOD_SHIELD_e);
 }
 
-// Wooden Sword, Ordon Shield and Ordon Clothes in front of the native items of their rows.
-// Without a model a slot equips the vanilla item itself; without a name / icon it shows the
-// game's own.
 static void register_starter_gear() {
     if (!g_configCollectionStarterEquip) {
         return;
@@ -144,7 +141,7 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
 }
 
 void update_collection_menu(const LogService*, ModContext*) {
-    // A burnt Ordon Shield loses its item bit; kept, it stays owned so its slot can equip it.
+
     if (g_configCollectionStarterEquip && g_configCollectionKeepOrdonShield &&
         dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) &&
         !dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {

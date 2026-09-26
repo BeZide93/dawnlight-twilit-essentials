@@ -15,7 +15,7 @@ extern bool g_configVisibleEquipMirrorBow;
 extern bool g_configVisibleEquipShowBow;
 extern bool g_configVisibleEquipShowLantern;
 extern bool g_configVisibleEquipQuiverOnBelt;
-// 0 = automatic (by max arrows), 1 = Quiver, 2 = Big Quiver, 3 = Giant Quiver
+
 extern int g_configVisibleEquipQuiverType;
 
 ModResult init_visible_equipment(const HookService* hook_svc, ModError* err);

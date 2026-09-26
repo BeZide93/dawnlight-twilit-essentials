@@ -31,10 +31,6 @@ void log_collect_warn(const char* fmt, ...) {
     g_logSvc->warn(g_modCtx, buf);
 }
 
-// ---------------------------------------------------------------------------
-// Panes
-// ---------------------------------------------------------------------------
-
 u64 cl_make_tag(char p0, char p1, char p2, char p3, u8 a, u8 b) {
     const u8 chars[6] = {static_cast<u8>(p0), static_cast<u8>(p1), static_cast<u8>(p2),
                          static_cast<u8>(p3), static_cast<u8>('0' + a), static_cast<u8>('0' + b)};
@@ -72,23 +68,18 @@ Vec cl_pane_global_center(J2DPane* pane) {
     return probe.getGlobalVtxCenter(pane, false, 0);
 }
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-
 namespace {
 
 struct IconCacheEntry {
     const char* path;
     u16 fileId;
-    ResTIMG* tex;       // owned copy (or texture replacement), 32-byte aligned
+    ResTIMG* tex;
 };
 
 constexpr int kMaxIcons = 64;
 IconCacheEntry s_icons[kMaxIcons] = {};
 int s_iconCount = 0;
 
-// Archive paths that are not in the mod's res/ (every failed load logs an error).
 constexpr int kMaxMissing = 8;
 const char* s_missingPaths[kMaxMissing] = {};
 int s_missingCount = 0;
@@ -139,7 +130,6 @@ ResTIMG* load_icon_uncached(const char* path, u16 fileId) {
         return replaced;
     }
 
-    // Archive shipped in the mod's res/.
     if (path != nullptr && res != nullptr && g_modCtx != nullptr && !known_missing(path)) {
         ResourceBuffer buf = RESOURCE_BUFFER_INIT;
         if (res->load(g_modCtx, path, &buf) != MOD_OK || buf.data == nullptr) {
@@ -154,11 +144,10 @@ ResTIMG* load_icon_uncached(const char* path, u16 fileId) {
         }
     }
 
-    // The game's collection archive (Layout/clctres.arc, including overlay patches).
     return copy_from_archive(dComIfGp_getCollectResArchive(), fileId);
 }
 
-}  // namespace
+}
 
 ResTIMG* cl_load_icon(const char* path, IconArcRef iconArc) {
     if (path == nullptr && iconArc.fileId == 0xFFFF) return nullptr;
@@ -167,7 +156,7 @@ ResTIMG* cl_load_icon(const char* path, IconArcRef iconArc) {
         IconCacheEntry& e = s_icons[i];
         if (e.fileId == iconArc.fileId && same_path(e.path, path)) {
             if (e.tex != nullptr) return e.tex;
-            // Failed before - retry (the game archive may not have been mounted yet).
+
             e.tex = load_icon_uncached(path, iconArc.fileId);
             return e.tex;
         }

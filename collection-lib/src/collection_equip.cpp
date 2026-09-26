@@ -2,12 +2,6 @@
 
 #include "d/d_msg_flow.h"
 
-// Equipping from the Collection screen.
-//
-// Native cells still go through the game's changeSword/changeShield/changeClothe(); the
-// library only steps in when a custom item of that kind is worn (the native code would see
-// the vanilla item underneath and do nothing). Custom cells are handled completely here.
-
 DEFINE_HOOK(&dMenu_Collect2D_c::wait_proc, WaitProcHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::pointerActivateCurrent, PointerActivateCurrentHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::changeSword, ChangeSwordHook);
@@ -38,7 +32,6 @@ u8 current_equip(int r) {
     return dComIfGs_getSelectEquipClothes();
 }
 
-// What the native change*() equips for a native cell (d_menu_collect.cpp).
 u8 native_target(int r, u8 x) {
     if (r == 0) {
         if (x == 3) return dComIfGs_isItemFirstBit(dItemNo_SWORD_e) ? dItemNo_SWORD_e : dItemNo_WOOD_STICK_e;
@@ -107,9 +100,9 @@ HookAction handle_change(void* args, int r) {
 
     custom_equip_clear(kind);
     if (target != dItemNo_NONE_e && current_equip(r) != target) {
-        return HOOK_CONTINUE;   // the native code equips it (sound, frame) as usual
+        return HOOK_CONTINUE;
     }
-    // The vanilla item was already worn underneath: the native code would do nothing.
+
     if (target != dItemNo_NONE_e) {
         set_vanilla(r, target);
         equip_feedback(true);
@@ -133,7 +126,6 @@ HookAction on_wait_proc_pre(ModContext*, void* args, void*, void*) {
         return HOOK_SKIP_ORIGINAL;
     }
 
-    // The native A handling only knows the native cells.
     if (dMw_A_TRIGGER()) {
         const int id = custom_under_cursor(c);
         if (id >= 0) {
@@ -175,10 +167,6 @@ HookAction on_pointer_activate_current_pre(ModContext*, void* args, void*, void*
     equip_activate_custom(c, id);
     return HOOK_SKIP_ORIGINAL;
 }
-
-// ---------------------------------------------------------------------------
-// Link
-// ---------------------------------------------------------------------------
 
 bool s_inAlinkCreate = false;
 cXyz s_savedLinkPos;
@@ -232,8 +220,6 @@ void on_da_alink_change_wolf_post(ModContext*, void*, void*, void*) {
     custom_equip_set_link_model_wolf(true);
 }
 
-// Link's create switches Ordon Clothes to the Hero's Clothes once they are owned. When a
-// slot lets the player wear the Ordon Clothes again, keep them.
 HookAction on_set_select_equip_clothes_pre(ModContext*, void* args, void*, void*) {
     if (args == nullptr || !s_inAlinkCreate) return HOOK_CONTINUE;
     const u8 newCloth = mods::arg<u8>(args, 0);
@@ -257,10 +243,8 @@ HookAction on_msg_flow_get_check_pre(ModContext*, void* args, void* retval, void
     return HOOK_CONTINUE;
 }
 
-}  // namespace
+}
 
-// Native "equipped" rule of a native cell (setEquipItemFrameColor*). A Wooden Sword or Ordon
-// Shield with a column of its own is no longer part of the cell that shows it natively.
 bool native_cell_equipped(int r, u8 x) {
     if (custom_equip_active(row_kind(r))) return false;
     const u8 cur = current_equip(r);

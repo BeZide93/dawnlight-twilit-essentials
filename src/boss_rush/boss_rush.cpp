@@ -386,7 +386,7 @@ static int s_arenaFreezeUntil = kBossUnfreezeFrame;
 static bool s_swordDrawnLatched = false;
 
 static bool s_pendingGearSaveApply = false;
-static int s_pendingGearSaveKind = 0;  // 1 = fight restriction, 2 = chamber equips
+static int s_pendingGearSaveKind = 0;
 static const BossGalleryEntry* s_pendingGearBoss = nullptr;
 static bool s_retryWarpActive = false;
 static bool s_gauntletLadderActive = false;
@@ -431,9 +431,6 @@ static void persist_saved_location_to_disk() {
                        sizeof(s_savedLocation));
 }
 
-// Marks an in-flight boss rush session so that a mod reload while standing in
-// the chamber room (which vanilla progression can also reach) does not resume
-// boss rush unless a session was actually started.
 static constexpr const char* kBossRushSessionBlobName = "boss_rush_session_active";
 
 static void persist_boss_rush_session_marker() {
@@ -464,9 +461,6 @@ static void clear_boss_rush_session_marker() {
 static bool s_chamberEquipsPending = false;
 static int  s_chamberEquipsFrames  = 0;
 
-// Set when the entry warp ends; the custom equip suppression must only land
-// once the transition fader is fully black, or the model visibly pops from the
-// custom tunic to the hero tunic in the last frames of the warp cinematic.
 static bool s_equipSuppressWaitBlack = false;
 static int  s_equipSuppressWaitBlackFrames = 0;
 
@@ -848,13 +842,6 @@ static void update_beastganon_instant_fight(bool gameFrameTick) {
     }
 }
 
-// Calling Midna already freezes Beast Ganon correctly: talking to her runs
-// as a proper engine event, and dComIfGp_event_moveApproval() suspends every
-// actor that isn't part of that event (see f_op_actor.cpp's execute
-// dispatch). A plain wolf<->human transformation is not an engine event, so
-// that suspension never kicks in and Beast Ganon keeps acting while the
-// player can't. Skip its own execute() outright for the duration instead -
-// unlike toggling fopAcStts_NOEXEC_e, this leaves it fully drawn in place.
 DEFINE_HOOK(&daB_MGN_c::execute, BossRushBeastGanonTransformFreezeHook);
 
 static HookAction on_beastganon_execute_pre(ModContext*, void*, void* retval, void*) {
@@ -868,8 +855,6 @@ static HookAction on_beastganon_execute_pre(ModContext*, void*, void* retval, vo
     *static_cast<int*>(retval) = 1;
     return HOOK_SKIP_ORIGINAL;
 }
-
-
 
 DEFINE_HOOK(&cc_at_check, BossRushBeastGanonArrowHook);
 
@@ -1210,14 +1195,9 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
     s_recordReturnReason = nullptr;
     s_recordReturnFrames = -1;
 
-
     boss_rush_timer_reset_run();
     boss_rush_timer_end_all_phases();
 
-    // Don't clear an already-held black screen here - a caller (e.g. the
-    // Horseback Ganon defeat sequence) may have faded to black deliberately
-    // before calling in; clearing it right before the stage warp briefly
-    // reveals whatever scene is still rendering underneath.
     if (!boss_rush_screen_is_fully_black()) {
         mDoGph_gInf_c::offFade();
     }
@@ -1276,7 +1256,6 @@ void return_to_boss_rush_chamber(const LogService* log_svc, ModContext* mod_ctx,
 }
 
 namespace {
-
 
 static bool change_scene_reloads_current_room(int exitId, s8 roomNo) {
     const char* curStage = dComIfGp_getStartStageName();
@@ -1423,8 +1402,6 @@ static void on_boss_rush_draw_post_impl(ModContext*, void*, void*, void*) {
     if (!is_in_boss_rush_chamber()) {
         return;
     }
-
-
 
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (link == nullptr) {
@@ -1663,12 +1640,7 @@ static void update_ganon_ground_duel() {
     if (zelda != nullptr) {
         fopAcM_delete(zelda);
     }
-    // Hide the horse instead of deleting it: Ganondorf's own final-death
-    // demo camera (demo_camera() in d_a_b_gnd.cpp, case 62) unconditionally
-    // calls dComIfGp_getHorseActor()->setHorsePosAndAngle(...) with no null
-    // check, assuming the horse actor always still exists. Deleting it here
-    // left that call dereferencing a stale pointer and crashed on the final
-    // ground-duel kill.
+
     fopAc_ac_c* horse = reinterpret_cast<fopAc_ac_c*>(dComIfGp_getHorseActor());
     if (horse != nullptr) {
         cXyz awayPos(0.0f, -5000.0f, 0.0f);
@@ -1730,7 +1702,7 @@ static void update_ganon_ground_duel() {
         bgnd->field_0xc44[0] = 200;
 
         if (bgnd->mpModelMorf != nullptr) {
-            void* bck = dComIfG_getObjectRes("B_gnd", 0x5D /* B_GND_BCK_EGND_WALK */);
+            void* bck = dComIfG_getObjectRes("B_gnd", 0x5D );
             if (bck != nullptr) {
                 bgnd->mAnmID = 0x5D;
                 bgnd->mpModelMorf->setAnm(reinterpret_cast<J3DAnmTransform*>(bck), 2, 0.0f, 1.0f, 0.0f, -1.0f);
@@ -3049,8 +3021,7 @@ static void update_argorok_phase_transition_skip() {
         daAlink_c* link = daAlink_getAlinkActorClass();
         if (link != nullptr) {
             link->cancelOriginalDemo();
-            // The tail-hang demo state would keep Link glued to Argorok after
-            // the skip; put him back on the arena floor where he last stood.
+
             if (s_groundValid) {
                 link->current.pos = s_groundPos;
                 link->old.pos = s_groundPos;
@@ -3135,11 +3106,6 @@ static void update_horsebackganon_instant_fight() {
         }
     }
 
-    // Once Ganondorf is defeated (ACTION_HEND) his own b_gnd_h_end() drives a
-    // fall-off-horse animation through mDemoCamMode (30 -> 32 -> 34), which
-    // needs its own camera control. Forcing QuickStart()/SetTrimSize(0) every
-    // frame here fights that and keeps the normal gameplay camera up,
-    // hiding the animation entirely - stop doing that once he's down.
     bool ganondorfDown = false;
     if (fopAc_ac_c* gnd = fopAcM_SearchByName(fpcNm_B_GND_e)) {
         int gam, gmm, gdcm, ghorse, ghp, gkd;
@@ -3952,7 +3918,6 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     fix_boss_rush_miniboss_bgm();
     boss_rush_timer_update();
 
-
     if (link == nullptr || (!s_bossRushModeActive && !s_exitingBossRush) || !is_in_boss_rush_chamber()) {
         if (any_ring_flames_lit()) clear_ring_flames();
         return;
@@ -4203,9 +4168,7 @@ bool is_in_boss_rush_chamber() {
             return false;
         }
     }
-    // The chamber room (D_MN06B room 51) is reachable in vanilla progression
-    // (Temple of Time darknut hall), so only treat it as the boss rush chamber
-    // while a boss rush session is actually running.
+
     if (!s_bossRushModeActive && !s_exitingBossRush) {
         return false;
     }
@@ -4437,7 +4400,6 @@ static HookAction on_skip_portal_obj_warp_pre(ModContext*, void*, void*, void*) 
     dComIfGs_setRestartRoomParam((kBossRushChamberRoom & 0x3F) | (0xFF << 24));
     dComIfGp_setNextStage(kBossRushChamberStage, kBossRushChamberPoint, kBossRushChamberRoom,
                           kBossRushChamberLayer, 0.0f, 0, 1, 0, cM_deg2s(180.0f), 1, 0);
-
 
     return HOOK_SKIP_ORIGINAL;
 }
@@ -4773,7 +4735,6 @@ void exit_boss_rush() {
     if (!s_bossRushModeActive && !s_exitingBossRush) return;
     if (s_exitSaveReloadPending) return;
 
-
     s_bossRushModeActive = false;
     s_exitingBossRush = true;
     s_activeFightIndex = -1;
@@ -4904,7 +4865,6 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         return;
     }
 
-
     if (std::strcmp(boss.stage, "D_MN09B") == 0) {
         if (std::strcmp(boss.displayName, "Ganondorf") == 0) {
             g_dComIfG_gameInfo.info.getDan().onSwitch(1);
@@ -4921,10 +4881,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
             link->offMidnaRide();
         }
     } else {
-        // The chamber holds the Midna availability bits on (HUD flicker fix);
-        // fights expect the fresh-save state, so drop them again on the way
-        // out. With 0x0540/M_067 still set the engine assumes Midna is
-        // already riding and never mounts her on the wolf.
+
         dComIfGs_offEventBit(dSv_event_flag_c::M_067);
         dComIfGs_offEventBit(0x0540);
         dComIfGs_onEventBit(dSv_event_flag_c::F_0800);
@@ -5938,7 +5895,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             }
             const int phase = boss_rush_gauntlet_phase();
             if (phase == 1 || std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0) {
-                // In-place transition between Horseback Ganon and Ganondorf Duel; do not commit stage warp
+
                 return;
             }
             const char* want = (phase == 2)   ? "Beast Ganon"
@@ -5958,11 +5915,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
         if (gt >= 0 && static_cast<size_t>(gt) < g_bossGalleryCount &&
             std::strcmp(g_bossGalleryTable[gt].displayName, "Horseback Ganon") == 0) {
-            // Horseback Ganon (separate-Ganon mode) drives its own defeat
-            // cutscene/fade timing via s_horsebackGanonKoTimer below, based
-            // on Ganondorf's own health/action state - this generic
-            // boss-bar fade-out edge fires a bit earlier and would otherwise
-            // warp away before the cutscene finishes playing.
+
             return;
         }
         advance_boss_rush_run(log_svc, mod_ctx, "Boss defeated");
@@ -6054,14 +6007,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
                     return;
                 }
             } else if (g_configBossRushSeparateGanon && s_hbSepWaitingCutscene) {
-                // Defeat already detected (mActionMode == ACTION_HEND). The
-                // fall-off-horse animation isn't an engine event - it's
-                // b_gnd_h_end()'s own mMoveMode/mDemoCamMode sub-state
-                // machine (camera mode climbs 30 -> 32 -> 34 as the horse-down
-                // and Ganondorf-down animations play), which just sits once
-                // settled waiting for external code to move on. Wait for
-                // mDemoCamMode to reach 34 before starting the short fade.
-                // Capped as a safety net in case it never gets there.
+
                 ++s_hbCutsceneWaitFrames;
                 fopAc_ac_c* gndWait = fopAcM_SearchByName(fpcNm_B_GND_e);
                 int wGam = -1, wMoveMode = -1, wDemoCam = -1, wHorse = -1, wHp = -1, wKd = -1;
@@ -6239,9 +6185,6 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
     init_boss_rush_collection(hook_svc, log_svc, mod_ctx);
     init_ganondorf_cape(hook_svc, log_svc, mod_ctx);
 
-    // Only resume boss rush on init when a session was actually started
-    // (persisted marker); the chamber room and boss arenas are all reachable
-    // through vanilla progression, so the stage check alone is not enough.
     bool resumedBossRush = false;
     if (is_game_resetting_or_title()) {
         clear_boss_rush_session_marker();
@@ -6282,10 +6225,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
                 sync_life_meter_instant(full_life_for_max(dComIfGs_getMaxLife()),
                                         dComIfGs_getMaxLife());
             }
-            // A mod reload re-inits the custom-equip module fresh, dropping
-            // its suppression flag even though the boss rush session (and
-            // the vanilla loadout it enforces) is still active - reapply it
-            // the same way a fresh chamber entry does.
+
             s_pendingInitialInventory = true;
         } else if (const char* curStage = dComIfGp_getStartStageName()) {
             const s8 curRoom = static_cast<s8>(dComIfGp_roomControl_getStayNo());
@@ -6329,7 +6269,6 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
     if (!resumedBossRush) {
         clear_boss_rush_session_marker();
     }
-
 
     return MOD_OK;
 }

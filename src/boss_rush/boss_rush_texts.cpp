@@ -175,8 +175,7 @@ void draw_boss_rush_texts(float floorY) {
 
 void draw_boss_rush_fight_timer() {
     if (boss_rush_timer_preview_active()) {
-        // Position preview: draw a frozen sample time (1:23.45) while the
-        // offsets are being adjusted in the Customization tab.
+
         boss_rush_timer_v2_draw(8345, false, false, false, 0, 0.0f);
         return;
     }
@@ -219,8 +218,7 @@ void draw_boss_rush_fight_timer() {
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Puppet Zelda") == 0 ||
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Beast Ganon") == 0 ||
          std::strcmp(g_bossGalleryTable[tIdx].displayName, "Horseback Ganon") == 0));
-    // Only in the horseback fight the resting timer rows sit where Epona
-    // gallops across the screen, so raise both of them above the horse.
+
     const bool isHorsebackFight = (tIdx >= 0 && static_cast<size_t>(tIdx) < g_bossGalleryCount &&
         std::strcmp(g_bossGalleryTable[tIdx].displayName, "Horseback Ganon") == 0);
     const bool allPhasesTarget = boss_rush_timer_all_phases_active() ||

@@ -34,10 +34,6 @@ static void on_collect_set_heart_piece_post(ModContext*, void* args, void*, void
     }
 }
 
-
-
-
-
 ModResult init_always(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_ERROR;
     mods::hook::add_post<CollectSetHeartPieceHook>(hook_svc, on_collect_set_heart_piece_post);

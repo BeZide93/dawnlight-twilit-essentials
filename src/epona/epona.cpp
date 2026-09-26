@@ -18,7 +18,7 @@ constexpr s16 kAutoGallopHeading = 0x3000;
 constexpr f32 kAutoGallopStickValue = 0.9f;
 constexpr s16 kAutoGallopLashTime = 2;
 
-}  // namespace
+}
 
 bool g_configEponaEnabled = false;
 

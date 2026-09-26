@@ -195,7 +195,6 @@ static void open_bottle_menu() {
     s_bottleMenuOpen = true;
     bottles_reset_repeat();
 
-    /* Start with nothing selected; the player picks a slot with the stick. */
     s_bottleSelectedSlot = SLOT_NONE;
 
     qa_invalidate_msg_window();

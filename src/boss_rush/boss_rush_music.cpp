@@ -18,7 +18,6 @@ DEFINE_HOOK(&Z2SeqMgr::bgmStop, BossRushMusicBgmStopHook);
 
 namespace {
 
-// spirit.ast
 constexpr u32 kSpiritStreamId = 0x200005F;
 constexpr u32 kNoStream = 0xFFFFFFFFu;
 constexpr int kLeaveDelayFrames = 8;
@@ -167,7 +166,7 @@ void on_execute_post(ModContext*, void*, void*, void*) {
     update_music();
 }
 
-}  // namespace
+}
 
 ModResult init_boss_rush_music(const HookService* hook_svc, const LogService*, ModContext*) {
     if (hook_svc == nullptr) {

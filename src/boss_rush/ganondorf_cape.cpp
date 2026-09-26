@@ -41,7 +41,6 @@ constexpr f32 kRearDrift = 0.45f;
 
 ModContext*       s_ctx = nullptr;
 
-
 bool s_hookInstalled = false;
 bool s_shuttingDown  = false;
 

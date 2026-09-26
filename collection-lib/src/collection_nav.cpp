@@ -1,12 +1,5 @@
 #include "collection_internal.hpp"
 
-// Cursor and text of the equipment rows.
-//
-// Native navigation walks the grid by cell index, which only matches the picture while the
-// rows are native. The library walks the visible columns instead, with the native rules:
-// straight up/down (skipping rows without that column), the Pieces of Heart and the Fused
-// Shadow behind the sword row, down out of the clothes row into the item rows.
-
 DEFINE_HOOK(&dMenu_Collect2D_c::getItemTag, GetItemTagHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::cursorMove, CursorMoveHook);
 DEFINE_HOOK(&dMenu_Collect2D_c::cursorPosSet, CursorPosSetHook);
@@ -17,10 +10,10 @@ DEFINE_HOOK(&dMsgStringBase_c::getStringLocal, MsgStringGetStringLocalHook);
 namespace {
 
 constexpr u8 kNone = 0xFF;
-constexpr int kNavCols = kClMaxCols + 2;   // + heart and fused shadow behind the sword row
+constexpr int kNavCols = kClMaxCols + 2;
 
 struct Nav {
-    u8 x[kClRows][kNavCols + 1];   // grid cell x per row and visible column (1-based)
+    u8 x[kClRows][kNavCols + 1];
 };
 
 Nav build_nav(dMenu_Collect2D_c* c) {
@@ -34,7 +27,7 @@ Nav build_nav(dMenu_Collect2D_c* c) {
     }
     int next = layout_last_col(0) + 1;
     if (screen_heart_on_main() && next <= kNavCols) n.x[0][next++] = 5;
-    // Native: the fused shadow is only reachable once it is shown.
+
     if (screen_mask_on_main() && c->field_0x22d[6][0] != 0 && next <= kNavCols) n.x[0][next] = 6;
     return n;
 }
@@ -64,7 +57,6 @@ void move_cursor(dMenu_Collect2D_c* c, u8 x, u8 y) {
     c->setItemNameString(x, y);
 }
 
-// Native: leaving the equipment rows downwards lands on the first item cell of this list.
 void down_into_items(dMenu_Collect2D_c* c, u8* x, u8* y) {
     static const u8 kX[8] = {3, 2, 3, 1, 2, 0, 1, 0};
     static const u8 kY[8] = {3, 3, 4, 3, 4, 3, 4, 4};
@@ -109,7 +101,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
 
     s_moveFromX = c->mCursorX;
     s_moveFromY = c->mCursorY;
-    // With a page shown the equipment rows are off screen; the item rows move natively.
+
     if (collection_page_on_page()) return HOOK_CONTINUE;
 
     const u8 cx = c->mCursorX;
@@ -141,8 +133,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
             }
         }
         if (tx == kNone) {
-            // Native: past the shield row lies the heart, past the clothes row the fused
-            // shadow - while they are on the grid. Otherwise the row wraps around.
+
             const bool maskReachable = screen_mask_on_main() && c->field_0x22d[6][0] != 0;
             if (r == 1 && screen_heart_on_main()) {
                 tx = 5;
@@ -164,7 +155,7 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
         const u8 py = c->field_0x25a;
         const int shieldLast = layout_last_col(1);
         if (onMask && screen_equip_row_at(px, py) >= 0 && !(px == 6 && py == 0)) {
-            // Native: back to where the cursor came from.
+
             tx = px;
             ty = py;
         } else if (onHeart && py == 1 && shieldLast != 0 && px == n.x[1][shieldLast]) {
@@ -179,18 +170,18 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
             }
         }
     } else if (onMask) {
-        // Native: from the fused shadow, down leaves the equipment rows.
+
         if (down) down_into_items(c, &tx, &ty);
     } else {
         const int step = down ? 1 : -1;
-        // Same column in the next row that has it.
+
         for (int rr = r + step; rr >= 0 && rr < kClRows && tx == kNone; rr += step) {
             if (n.x[rr][col] != kNone) {
                 tx = n.x[rr][col];
                 ty = static_cast<u8>(rr);
             }
         }
-        // Otherwise the nearest column of the next row that has any.
+
         for (int rr = r + step; rr >= 0 && rr < kClRows && tx == kNone; rr += step) {
             if (row_empty(n, rr)) continue;
             int best = 0;
@@ -210,8 +201,6 @@ HookAction on_cursor_move_pre(ModContext*, void* args, void*, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
-// Native cursor code uses its own copy of the cell table (getItemTag is inlined there), so it
-// can walk from the item rows into cells the layout emptied or that are off screen.
 void on_cursor_move_post(ModContext*, void* args, void*, void*) {
     if (args == nullptr) return;
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
@@ -220,7 +209,7 @@ void on_cursor_move_post(ModContext*, void* args, void*, void*) {
     const bool enteredGrid = s_moveFromY >= kClRows && c->mCursorY < kClRows;
 
     if (collection_page_on_page()) {
-        // Up from the item rows while a page is shown goes onto the page.
+
         const bool stayedUp = c->mCursorX == s_moveFromX && c->mCursorY == s_moveFromY &&
                               c->mCursorY == 3 && c->mpStick != nullptr && c->mpStick->checkUpTrigger();
         if (!enteredGrid && !stayedUp) return;
@@ -237,7 +226,6 @@ void on_cursor_move_post(ModContext*, void* args, void*, void*) {
 
     if (!enteredGrid || screen_equip_row_at(c->mCursorX, c->mCursorY) >= 0) return;
 
-    // Native order of cells tried when walking up from the item rows, on the real grid.
     static const u8 kUpX[9] = {3, 3, 4, 3, 4, 5, 4, 5, 5};
     static const u8 kUpY[9] = {2, 1, 2, 0, 1, 2, 0, 1, 0};
     u8 tx = kNone;
@@ -266,14 +254,6 @@ void on_cursor_move_post(ModContext*, void* args, void*, void*) {
     c->setItemNameString(tx, ty);
 }
 
-// ---------------------------------------------------------------------------
-// Mouse pointer
-//
-// The native pointerWait() only tests the cells of its own table. The cells the library
-// added get the same treatment here, through the game's menu pointer functions.
-// ---------------------------------------------------------------------------
-
-// Mirrors the head of dusk::menu_pointer::State (x, y, valid).
 struct PointerState {
     f32 x;
     f32 y;
@@ -281,8 +261,7 @@ struct PointerState {
 };
 
 bool (*s_hitRect)(f32, f32, f32, f32, f32) = nullptr;
-// Android builds inline hit_rect() into its callers, so the manifest has no such symbol there;
-// state() is still exported and hit_rect() is only a bounds test on it.
+
 const PointerState& (*s_pointerState)() = nullptr;
 void (*s_setHoverTarget)(u16) = nullptr;
 bool (*s_consumeClick)() = nullptr;
@@ -295,14 +274,12 @@ bool pointer_hit_rect(f32 left, f32 top, f32 right, f32 bottom, f32 padding) {
            state.y <= bottom + padding;
 }
 
-// Cells in the native getItemTag() table of the equipment rows.
 bool native_table_cell(u8 x, u8 y) {
     if (y == 0) return x >= 3 && x <= 6;
     if (y == 1) return x == 3 || x == 4;
     return x >= 3 && x <= 5;
 }
 
-// dusk::menu_pointer::hit_pane(CPaneMgr*, 8.0f).
 bool pointer_hits(CPaneMgr* pm) {
     J2DPane* pane = pm != nullptr ? pm->getPanePtr() : nullptr;
     if (pane == nullptr) return false;
@@ -372,7 +349,7 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
 
     u64& tag = *static_cast<u64*>(ret);
     if (collection_page_on_page()) {
-        // The equipment rows are off screen: not selectable (cursor or pointer).
+
         tag = 0;
         return HOOK_SKIP_ORIGINAL;
     }
@@ -390,17 +367,12 @@ HookAction on_get_item_tag_pre(ModContext*, void* args, void* ret, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
-// The pane of a cell. The equipment rows come from the layout, not from getItemTag(): its
-// hook cannot be relied on (the function is inlined into the native menu code, and the
-// hooking backend may fail to patch it).
 J2DPane* any_cell_pane(dMenu_Collect2D_c* c, u8 x, u8 y) {
     if (y < kClRows) return screen_cell_pane(x, y);
     const u64 tag = c->getItemTag(x, y, true);
     return tag != 0 ? c->mpScreen->search(tag) : nullptr;
 }
 
-// Native cursorPosSet(), except that cell (6,0) only gets the small fused-shadow cursor while
-// it still is the fused shadow.
 HookAction on_cursor_pos_set_pre(ModContext*, void* args, void*, void*) {
     if (args == nullptr) return HOOK_CONTINUE;
     dMenu_Collect2D_c* c = mods::arg<dMenu_Collect2D_c*>(args, 0);
@@ -493,7 +465,7 @@ HookAction on_get_string_local_pre(ModContext*, void* args, void* ret, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
-}  // namespace
+}
 
 void nav_install_hooks(const HookService* hook_svc) {
     if (!resolve_fn(hook_svc, "dusk::menu_pointer::hit_rect", &s_hitRect, false)) {

@@ -59,8 +59,6 @@ struct DamagePopup {
     bool isCritical;
 };
 
-// Render-frame interpolation for the popups: the engine's interp step
-// (fraction into the current game frame at draw time), resolved lazily.
 static float (*s_interpStepFn)() = nullptr;
 static bool s_interpStepResolved = false;
 static const HookService* s_hpHookSvc = nullptr;
@@ -328,7 +326,6 @@ static int drawEnemyHpBarCallback(void* pActor, void* pData) {
     if (hpRatio < 0.0f) hpRatio = 0.0f;
     if (hpRatio > 1.0f) hpRatio = 1.0f;
 
-    // White trailing segment that chases the live value down, like the boss bar's chip.
     f32 chipRatio;
     auto itChip = g_enemyChipMap.find(id);
     if (itChip == g_enemyChipMap.end() || hpRatio >= itChip->second) {
@@ -539,8 +536,6 @@ static void on_meter2_draw_post(ModContext* mod_ctx, void*, void*, void*) {
         s_hpModCtx = mod_ctx;
     }
 
-    // Only real pause menus hide the bars; keep drawing through hitstop
-    // (which is a scene pause), like the stamina meter does.
     if (dComIfGp_isPauseFlag()) {
         return;
     }

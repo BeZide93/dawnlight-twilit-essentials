@@ -11,7 +11,6 @@
 #include <cstring>
 #include <string>
 
-// Service globals defined in mod.cpp.
 extern const HookService* svc_hook;
 extern "C" ModContext* mod_ctx;
 
@@ -19,7 +18,6 @@ namespace {
 
 using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
 
-// The host's config key of a mod's var: "mod.<id with '.' -> '_' and '_' -> '__'>.<name>".
 std::string mod_cvar_name(std::string_view id, std::string_view var) {
     std::string name = "mod.";
     for (const char c : id) {
@@ -50,7 +48,7 @@ GetConfigVarFn host_get_config_var() {
     return fn;
 }
 
-}  // namespace
+}
 
 bool is_mod_enabled(std::string_view id) {
     return mod_config_bool(id, "enabled", false);

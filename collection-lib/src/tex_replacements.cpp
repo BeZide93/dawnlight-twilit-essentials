@@ -1,17 +1,4 @@
-/*
- * User texture overrides for icons the library loads from .bti files.
- *
- * Users can drop PNG files into <Dusklight data folder>/texture_replacements/
- * to override a slot icon shipped in a mod's res/, named after the .bti:
- *
- *     kokiri_sword.png           overrides textures/kokiri_sword.bti
- *
- * The user file always wins over the bundled texture, because the override is
- * applied when the texture is first loaded. PNGs with different dimensions are
- * scaled to the original texture size.
- *
- * Part of the collection_lib unity translation unit (collection_lib.cpp).
- */
+
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -45,10 +32,6 @@ static void tex_rep_log(const char* fmt, ...) {
     g_logSvc->info(g_modCtx, buffer);
 }
 
-/* ResTIMG headers are raw big-endian bytes, exactly as on disk: the resource
- * service returns bundle bytes unswapped, and the BE<> field accessors are not
- * guaranteed to swap in every translation unit (they did not for width/height
- * here — a 768-wide BTI read as 3). Always go through explicit byte access. */
 static int tex_rep_timg_width(const ResTIMG* img) {
     const u8* p = reinterpret_cast<const u8*>(img);
     return (p[0x02] << 8) | p[0x03];
@@ -83,8 +66,6 @@ static bool tex_rep_resolve_png_path(const char* resPath, std::filesystem::path&
         return false;
     }
 
-    // data_dir is <config>/mod_data/<mod id>; the shared texture_replacements
-    // folder lives directly in <config>.
     std::error_code ec;
     const std::filesystem::path configDir =
         std::filesystem::path(dataDir).parent_path().parent_path();
@@ -132,8 +113,6 @@ static std::vector<u8> tex_rep_scale_bilinear(const std::vector<u8>& src, int sr
     return dst;
 }
 
-/* GX_TF_RGBA8: 4x4 pixel tiles in row-major order, 64 bytes per tile
- * (32 bytes of (A,R) pairs, then 32 bytes of (G,B) pairs). */
 static void tex_rep_encode_rgba8(u8* dst, const u8* src, int w, int h) {
     for (int ty = 0; ty < h / 4; ++ty) {
         for (int tx = 0; tx < w / 4; ++tx) {
@@ -177,9 +156,6 @@ static ResTIMG* tex_rep_build_override(ResTIMG* original, const u8* pngPixels, i
         rgba.assign(pngPixels, pngPixels + static_cast<size_t>(pngW) * pngH * 4);
     }
 
-    /* Process-owned allocation instead of the game heap: the override may be
-     * built during mod init, before the game heaps exist, and the buffer only
-     * needs to outlive the mod (same lifetime model as resource buffers). */
     const size_t texelBytes = static_cast<size_t>(targetW) * targetH * 4;
     u8* buffer = nullptr;
     try {
@@ -190,17 +166,17 @@ static ResTIMG* tex_rep_build_override(ResTIMG* original, const u8* pngPixels, i
 
     u8 header[kResTIMGSize];
     std::memcpy(header, original, kResTIMGSize);
-    header[0x00] = kGX_TF_RGBA8;  /* format */
-    header[0x01] = 1;             /* alphaEnabled */
+    header[0x00] = kGX_TF_RGBA8;
+    header[0x01] = 1;
     tex_rep_write_be16(header + 0x02, targetW);
     tex_rep_write_be16(header + 0x04, targetH);
-    header[0x08] = 0;             /* indexTexture */
-    header[0x09] = 0;             /* colorFormat */
-    tex_rep_write_be16(header + 0x0A, 0);               /* numColors */
-    tex_rep_write_be32(header + 0x0C, 0);               /* paletteOffset */
-    header[0x10] = 0;             /* mipmapEnabled */
-    header[0x18] = 1;             /* mipmapCount */
-    tex_rep_write_be32(header + 0x1C, static_cast<u32>(kResTIMGSize));  /* imageOffset */
+    header[0x08] = 0;
+    header[0x09] = 0;
+    tex_rep_write_be16(header + 0x0A, 0);
+    tex_rep_write_be32(header + 0x0C, 0);
+    header[0x10] = 0;
+    header[0x18] = 1;
+    tex_rep_write_be32(header + 0x1C, static_cast<u32>(kResTIMGSize));
 
     std::vector<u8> texels(texelBytes);
     tex_rep_encode_rgba8(texels.data(), rgba.data(), srcW, srcH);
@@ -209,11 +185,6 @@ static ResTIMG* tex_rep_build_override(ResTIMG* original, const u8* pngPixels, i
     return reinterpret_cast<ResTIMG*>(buffer);
 }
 
-/*
- * Returns a replacement ResTIMG for `resPath` when the user provided a PNG in
- * the texture_replacements folder, otherwise returns `fallback` unchanged.
- * Called once per texture on first load; the result is cached by the caller.
- */
 ResTIMG* tex_replacements_apply(const char* resPath, ResTIMG* fallback) {
     if (fallback == nullptr) {
         return nullptr;

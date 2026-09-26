@@ -144,10 +144,7 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
                 }
             }
             dMeter2Info_setItemColor(zItem, mainPic, shinePic, nullptr, nullptr);
-            /* Bottle-content icons (pou fire, fairy, bee child, worm) load
-               the content overlay as the main texture; the game modulates it
-               with the 2nd color, not the 1st that setItemColor applies
-               (dMeter2_ItemType 27..30). */
+
             const u8 zItemType = g_meter2_info.getItemType(zItem);
             if (zItemType >= 27 && zItemType <= 30 && mainPic != nullptr) {
                 g_meter2_info.set2ndColor(zItemType, mainPic);
@@ -507,9 +504,6 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
 
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
 
-    // Boss Rush owns the Midna availability in its Ganon fights (Puppet
-    // Zelda / Beast Ganon / Ganondorf); this must run regardless of the
-    // custom Z button setting, or the call and the HUD die in those fights.
     if (is_boss_rush_ganon_fight()) {
         dComIfGs_offEventBit(dSv_event_flag_c::F_0800);
         dComIfGs_onEventBit(dSv_event_flag_c::M_067);

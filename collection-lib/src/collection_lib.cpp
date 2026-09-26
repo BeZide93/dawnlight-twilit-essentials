@@ -3,7 +3,6 @@
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 
-// The library is one translation unit.
 #include "collection_common.cpp"
 #include "tex_replacements.cpp"
 #include "custom_equip.cpp"
@@ -14,17 +13,11 @@
 #include "collection_nav.cpp"
 #include "collection_equip.cpp"
 
-// Services the library uses itself, under its own names: a mod that imports the same
-// services as svc_resource / svc_host does not collide with them.
 IMPORT_OPTIONAL_SERVICE(ResourceService, cl_svc_resource);
 IMPORT_OPTIONAL_SERVICE(HostService, cl_svc_host);
 
 const ResourceService* cl_resource_service() { return cl_svc_resource; }
 const HostService* cl_host_service() { return cl_svc_host; }
-
-// ---------------------------------------------------------------------------
-// Policies
-// ---------------------------------------------------------------------------
 
 static bool (*s_unequipPolicy)() = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
@@ -37,10 +30,6 @@ void collectionlib_set_hd_layout_policy(bool (*fn)()) { s_hdLayoutPolicy = fn; }
 bool cl_unequip_enabled() { return s_unequipPolicy != nullptr && s_unequipPolicy(); }
 bool cl_keep_ordon_shield_enabled() { return s_keepOrdonShieldPolicy != nullptr && s_keepOrdonShieldPolicy(); }
 bool cl_hd_layout_requested() { return s_hdLayoutPolicy != nullptr && s_hdLayoutPolicy(); }
-
-// ---------------------------------------------------------------------------
-// B button icon of a custom sword
-// ---------------------------------------------------------------------------
 
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemB, CollectionLibItemBTextureHook);
 
@@ -66,10 +55,6 @@ static void refresh_item_b_texture() {
     dMeter2Draw_c* draw = meter != nullptr ? meter->getMeterDrawPtr() : nullptr;
     if (draw != nullptr) draw->changeTextureItemB(dComIfGs_getSelectEquipSword());
 }
-
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
 
 static void ensure_collection_heap_capacity() {
     static bool s_done = false;
@@ -128,19 +113,11 @@ void collectionlib_shutdown() {
     collection_page_teardown();
     screen_shutdown();
     custom_equip_shutdown();
-    // The meter must not keep showing an icon that is freed next.
+
     refresh_item_b_texture();
     cl_free_icons();
     s_currentCollect2D = nullptr;
 }
-
-// ---------------------------------------------------------------------------
-// Mod-link compat
-//
-// Older SDK headers declare J3DTexture::initGXTexObj out-of-line on PC, but the game binary
-// does not export it to mods; the model code needs it. The body mirrors the in-tree one.
-// Newer versions export it as loadGXTexObj (CMakeLists.txt tells them apart).
-// ---------------------------------------------------------------------------
 
 #if CL_DEFINE_INIT_GX_TEX_OBJ
 #include <dolphin/gx.h>

@@ -8,9 +8,9 @@
 
 static cl::Page* s_pages[cl::Page::kMaxPages] = {};
 static int  s_pageCount = 0;
-static int  s_target = 0;     // page the strip moves to (0 = item grid)
-static f32  s_strip = 0.0f;   // eased position of the strip, in pages
-static int  s_p2sel = -1;     // selected element of the target page, -1 = cursor in the item rows
+static int  s_target = 0;
+static f32  s_strip = 0.0f;
+static int  s_p2sel = -1;
 
 alignas(8) static unsigned char s_pagePool[sizeof(cl::Page) * cl::Page::kMaxPages];
 static bool s_pagePoolUsed[cl::Page::kMaxPages] = {};
@@ -164,7 +164,6 @@ static void fade_grid(u8 a) {
     for (int i = 0; i < n; i++) panes[i]->setAlpha(a);
 }
 
-// While sliding, grid panes left of the grid frame would cross the Link doll: hide them.
 static constexpr f32 kGridFrameLeftEdge = -117.5f;
 
 static void grid_mask_beyond_frame() {
@@ -175,7 +174,6 @@ static void grid_mask_beyond_frame() {
     }
 }
 
-// Name / description of the selected page element (native text of the cell it claims).
 static void show_element_name(dMenu_Collect2D_c* c) {
     if (s_target < 1 || s_p2sel < 0) return;
     const cl::Element& e = s_pages[s_target - 1]->mElements[s_p2sel];
@@ -256,8 +254,7 @@ bool collection_page_claims_cell(u8 x, u8 y) {
 
 static void page_attach(cl::Page* pg, J2DPane* pane, int k, J2DScreen* screen) {
     if (pg->mRootPane == nullptr) {
-        // The root sits where the pane's old parents put it, so page coordinates keep
-        // meaning what they meant in the layout.
+
         f32 tx = 0.0f, ty = 0.0f;
         for (J2DPane* p = pane->getParentPane();
              p != nullptr && p != static_cast<J2DPane*>(screen);
@@ -311,7 +308,6 @@ void collection_page_sync_screen(J2DScreen* screen) {
     }
 }
 
-// Back on the item grid: cursor, name and A button of the grid cell again.
 static void return_to_grid(dMenu_Collect2D_c* c) {
     c->cursorPosSet();
     c->setItemNameString(c->mCursorX, c->mCursorY);
@@ -345,7 +341,7 @@ void collection_page_handle_input(dMenu_Collect2D_c* c) {
             if (s_p2sel >= 0) {
                 show_element_name(c);
             } else if (c->mCursorY < kClRows) {
-                // Nothing to select on this page: the grid cursor would sit off screen.
+
                 c->mCursorX = 3;
                 c->mCursorY = 3;
                 return_to_grid(c);
@@ -383,7 +379,7 @@ void collection_page_handle_input(dMenu_Collect2D_c* c) {
         if (prv >= 0) {
             s_p2sel = prv;
         } else {
-            // Off the page into the item rows below.
+
             s_p2sel = -1;
             c->mCursorX = 3;
             c->mCursorY = 3;
@@ -450,7 +446,7 @@ void collection_page_apply(dMenu_Collect2D_c* c) {
             c->mpDrawCursor->setAlphaRate(1.0f);
             c->mpDrawCursor->setPos(pos.x, pos.y, sel, false);
             if (e.claimsCell && e.cellX == 6 && e.cellY == 0) {
-                c->mpDrawCursor->setParam(0.6f, 0.85f, 0.03f, 0.6f, 0.6f);   // native fused-shadow cursor
+                c->mpDrawCursor->setParam(0.6f, 0.85f, 0.03f, 0.6f, 0.6f);
             } else {
                 c->mpDrawCursor->setParam(1.0f, 1.0f, 0.1f, 0.7f, 0.7f);
             }

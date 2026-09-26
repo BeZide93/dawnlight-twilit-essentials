@@ -36,8 +36,6 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
         return MOD_OK;
     }
 
-    // Hooks are registered unconditionally so the submod can be toggled at
-    // runtime; every hook re-checks g_configCustomZButtonEnabled per call.
     mods::hook::add_pre<SetActiveCursorHook>(hook_svc, on_set_active_cursor_pre);
     mods::hook::add_post<SetActiveCursorHook>(hook_svc, on_set_active_cursor_post);
     mods::hook::add_pre<SetSelectItemHook>(hook_svc, on_set_select_item_pre);
@@ -107,9 +105,6 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
     }
     s_wasActive = true;
 
-    // Kill the Midna hint sparkle (field_0x738) while a menu page or an
-    // event/cutscene is active — otherwise its draw keeps blinking over the
-    // map/collection screens. During plain gameplay the hint blink stays.
     if (dMeter2Info_getWindowStatus() != 0 || dComIfGp_event_runCheck()) {
         if (g_meter2_info.getMeterClass() != nullptr) {
             dMeter2Draw_c* draw = g_meter2_info.getMeterClass()->getMeterDrawPtr();

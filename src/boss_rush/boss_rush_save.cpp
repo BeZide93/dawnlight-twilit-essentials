@@ -31,7 +31,6 @@ static_assert(sizeof(PresetHeader) == 12, "keep the header packed");
 
 ModContext* s_modCtx = nullptr;
 
-
 dSv_save_c s_presetSave;
 bool s_presetAvailable = false;
 
@@ -59,10 +58,6 @@ bool accept_preset_image(const void* data, size_t size, const char* source) {
 void load_preset() {
     s_presetAvailable = false;
 
-    // The bundle preset wins over a data_dir export: the bundle carries the
-    // full mid-game state (transform unlocked, Midna availability bits) that
-    // the boss rush fights are built around, while a stale data_dir export
-    // can be an early-game save without any of it (no wolf spawns, no Midna).
     const ResourceService* res_svc = get_resource_service();
     if (res_svc != nullptr && s_modCtx != nullptr) {
         ResourceBuffer buf = RESOURCE_BUFFER_INIT;

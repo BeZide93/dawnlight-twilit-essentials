@@ -223,9 +223,6 @@ static bool human_warp_protection_active() {
     return link != nullptr && !link->checkWolf();
 }
 
-// Disable applies every frame (idempotent, also catches freshly spawned player
-// actors mid-transition). Enable only restores once, and only if we disabled
-// before — so the game's own collider states are never fought per-frame.
 static void human_warp_set_hit_enabled(bool i_enabled) {
     if (i_enabled && !s_humanWarpHitsDisabled) return;
 
@@ -343,7 +340,6 @@ static HookAction on_human_warp_damage_action_pre(ModContext*, void* args, void*
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link == nullptr) return HOOK_CONTINUE;
 
-    // Drop pending hit results so nothing downstream still treats them as real.
     for (int i = 0; i < 3; i++) {
         link->mTgCyls[i].ResetTgHit();
     }
