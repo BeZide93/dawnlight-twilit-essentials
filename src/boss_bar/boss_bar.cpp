@@ -329,6 +329,14 @@ static f32 diababa_live01(bool& engageOk, bool& hideNow) {
 
     const bool headRisen = bq && bbi::diababa_head_risen(bq);
 
+    if (bq != nullptr && s_diaSawHeads && bbi::diababa_dying(bq)) {
+        s_diaP2Started = true;
+        engageOk = true;
+        hideNow = false;
+        s_diaDbgPhase = 3;
+        return 0.0f;
+    }
+
     const bool cutscene = dComIfGp_event_runCheck() != 0;
     if (cutscene && ++s_diaIntroFrames > 20) s_diaSawIntro = true;
     if (boss_rush_is_fighting_here()) s_diaSawIntro = true;

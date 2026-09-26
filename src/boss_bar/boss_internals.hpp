@@ -606,6 +606,11 @@ inline void ook_skip_intro(fopAc_ac_c* a) {
 
 inline s16  diababa_demo_mode(fopAc_ac_c* a) { return reinterpret_cast<const b_bq_class*>(a)->mDemoMode; }
 inline s16  diababa_action(fopAc_ac_c* a)    { return reinterpret_cast<const b_bq_class*>(a)->mAction; }
+inline s16  diababa_mode(fopAc_ac_c* a)      { return reinterpret_cast<const b_bq_class*>(a)->mMode; }
+inline bool diababa_dying(fopAc_ac_c* a) {
+    const s16 action = diababa_action(a);
+    return action == 4 || (action == 3 && diababa_mode(a) >= 40);
+}
 inline void diababa_mark_skipped(fopAc_ac_c* a) { reinterpret_cast<b_bq_class*>(a)->mDemoMode = 1000; }
 
 }

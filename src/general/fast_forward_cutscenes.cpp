@@ -33,6 +33,10 @@ namespace {
 
 using SetTimescaleFn = void (*)(float);
 using GetTimescaleFn = float (*)();
+using SetSimRateFn = void (*)(float);
+using GetSimRateFn = float (*)();
+
+constexpr float kBaseSimHz = 30.0f;
 
 constexpr float kFastForwardScale = 4.0f;
 constexpr float kHiddenRunScale = 16.0f;
@@ -43,6 +47,8 @@ constexpr int kStuckWatchFrames = 30;
 
 SetTimescaleFn s_setTimescale = nullptr;
 GetTimescaleFn s_getTimescale = nullptr;
+SetSimRateFn s_setSimRate = nullptr;
+GetSimRateFn s_getSimRate = nullptr;
 
 bool s_active = false;
 float s_restoreScale = 1.0f;
@@ -66,6 +72,10 @@ float sane_host_scale(float scale) {
     return scale > 0.0f && scale < kHiddenRunScale ? scale : 1.0f;
 }
 
+bool clock_available() {
+    return (s_setSimRate != nullptr && s_getSimRate != nullptr) || s_setTimescale != nullptr;
+}
+
 void on_aurora_get_timescale_post(ModContext*, void*, void* retval, void*) {
     if (retval == nullptr) return;
     if (s_hiddenRun) {
@@ -80,20 +90,26 @@ void on_aurora_get_timescale_post(ModContext*, void*, void* retval, void*) {
 
 HookAction on_aurora_set_timescale_pre(ModContext*, void* args, void*, void*) {
     float& requested = mods::arg_ref<float>(args, 0);
-    requested = sane_host_scale(requested);
-    s_hostScale = requested;
+    if (requested >= kHiddenRunScale) requested = 1.0f;
+    if (requested > 0.0f) s_hostScale = requested;
     s_extHoldsFastScale = requested == kFastForwardScale;
     return s_hiddenRun ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
 }
 
 float live_timescale() {
+    if (s_getSimRate != nullptr) return s_getSimRate() / kBaseSimHz;
     if (AuroraGetTimescaleHook::g_orig) return AuroraGetTimescaleHook::g_orig();
     return s_getTimescale ? s_getTimescale() : 1.0f;
 }
 
 void own_set_timescale(float scale) {
-    if (AuroraSetTimescaleHook::g_orig) AuroraSetTimescaleHook::g_orig(scale);
-    else if (s_setTimescale) s_setTimescale(scale);
+    if (s_setSimRate != nullptr) {
+        s_setSimRate(scale * kBaseSimHz);
+    } else if (AuroraSetTimescaleHook::g_orig) {
+        AuroraSetTimescaleHook::g_orig(scale);
+    } else if (s_setTimescale) {
+        s_setTimescale(scale);
+    }
 }
 
 void stop_fast_forward() {
@@ -221,16 +237,16 @@ bool is_genuine_cutscene(dEvt_control_c* evt) {
     const u8 mode = evt->getMode();
     if (mode != dEvt_mode_DEMO_e && mode != dEvt_mode_COMPULSORY_e) return false;
 
-    if (evt->mEventId < 0) return false;
-
     static constexpr const char* kNeverBoostEvents[] = {
         "DEFAULT_START",
         "KNOB_START",
     };
-    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
-    if (data != nullptr && data->getName() != nullptr) {
-        for (const char* name : kNeverBoostEvents) {
-            if (std::strcmp(data->getName(), name) == 0) return false;
+    if (evt->mEventId >= 0) {
+        dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+        if (data != nullptr && data->getName() != nullptr) {
+            for (const char* name : kNeverBoostEvents) {
+                if (std::strcmp(data->getName(), name) == 0) return false;
+            }
         }
     }
 
@@ -252,6 +268,18 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_ERROR;
     if (hook_svc->resolve) {
         void* addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::game_clock::set_sim_rate", &addr, nullptr) == MOD_OK && addr) {
+            s_setSimRate = reinterpret_cast<SetSimRateFn>(addr);
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::game_clock::get_sim_rate", &addr, nullptr) == MOD_OK && addr) {
+            s_getSimRate = reinterpret_cast<GetSimRateFn>(addr);
+        }
+        if (s_setSimRate == nullptr || s_getSimRate == nullptr) {
+            s_setSimRate = nullptr;
+            s_getSimRate = nullptr;
+        }
+        addr = nullptr;
         if (hook_svc->resolve(mod_ctx, "aurora_set_timescale", &addr, nullptr) == MOD_OK && addr) {
             s_setTimescale = reinterpret_cast<SetTimescaleFn>(addr);
         }
@@ -307,9 +335,6 @@ void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
             if (mode != dEvt_mode_DEMO_e && mode != dEvt_mode_COMPULSORY_e) {
                 key |= 5u << 22;
                 std::snprintf(why, sizeof(why), "mode=%d", (int)mode);
-            } else if (evt->mEventId < 0) {
-                key |= 6u << 22;
-                std::snprintf(why, sizeof(why), "eventId<0");
             } else if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) {
                 key |= 7u << 22;
                 std::snprintf(why, sizeof(why), "talk/shop");
@@ -324,20 +349,18 @@ void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
                 key |= (u32(type & 0xF) << 22) | (9u << 26);
                 std::snprintf(why, sizeof(why), "orderType=%d", (int)type);
             }
-            dEvDtEvent_c* data =
-                g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
-            if (data != nullptr && data->getName() != nullptr) {
-                diag_log(log_svc, "ff-cutscene: evt=%d name='%s' status=%d mode=%d "
-                                    "skipFunc=%d genuine=%d %s",
-                         (int)evt->mEventId, data->getName(), (int)evt->mEventStatus,
-                         (int)evt->getMode(), evt->mSkipFunc != nullptr ? 1 : 0,
-                         genuine ? 1 : 0, why);
-            }
         }
     }
     if (key != s_diagKey) {
         s_diagKey = key;
-        diag_log(log_svc, "ff-cutscene: gate %s (%s)", genuine ? "OPEN" : "closed", why);
+        const char* name = "";
+        if (evt != nullptr && evt->mEventId >= 0) {
+            dEvDtEvent_c* data =
+                g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+            if (data != nullptr && data->getName() != nullptr) name = data->getName();
+        }
+        diag_log(log_svc, "ff-cutscene: gate %s evt=%d name='%s' (%s)", genuine ? "OPEN" : "closed",
+                 evt != nullptr ? (int)evt->mEventId : -1, name, why);
     }
 }
 
@@ -345,14 +368,12 @@ void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
 
 void update_hidden_run_watchdog();
 
-void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx) {
-    if (!s_setTimescale) return;
+void update_fast_forward_cutscenes(const LogService* log_svc, ModContext*) {
+    if (!clock_available()) return;
 
     update_hidden_run_watchdog();
 
     update_boss_rush_fight_start_hold();
-
-    return;
 
     const bool defeatHold = is_boss_rush_defeat_hold();
     const bool startHold = is_boss_rush_fight_start_hold();
@@ -466,7 +487,7 @@ void update_hidden_run_watchdog() {
 }
 
 void fast_forward_set_hidden_run(bool on) {
-    if (!s_setTimescale) return;
+    if (!clock_available()) return;
     if (on == s_hiddenRun) {
         if (on && live_timescale() != kHiddenRunScale) own_set_timescale(kHiddenRunScale);
         return;
@@ -483,5 +504,6 @@ void fast_forward_set_hidden_run(bool on) {
 
 float general_get_aurora_timescale() {
     if (s_active) return s_restoreScale;
-    return s_getTimescale ? s_getTimescale() : 1.0f;
+    if (!clock_available()) return 1.0f;
+    return live_timescale();
 }

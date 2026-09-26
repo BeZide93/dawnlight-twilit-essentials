@@ -15,10 +15,7 @@ bool is_boss_rush_active();
 ModResult init_general(const HookService* hook_svc, ModError* error) {
     if (!hook_svc) return MOD_ERROR;
     init_skip_cutscenes(hook_svc, error);
-#if 1
-
     init_fast_forward_cutscenes(hook_svc, error);
-#endif
     init_dominion_sword(hook_svc, error);
     init_always(hook_svc, error);
     init_human_warp(hook_svc, error);
@@ -57,9 +54,7 @@ static void repair_horseback_battle_flag(const LogService* log_svc, ModContext* 
 void update_general(const LogService* log_svc, ModContext* mod_ctx) {
     repair_horseback_battle_flag(log_svc, mod_ctx);
     update_horse_cam();
-#if 0
     update_fast_forward_cutscenes(log_svc, mod_ctx);
-#endif
     update_dominion_sword();
     update_human_warp(log_svc, mod_ctx);
     update_hud_auto_fade();
@@ -69,9 +64,7 @@ void update_general(const LogService* log_svc, ModContext* mod_ctx) {
 
 void shutdown_general() {
     shutdown_skip_cutscenes();
-#if 0
     shutdown_fast_forward_cutscenes();
-#endif
     shutdown_dominion_sword();
     shutdown_human_warp();
     shutdown_faster_midna_cancel();
