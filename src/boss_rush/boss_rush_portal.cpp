@@ -12,12 +12,14 @@
 #include "d/d_menu_window.h"
 #include "d/d_meter2_info.h"
 #include "d/d_meter2_draw.h"
+#include "d/d_pane_class.h"
 #include "d/d_save.h"
 #include "d/d_s_play.h"
 #include "d/d_select_cursor.h"
 #include "d/actor/d_a_player.h"
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
+#include "JSystem/J2DGraph/J2DScreen.h"
 #include "JSystem/JUtility/TColor.h"
 #include "m_Do/m_Do_graphic.h"
 #include "Z2AudioLib/Z2SeMgr.h"
@@ -28,18 +30,19 @@ bool g_configBossRushPortal = true;
 
 static constexpr f32 kCompassBaseX = 398.0f;
 static constexpr f32 kCompassBaseY = 344.0f;
-static constexpr f32 kCursorSelectRadiusSq = 625.0f;
+static constexpr f32 kCursorSelectRadiusSq = 729.0f;
+static constexpr f32 kPortalDrawSize = 52.0f;
+static constexpr f32 kHoverBracketScale = 0.8f;
 
 static bool s_warpPending      = false;
 static bool s_requestMapClose  = false;
 static bool s_requestDmapClose = false;
 static bool s_portalHovered    = false;
 static int  s_warpDelay        = 0;
-static f32  s_glowPhase        = 0.0f;
 
-static J2DPicture* s_goldPortalPic   = nullptr;
-static J2DPicture* s_goldFogPic      = nullptr;
-static ResTIMG*    s_lastPortalTimg  = nullptr;
+static J2DScreen* s_goldPortalScreen = nullptr;
+static J2DPane*   s_goldPortalRoot   = nullptr;
+static f32        s_goldPortalW      = 0.0f;
 
 static dSelect_cursor_c* s_hoverBracket = nullptr;
 
@@ -74,31 +77,54 @@ static void get_portal_screen_pos(dMenu_Fmap2DBack_c* back, f32* outX, f32* outY
     }
 }
 
-static void update_portal_textures() {
+static void tint_portal_pane_gold(J2DPane* pane) {
+    if (pane == nullptr) return;
+    if (pane->getTypeID() == 18) {
+        static_cast<J2DPicture*>(pane)->setBlackWhite(
+            JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 215, 0, 255));
+    }
+    for (J2DPane* child = pane->getFirstChildPane(); child != nullptr;
+         child = child->getNextChildPane()) {
+        tint_portal_pane_gold(child);
+    }
+}
+
+static void ensure_portal_screen() {
+    if (s_goldPortalScreen != nullptr) {
+        return;
+    }
+
     JKRArchive* arc = g_dComIfG_gameInfo.play.getFmapResArchive();
     if (!arc) {
         arc = dComIfGp_getMain2DArchive();
     }
     if (!arc) return;
 
-    ResTIMG* portalImg = (ResTIMG*)arc->getResource('TIMG', "im_map_icon_portal_4ia_40_05.bti");
-    if (portalImg && portalImg != s_lastPortalTimg) {
-        s_lastPortalTimg = portalImg;
-
-        if (!s_goldPortalPic) {
-            s_goldPortalPic = new J2DPicture(portalImg);
-        } else {
-            s_goldPortalPic->changeTexture(portalImg, 0);
-        }
-        s_goldPortalPic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 215, 0, 255));
-
-        if (!s_goldFogPic) {
-            s_goldFogPic = new J2DPicture(portalImg);
-        } else {
-            s_goldFogPic->changeTexture(portalImg, 0);
-        }
-        s_goldFogPic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 200, 40, 255));
+    J2DScreen* screen = new J2DScreen();
+    bool ok = screen->setPriority("zelda_map_screen_portal_icon.blo", 0x20000, arc);
+    if (!ok) {
+        ok = screen->setPriority("SCRN/zelda_map_screen_portal_icon.blo", 0x20000, arc);
     }
+    if (!ok) {
+        delete screen;
+        return;
+    }
+    dPaneClass_showNullPane(screen);
+
+    J2DPane* root = screen->search(MULTI_CHAR('Null'));
+    if (root == nullptr) {
+        delete screen;
+        return;
+    }
+
+    f32 nativeW = root->getWidth();
+    if (nativeW <= 0.0f) nativeW = 40.0f;
+
+    tint_portal_pane_gold(root);
+
+    s_goldPortalScreen = screen;
+    s_goldPortalRoot   = root;
+    s_goldPortalW      = nativeW;
 }
 
 static HookAction handle_portal_cursor_pre(dMenu_Fmap_c* fmap) {
@@ -236,25 +262,18 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
     f32 posX = 0.0f, posY = 0.0f;
     get_portal_screen_pos(back, &posX, &posY);
 
-    update_portal_textures();
+    ensure_portal_screen();
 
     J2DGrafContext* ctx = dComIfGp_getCurrentGrafPort();
     if (ctx) {
         ctx->setup2D();
     }
 
-    if (s_goldFogPic) {
-        const f32 pulse    = 0.5f + 0.5f * std::sin(s_glowPhase);
-        const f32 fogSize  = 44.0f + pulse * 16.0f;
-        const u8  fogAlpha = static_cast<u8>(110.0f + pulse * 90.0f);
-        s_goldFogPic->setAlpha(fogAlpha);
-        s_goldFogPic->draw(posX - fogSize * 0.5f, posY - fogSize * 0.5f, fogSize, fogSize,
-                           false, false, false);
-    }
-
-    if (s_goldPortalPic) {
-        s_goldPortalPic->setAlpha(255);
-        s_goldPortalPic->draw(posX - 20.0f, posY - 20.0f, 40.0f, 40.0f, false, false, false);
+    if (s_goldPortalScreen != nullptr && s_goldPortalRoot != nullptr) {
+        const f32 scale = kPortalDrawSize / s_goldPortalW;
+        s_goldPortalRoot->scale(scale, scale);
+        s_goldPortalRoot->translate(posX, posY);
+        s_goldPortalScreen->draw(0.0f, 0.0f, ctx);
     }
 
     if (s_portalHovered) {
@@ -265,7 +284,7 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
             s_hoverBracket->onUpdateFlag();
             s_hoverBracket->setAlphaRate(1.0f);
             s_hoverBracket->setPos(posX, posY);
-            s_hoverBracket->setScale(1.0f);
+            s_hoverBracket->setScale(kHoverBracketScale);
             s_hoverBracket->draw();
             s_hoverBracket->resetUpdateFlag();
         }
@@ -298,11 +317,6 @@ static HookAction dmap_map_mode_pre(ModContext*, void*, void*, void*) {
 }
 
 void update_boss_rush_portal(const LogService* log_svc, ModContext* mod_ctx) {
-    if (portal_available()) {
-        s_glowPhase += 0.06f;
-        if (s_glowPhase >= 6.2831853f) s_glowPhase -= 6.2831853f;
-    }
-
     if (!s_warpPending) {
         s_warpDelay = 0;
         return;
@@ -339,6 +353,10 @@ void shutdown_boss_rush_portal() {
     s_requestMapClose  = false;
     s_requestDmapClose = false;
     s_portalHovered    = false;
-    s_glowPhase        = 0.0f;
     s_warpDelay        = 0;
+
+    delete s_goldPortalScreen;
+    s_goldPortalScreen = nullptr;
+    s_goldPortalRoot   = nullptr;
+    s_goldPortalW      = 0.0f;
 }

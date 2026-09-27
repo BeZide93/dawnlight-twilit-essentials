@@ -405,6 +405,7 @@ static void shutdown_free_camera_toggle() {
 
 static ConfigVarHandle s_varGeneralSkipCutscenes = 0;
 static ConfigVarHandle s_varGeneralFastForwardCutscenes = 0;
+static ConfigVarHandle s_varGeneralFastForwardSpeed = 0;
 static ConfigVarHandle s_varGeneralDominionSword = 0;
 static ConfigVarHandle s_varHorseCamNoRecenter = 0;
 static ConfigVarHandle s_varGeneralHumanWarp = 0;
@@ -874,6 +875,12 @@ static void on_general_fast_forward_cutscenes_changed(ModContext*, ConfigVarHand
     }
 }
 
+static void on_general_fast_forward_speed_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configGeneralFastForwardSpeed = clamp_fast_forward_speed(static_cast<float>(value->int_value));
+    }
+}
+
 static void on_general_dominion_sword_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configGeneralDominionSword = value->bool_value;
@@ -1013,6 +1020,10 @@ static bool is_wolf_sprint_speed_disabled(ModContext*, void*) {
 
 static bool is_swim_sprint_speed_disabled(ModContext*, void*) {
     return !g_configStaminaSwimSprint;
+}
+
+static bool is_fast_forward_speed_disabled(ModContext*, void*) {
+    return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_OFF;
 }
 
 static bool is_controls_midna_disabled(ModContext*, void*) {
@@ -1494,10 +1505,25 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>Skips skippable cutscenes automatically.</p>");
     static const char* const kFastForwardCutscenesModes[] = {"Off", "On", "Skip even more"};
     ui_add_select(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
-        "<p><b>On</b> plays cutscenes that can't be skipped at 8x speed. Dialogue text still "
-        "runs at normal speed. <b>Skip even more</b> also speeds up doors opening and other "
-        "waits that normally stay at normal speed.</p>",
+        "<p><b>On</b> plays cutscenes that can't be skipped at increased speed. Dialogue text "
+        "still runs at normal speed. <b>Skip even more</b> also speeds up doors opening and "
+        "other waits that normally stay at normal speed.</p>",
         kFastForwardCutscenesModes, 3);
+    if (s_varGeneralFastForwardSpeed != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_NUMBER;
+        c.label = "Fast-forward speed";
+        c.help_rml = "<p>Speed multiplier for fast-forwarded cutscenes (default: 8x, "
+                     "max 15x).</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varGeneralFastForwardSpeed;
+        c.is_disabled = is_fast_forward_speed_disabled;
+        c.min = 2;
+        c.max = 15;
+        c.step = 1;
+        c.suffix = "x";
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
     static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
     ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
         "<p><b>Fast</b> speeds up room, door and map transitions. "
@@ -2204,6 +2230,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varGeneralFastForwardCutscenes, &mode);
             g_configGeneralFastForwardCutscenesMode = static_cast<int>(mode);
             svc_config->subscribe(mod_ctx, s_varGeneralFastForwardCutscenes, on_general_fast_forward_cutscenes_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descGeneralFfSpeed = CONFIG_VAR_DESC_INIT;
+        descGeneralFfSpeed.name = "generalFastForwardSpeed";
+        descGeneralFfSpeed.type = CONFIG_VAR_INT;
+        descGeneralFfSpeed.default_int = 8;
+        if (svc_config->register_var(mod_ctx, &descGeneralFfSpeed, &s_varGeneralFastForwardSpeed) == MOD_OK) {
+            int64_t speed = 8;
+            svc_config->get_int(mod_ctx, s_varGeneralFastForwardSpeed, &speed);
+            g_configGeneralFastForwardSpeed = clamp_fast_forward_speed(static_cast<float>(speed));
+            svc_config->subscribe(mod_ctx, s_varGeneralFastForwardSpeed, on_general_fast_forward_speed_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descGeneralDominionSword = CONFIG_VAR_DESC_INIT;

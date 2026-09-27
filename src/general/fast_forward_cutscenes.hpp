@@ -11,6 +11,9 @@ enum FastForwardCutscenesMode {
 };
 
 extern int g_configGeneralFastForwardCutscenesMode;
+extern float g_configGeneralFastForwardSpeed;
+
+float clamp_fast_forward_speed(float speed);
 
 ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError* error);
 void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx);

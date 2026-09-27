@@ -23,6 +23,14 @@
 
 int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
 
+float g_configGeneralFastForwardSpeed = 8.0f;
+
+float clamp_fast_forward_speed(float speed) {
+    if (speed < 2.0f) speed = 2.0f;
+    if (speed > 15.0f) speed = 15.0f;
+    return speed;
+}
+
 bool is_boss_rush_active();
 bool boss_rush_is_fighting_here();
 bool boss_rush_is_returning_to_chamber();
@@ -44,8 +52,6 @@ using GetTransientSettingsFn = dusk::TransientSettings& (*)();
 
 constexpr float kBaseSimHz = 30.0f;
 
-constexpr float kFastForwardScale = 8.0f;
-constexpr float kVeryFastForwardScale = 12.0f;
 constexpr float kTurboScale = 4.0f;
 constexpr float kHiddenRunScale = 16.0f;
 constexpr int kLeadFrames = 5;
@@ -500,7 +506,7 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
                                    !skipWillHandle &&
                                    s_confirmFrames >= kLeadFrames;
 
-    const float targetScale = veryFast ? kVeryFastForwardScale : kFastForwardScale;
+    const float targetScale = g_configGeneralFastForwardSpeed;
 
     if (shouldFastForward) {
         const float current = live_timescale();

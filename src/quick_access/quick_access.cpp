@@ -1974,6 +1974,25 @@ static void qa_wolf_sun_song() {
     link->handleWolfHowl();
 }
 
+static void qa_wolf_open_warp_map() {
+    dMeter2Info_setPauseStatus(6);
+}
+
+static void wolf_menu_select(f32 stickY) {
+    const f32 kDeadzone = 0.35f;
+    if (stickY >= kDeadzone) {
+        if (s_selectedSlot != SLOT_UP) {
+            s_selectedSlot = SLOT_UP;
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+    } else if (stickY <= -kDeadzone) {
+        if (s_selectedSlot != SLOT_DOWN) {
+            s_selectedSlot = SLOT_DOWN;
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+    }
+}
+
 static void wolf_quick_access_input(interface_of_controller_pad& pad) {
     bool held = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
     if (s_dpadCancelLatch) {
@@ -1997,6 +2016,9 @@ static void wolf_quick_access_input(interface_of_controller_pad& pad) {
         s_holdFrames++;
         if (s_holdFrames >= QA_TAP_FRAMES) {
             s_menuOpen = true;
+            if (s_selectedSlot != SLOT_UP && s_selectedSlot != SLOT_DOWN) {
+                s_selectedSlot = SLOT_DOWN;
+            }
             qa_invalidate_msg_window();
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
         }
@@ -2009,7 +2031,12 @@ static void wolf_quick_access_input(interface_of_controller_pad& pad) {
         pad.mButtonFlags &= ~PAD_BUTTON_A;
         s_dpadCancelLatch = true;
         close_menu();
-        qa_wolf_sun_song();
+        if (s_selectedSlot == SLOT_UP) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OK, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            qa_wolf_open_warp_map();
+        } else {
+            qa_wolf_sun_song();
+        }
         suppress_menu_buttons(pad);
         return;
     }
@@ -2029,6 +2056,13 @@ static void wolf_quick_access_input(interface_of_controller_pad& pad) {
     pad.mPressedButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
     pad.mButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
     swallow_shoulder_triggers(pad);
+
+    const f32 stickX = pad.mCStickPosX;
+    const f32 stickY = pad.mCStickPosY;
+    const f32 stickMag = std::sqrt(stickX * stickX + stickY * stickY);
+    if (stickMag >= 0.35f) {
+        wolf_menu_select(stickY);
+    }
 
     suppress_menu_buttons(pad);
 }
