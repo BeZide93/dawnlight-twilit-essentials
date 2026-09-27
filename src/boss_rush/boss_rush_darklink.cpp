@@ -656,6 +656,7 @@ void draw_at(J3DModel* model, MtxP mtx) {
 }
 
 bool boss_rush_darklink_enabled() {
+#if USE_DARK_LINK
     static int s_checkCountdown = 0;
     static bool s_enabled = false;
     if (--s_checkCountdown <= 0) {
@@ -663,6 +664,9 @@ bool boss_rush_darklink_enabled() {
         s_enabled = is_mod_enabled(kDarkLinkModId);
     }
     return s_enabled;
+#else
+    return false;
+#endif
 }
 
 void boss_rush_darklink_draw(const cXyz& pos, const csXyz& angle) {
