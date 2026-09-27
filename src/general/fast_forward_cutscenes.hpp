@@ -4,7 +4,13 @@
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
 
-extern bool g_configGeneralFastForwardCutscenes;
+enum FastForwardCutscenesMode {
+    FF_CUTSCENES_OFF = 0,
+    FF_CUTSCENES_ON = 1,
+    FF_CUTSCENES_VERY_FAST = 2,
+};
+
+extern int g_configGeneralFastForwardCutscenesMode;
 
 ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError* error);
 void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx);

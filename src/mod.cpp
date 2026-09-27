@@ -877,7 +877,10 @@ static void on_general_skip_cutscenes_changed(ModContext*, ConfigVarHandle, cons
 
 static void on_general_fast_forward_cutscenes_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
-        g_configGeneralFastForwardCutscenes = value->bool_value;
+        int64_t mode = value->int_value;
+        if (mode < FF_CUTSCENES_OFF) mode = FF_CUTSCENES_OFF;
+        if (mode > FF_CUTSCENES_VERY_FAST) mode = FF_CUTSCENES_VERY_FAST;
+        g_configGeneralFastForwardCutscenesMode = static_cast<int>(mode);
     }
 }
 
@@ -1301,19 +1304,6 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>Quality of life options.</p>", nullptr);
 
-    svc_ui->pane_add_section(mod_ctx, left, "Epona");
-    ui_add_toggle(left, "Enabled", g_varEponaEnabled,
-        "<p>Enables the Epona tweaks below.</p>");
-    ui_add_percent(left, "Turn speed", g_varEponaTurnRatePct,
-        "<p>Steering sharpness. 100% is vanilla.</p>", 100, 300, 5, is_epona_sub_disabled);
-    ui_add_percent(left, "Top speed", g_varEponaTopSpeedPct,
-        "<p>Gallop top speed. 100% is vanilla.</p>", 100, 200, 5, is_epona_sub_disabled);
-    ui_add_toggle(left, "Unlimited spurs", g_varEponaUnlimitedSpurs,
-        "<p>The whip pool stays at 6/6 while riding.</p>", is_epona_sub_disabled);
-    ui_add_toggle(left, "Auto-gallop", g_varEponaAutoGallop,
-        "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
-        is_epona_sub_disabled);
-
     ui_add_toggle(left, "Warp as human", s_varGeneralHumanWarp,
         "<p>Human Link warps with the light beam instead of turning into a wolf first.</p>");
 
@@ -1334,6 +1324,19 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
 
     ui_add_toggle(left, "Faster call cancel", s_varGeneralFasterMidnaCancel,
         "<p>Lets you cancel Midna's call faster.</p>");
+
+    svc_ui->pane_add_section(mod_ctx, left, "Epona");
+    ui_add_toggle(left, "Enabled", g_varEponaEnabled,
+        "<p>Enables the Epona tweaks below.</p>");
+    ui_add_percent(left, "Turn speed", g_varEponaTurnRatePct,
+        "<p>Steering sharpness. 100% is vanilla.</p>", 100, 300, 5, is_epona_sub_disabled);
+    ui_add_percent(left, "Top speed", g_varEponaTopSpeedPct,
+        "<p>Gallop top speed. 100% is vanilla.</p>", 100, 200, 5, is_epona_sub_disabled);
+    ui_add_toggle(left, "Unlimited spurs", g_varEponaUnlimitedSpurs,
+        "<p>The whip pool stays at 6/6 while riding.</p>", is_epona_sub_disabled);
+    ui_add_toggle(left, "Auto-gallop", g_varEponaAutoGallop,
+        "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
+        is_epona_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
     ui_add_toggle(left, "Enabled", s_varStamina,
@@ -1499,9 +1502,12 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>General options.</p>", nullptr);
     ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
         "<p>Skips skippable cutscenes automatically.</p>");
-    ui_add_toggle(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
-        "<p>Plays cutscenes that can't be skipped at 4x speed. Dialogue text still runs at "
-        "normal speed.</p>");
+    static const char* const kFastForwardCutscenesModes[] = {"Off", "On", "Skip even more"};
+    ui_add_select(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
+        "<p><b>On</b> plays cutscenes that can't be skipped at 8x speed. Dialogue text still "
+        "runs at normal speed. <b>Skip even more</b> also speeds up doors opening and other "
+        "waits that normally stay at normal speed.</p>",
+        kFastForwardCutscenesModes, 3);
     static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
     ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
         "<p><b>Fast</b> speeds up room, door and map transitions. "
@@ -2214,10 +2220,12 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 
         ConfigVarDesc descGeneralFfCut = CONFIG_VAR_DESC_INIT;
         descGeneralFfCut.name = "generalFastForwardCutscenes";
-        descGeneralFfCut.type = CONFIG_VAR_BOOL;
-        descGeneralFfCut.default_bool = false;
+        descGeneralFfCut.type = CONFIG_VAR_INT;
+        descGeneralFfCut.default_int = FF_CUTSCENES_OFF;
         if (svc_config->register_var(mod_ctx, &descGeneralFfCut, &s_varGeneralFastForwardCutscenes) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varGeneralFastForwardCutscenes, &g_configGeneralFastForwardCutscenes);
+            int64_t mode = FF_CUTSCENES_OFF;
+            svc_config->get_int(mod_ctx, s_varGeneralFastForwardCutscenes, &mode);
+            g_configGeneralFastForwardCutscenesMode = static_cast<int>(mode);
             svc_config->subscribe(mod_ctx, s_varGeneralFastForwardCutscenes, on_general_fast_forward_cutscenes_changed, nullptr, nullptr);
         }
 
