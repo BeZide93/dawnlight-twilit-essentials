@@ -9,8 +9,6 @@
 #include "fast_forward_cutscenes.hpp"
 #include "dominion_sword.hpp"
 #include "faster_transitions.hpp"
-#include "lockon_letterbox.hpp"
-#include "drowning_warning.hpp"
 
 ModResult init_general(const HookService* hook_svc, ModError* error);
 void update_general(const LogService* log_svc, ModContext* mod_ctx);

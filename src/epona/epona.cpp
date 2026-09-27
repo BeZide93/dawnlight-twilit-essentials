@@ -28,10 +28,10 @@ ConfigVarHandle g_varEponaTopSpeedPct = 0;
 ConfigVarHandle g_varEponaUnlimitedSpurs = 0;
 ConfigVarHandle g_varEponaAutoGallop = 0;
 
-static bool s_unlimitedSpurs = true;
-static bool s_autoGallop = true;
+static bool s_unlimitedSpurs = false;
+static bool s_autoGallop = false;
 static f32 s_turnRate = 1.25f;
-static f32 s_topSpeed = 1.25f;
+static f32 s_topSpeed = 1.05f;
 
 static void on_epona_enabled_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
                                      const ConfigVarValue*, void*) {
@@ -142,7 +142,7 @@ ModResult init_epona_config(const ConfigService* config_svc, ModContext* mod_ctx
 
     desc.name = "eponaEnabled";
     desc.type = CONFIG_VAR_BOOL;
-    desc.default_bool = false;
+    desc.default_bool = true;
     if (config_svc->register_var(mod_ctx, &desc, &g_varEponaEnabled) == MOD_OK) {
         config_svc->get_bool(mod_ctx, g_varEponaEnabled, &g_configEponaEnabled);
         config_svc->subscribe(mod_ctx, g_varEponaEnabled, on_epona_enabled_changed, nullptr, nullptr);
@@ -160,9 +160,9 @@ ModResult init_epona_config(const ConfigService* config_svc, ModContext* mod_ctx
     }
 
     desc.name = "eponaTopSpeedPct";
-    desc.default_int = 125;
+    desc.default_int = 105;
     if (config_svc->register_var(mod_ctx, &desc, &g_varEponaTopSpeedPct) == MOD_OK) {
-        int64_t pct = 125;
+        int64_t pct = 105;
         config_svc->get_int(mod_ctx, g_varEponaTopSpeedPct, &pct);
         s_topSpeed = static_cast<f32>(pct) / 100.0f;
         config_svc->subscribe(mod_ctx, g_varEponaTopSpeedPct, on_epona_top_speed_changed, nullptr, nullptr);
@@ -170,17 +170,18 @@ ModResult init_epona_config(const ConfigService* config_svc, ModContext* mod_ctx
 
     desc.name = "eponaUnlimitedSpurs";
     desc.type = CONFIG_VAR_BOOL;
-    desc.default_bool = true;
+    desc.default_bool = false;
     if (config_svc->register_var(mod_ctx, &desc, &g_varEponaUnlimitedSpurs) == MOD_OK) {
-        bool enabled = true;
+        bool enabled = false;
         config_svc->get_bool(mod_ctx, g_varEponaUnlimitedSpurs, &enabled);
         s_unlimitedSpurs = enabled;
         config_svc->subscribe(mod_ctx, g_varEponaUnlimitedSpurs, on_epona_unlimited_spurs_changed, nullptr, nullptr);
     }
 
     desc.name = "eponaAutoGallop";
+    desc.default_bool = false;
     if (config_svc->register_var(mod_ctx, &desc, &g_varEponaAutoGallop) == MOD_OK) {
-        bool enabled = true;
+        bool enabled = false;
         config_svc->get_bool(mod_ctx, g_varEponaAutoGallop, &enabled);
         s_autoGallop = enabled;
         config_svc->subscribe(mod_ctx, g_varEponaAutoGallop, on_epona_auto_gallop_changed, nullptr, nullptr);

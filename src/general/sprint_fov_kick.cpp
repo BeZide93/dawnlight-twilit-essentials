@@ -10,7 +10,7 @@
 
 #include <cmath>
 
-bool g_configSprintFovKickEnabled = false;
+bool g_configSprintFovKickEnabled = true;
 
 static constexpr f32 kMaxKickDeg = 8.0f;
 static constexpr f32 kSprintSpeedFactor = 1.06f;

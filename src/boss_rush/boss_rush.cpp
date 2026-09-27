@@ -245,7 +245,7 @@ const BossGalleryEntry g_bossGalleryTable[] = {
 };
 const size_t g_bossGalleryCount = sizeof(g_bossGalleryTable) / sizeof(g_bossGalleryTable[0]);
 
-bool g_configBossRushSuggestedItems = false;
+bool g_configBossRushSuggestedItems = true;
 bool g_configMasterRushRetryFromStart = true;
 int g_configMasterRushDifficulty = 0;
 static void apply_master_rush_max_life();
@@ -1028,6 +1028,27 @@ static void assign_select_item(int btn, u8 slotNo) {
     dComIfGs_setSelectItemIndex(btn, slotNo);
 }
 
+static void assign_bomb_arrow(int btn) {
+    int bagSlot = -1;
+    for (int b = 0; b < 3 && bagSlot < 0; b++) {
+        if (dComIfGs_getItem(static_cast<u8>(SLOT_15 + b), false) == dItemNo_NORMAL_BOMB_e) {
+            bagSlot = SLOT_15 + b;
+        }
+    }
+    for (int b = 0; b < 3 && bagSlot < 0; b++) {
+        const u8 item = dComIfGs_getItem(static_cast<u8>(SLOT_15 + b), false);
+        if (item == dItemNo_WATER_BOMB_e || item == dItemNo_POKE_BOMB_e) {
+            bagSlot = SLOT_15 + b;
+        }
+    }
+    if (bagSlot < 0 || dComIfGs_getItem(SLOT_4, false) != dItemNo_BOW_e) {
+        assign_select_item(btn, SLOT_4);
+        return;
+    }
+    dComIfGs_setSelectItemIndex(btn, static_cast<u8>(bagSlot));
+    dComIfGs_setMixItemIndex(btn, SLOT_4);
+}
+
 static void apply_zant_room_suggested_items(s8 room) {
     clear_all_select_items();
 
@@ -1038,6 +1059,7 @@ static void apply_zant_room_suggested_items(s8 room) {
         break;
     case 54:
         assign_select_item(SELECT_ITEM_X, SLOT_3);
+        assign_select_item(SELECT_ITEM_Y, SLOT_0);
         break;
     case 55:
         assign_select_item(SELECT_ITEM_X, SLOT_3);
@@ -1077,12 +1099,14 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
     if (std::strcmp(name, "Ook") == 0) {
     } else if (std::strcmp(name, "Diababa") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_0);
+        assign_bomb_arrow(SELECT_ITEM_Y);
     } else if (std::strcmp(name, "Dangoro") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_3);
     } else if (std::strcmp(name, "Fyrus") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_3);
         assign_select_item(SELECT_ITEM_Y, SLOT_4);
     } else if (std::strcmp(name, "Deku Toad") == 0) {
+        assign_bomb_arrow(SELECT_ITEM_X);
     } else if (std::strcmp(name, "Morpheel") == 0) {
         dMeter2Info_setCloth(dItemNo_WEAR_ZORA_e, false);
         dComIfGs_setSelectEquipClothes(dItemNo_WEAR_ZORA_e);
@@ -1111,6 +1135,7 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
     } else if (std::strcmp(name, "Blizzeta") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_6);
     } else if (std::strcmp(name, "Darknut") == 0) {
+        assign_select_item(SELECT_ITEM_X, SLOT_6);
     } else if (std::strcmp(name, "Armogohma") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_4);
         assign_select_item(SELECT_ITEM_Y, SLOT_8);
@@ -4861,8 +4886,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         }
         s_pendingFightIndex = static_cast<int>(i);
         s_ignitedStatue = static_cast<int>(i);
-        u32 lastMode = g_dComIfG_gameInfo.info.getRestart().mLastMode & ~0xFF000000;
-        lastMode |= 0x28000000;
+        const u32 lastMode = 0x28000000;
         dComIfGp_setNextStage("D_MN09A", 0, 50, 0, 0.0f, lastMode, 1, 0, 0, 0, 0);
         return;
     }
@@ -4916,7 +4940,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
     s_beastGanonKoTimer = -1;
     boss_bar_consume_defeat_event();
 
-    u32 lastMode = g_dComIfG_gameInfo.info.getRestart().mLastMode & ~0xFF000000;
+    u32 lastMode = 0;
     if (std::strcmp(boss.displayName, "Ook") == 0 ||
         std::strcmp(boss.displayName, "Dangoro") == 0 ||
         std::strcmp(boss.displayName, "Deku Toad") == 0 ||

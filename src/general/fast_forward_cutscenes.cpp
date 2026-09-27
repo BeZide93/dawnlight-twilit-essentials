@@ -39,7 +39,7 @@ using GetTransientSettingsFn = dusk::TransientSettings& (*)();
 
 constexpr float kBaseSimHz = 30.0f;
 
-constexpr float kFastForwardScale = 4.0f;
+constexpr float kFastForwardScale = 8.0f;
 constexpr float kTurboScale = 4.0f;
 constexpr float kHiddenRunScale = 16.0f;
 constexpr int kLeadFrames = 5;

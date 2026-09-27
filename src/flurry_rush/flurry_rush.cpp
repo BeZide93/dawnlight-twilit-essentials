@@ -26,8 +26,8 @@
 bool g_configFlurryRushEnabled = false;
 int g_configFlurryRushPerfectFrames = 30;
 int g_configFlurryRushSlowFactor = 30;
-int g_configFlurryRushWindowTicks = 150;
-int g_configFlurryRushHits = 4;
+int g_configFlurryRushWindowTicks = 90;
+int g_configFlurryRushHits = 6;
 int g_configFlurryRushIdleFrames = 45;
 
 namespace {

@@ -46,11 +46,9 @@ add_mod(twilit_essentials
             src/general/faster_midna_cancel.cpp
             src/general/faster_transitions.cpp
             src/general/midna_select_freeze_guard.cpp
-            src/general/lockon_letterbox.cpp
             src/general/hud_auto_fade.cpp
             src/general/damage_vignette.cpp
             src/general/oxygen_vignette.cpp
-            src/general/drowning_warning.cpp
             src/general/sprint_fov_kick.cpp
             src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp

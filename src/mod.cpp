@@ -1,7 +1,6 @@
 #include "general/general.hpp"
 #include "general/always.hpp"
 #include "general/damage_vignette.hpp"
-#include "general/drowning_warning.hpp"
 #include "general/hud_auto_fade.hpp"
 #include "general/oxygen_vignette.hpp"
 #include "general/sprint_fov_kick.hpp"
@@ -411,18 +410,14 @@ static ConfigVarHandle s_varHorseCamNoRecenter = 0;
 static ConfigVarHandle s_varGeneralHumanWarp = 0;
 static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
-static ConfigVarHandle s_varGeneralLockonLetterbox = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
-static ConfigVarHandle s_varGeneralDrowningWarning = 0;
-static ConfigVarHandle s_varGeneralSprintFovKick = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varDamageVignetteIntensity = 0;
 static ConfigVarHandle s_varHpBars = 0;
 static ConfigVarHandle s_varHpBarsShowNumbers = 0;
 static ConfigVarHandle s_varBossBar = 0;
 static ConfigVarHandle s_varVisibleEquip = 0;
-static ConfigVarHandle s_varVisibleEquipMode = 0;
 static ConfigVarHandle s_varVisibleEquipMirrorBow = 0;
 static ConfigVarHandle s_varVisibleEquipShowBow = 0;
 static ConfigVarHandle s_varVisibleEquipShowLantern = 0;
@@ -438,9 +433,6 @@ static ConfigVarHandle s_varSheathedSpin = 0;
 static ConfigVarHandle s_varFlurryRush = 0;
 static ConfigVarHandle s_varFlurryRushPerfectFrames = 0;
 static ConfigVarHandle s_varFlurryRushSlowFactor = 0;
-static ConfigVarHandle s_varFlurryRushWindow = 0;
-static ConfigVarHandle s_varFlurryRushHits = 0;
-static ConfigVarHandle s_varFlurryRushIdleFrames = 0;
 static ConfigVarHandle s_varStamina = 0;
 static ConfigVarHandle s_varStaminaMax = 0;
 static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
@@ -487,7 +479,9 @@ static ConfigVarHandle s_varCollectionStarterEquip = 0;
 static ConfigVarHandle s_varCollectionKeepOrdonShield = 0;
 static ConfigVarHandle s_varCollectionShowOrdonHero = 0;
 static ConfigVarHandle s_varCollectionOrdonHeroAlways = 0;
+#if 0
 static ConfigVarHandle s_varBossRushSuggestedItems = 0;
+#endif
 static ConfigVarHandle s_varBossRushRefillAfterFight = 0;
 static ConfigVarHandle s_varBossRushSeparateGanon = 0;
 static ConfigVarHandle s_varBossRushVanillaGear = 0;
@@ -496,7 +490,6 @@ static ConfigVarHandle s_varBossRushShowBestTimer = 0;
 static ConfigVarHandle s_varBossRushBestTimes = 0;
 static ConfigVarHandle s_varBossRushChainBest = 0;
 static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
-static ConfigVarHandle s_varBossRushPortal = 0;
 static ConfigVarHandle s_varMasterRushRetryMode = 0;
 static ConfigVarHandle s_varMasterRushDifficulty = 0;
 
@@ -548,11 +541,13 @@ static void on_collection_ordon_hero_always_changed(ModContext*, ConfigVarHandle
     }
 }
 
+#if 0
 static void on_boss_rush_suggested_items_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossRushSuggestedItems = value->bool_value;
     }
 }
+#endif
 
 static void on_boss_rush_refill_after_fight_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
@@ -635,12 +630,6 @@ static void on_oxygen_vignette_changed(ModContext*, ConfigVarHandle, const Confi
     }
 }
 
-static void on_general_drowning_warning_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configDrowningWarningEnabled = value->bool_value;
-    }
-}
-
 static bool is_boss_rush_timer_sub_disabled(ModContext* ctx, void* user) {
     return is_boss_rush_fight_toggle_disabled(ctx, user);
 }
@@ -658,12 +647,6 @@ static void on_boss_rush_timer_changed(ModContext*, ConfigVarHandle, const Confi
 static void on_boss_rush_show_best_timer_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossRushShowBestTimer = value->bool_value;
-    }
-}
-
-static void on_boss_rush_portal_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configBossRushPortal = value->bool_value;
     }
 }
 
@@ -713,33 +696,6 @@ static void on_flurry_rush_slow_factor_changed(ModContext*, ConfigVarHandle, con
         if (pct < 5) pct = 5;
         if (pct > 80) pct = 80;
         g_configFlurryRushSlowFactor = static_cast<int>(pct);
-    }
-}
-
-static void on_flurry_rush_window_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        int64_t seconds = value->int_value;
-        if (seconds < 1) seconds = 1;
-        if (seconds > 10) seconds = 10;
-        g_configFlurryRushWindowTicks = static_cast<int>(seconds * 30);
-    }
-}
-
-static void on_flurry_rush_hits_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        int64_t hits = value->int_value;
-        if (hits < 1) hits = 1;
-        if (hits > 8) hits = 8;
-        g_configFlurryRushHits = static_cast<int>(hits);
-    }
-}
-
-static void on_flurry_rush_idle_frames_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        int64_t frames = value->int_value;
-        if (frames < 10) frames = 10;
-        if (frames > 150) frames = 150;
-        g_configFlurryRushIdleFrames = static_cast<int>(frames);
     }
 }
 
@@ -943,21 +899,9 @@ static void on_general_faster_midna_cancel_changed(ModContext*, ConfigVarHandle,
     }
 }
 
-static void on_general_lockon_letterbox_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configLockonNoLetterbox = value->bool_value;
-    }
-}
-
 static void on_hud_auto_fade_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configHudAutoFadeEnabled = value->bool_value;
-    }
-}
-
-static void on_general_sprint_fov_kick_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configSprintFovKickEnabled = value->bool_value;
     }
 }
 
@@ -983,12 +927,6 @@ static void on_hp_bars_show_numbers_changed(ModContext*, ConfigVarHandle, const 
 static void on_visible_equip_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configVisibleEquipmentEnabled = value->bool_value;
-    }
-}
-
-static void on_visible_equip_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configVisibleEquipDisplayMode = value->bool_value ? 1 : 0;
     }
 }
 
@@ -1575,21 +1513,14 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
 
     ui_add_toggle(left, "Horse camera: no auto-recenter", s_varHorseCamNoRecenter,
         "<p>On Epona, the camera stays where you point it with the C-Stick.</p>");
-    ui_add_toggle(left, "No letterbox while lock-on", s_varGeneralLockonLetterbox,
-        "<p>No black bars on the screen while Z-targeting.</p>");
     ui_add_toggle(left, "Enable HUD auto fade", s_varHudAutoFade,
         "<p>Fades the whole HUD out while Link stands still, and back in the moment he moves.</p>");
-    ui_add_toggle(left, "Sprint FOV kick", s_varGeneralSprintFovKick,
-        "<p>The camera zooms out slightly while sprinting.</p>");
 
     svc_ui->pane_add_section(mod_ctx, left, "Indicator");
     ui_add_toggle(left, "Damage vignette", s_varDamageVignette,
         "<p>Red screen-edge flash when hit, plus a pulsing vignette at low health.</p>");
     ui_add_toggle(left, "Drowning vignette", s_varGeneralDrowningVignette,
         "<p>Blue screen-edge vignette while the air meter runs low.</p>");
-    ui_add_toggle(left, "Drowning warning bands", s_varGeneralDrowningWarning,
-        "<p>Layered blue bands that pulse at the screen edges while the air meter runs low. "
-        "An alternative style to the drowning vignette above - both can be on at once.</p>");
     if (s_varDamageVignetteIntensity != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
@@ -1623,8 +1554,6 @@ static ModResult tab_visuals(ModContext*, UiWindowHandle, UiElementHandle left,
         c.is_disabled = is_visible_equip_sub_disabled;
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
-    ui_add_toggle(left, "Show gear always (even when not equipped)", s_varVisibleEquipMode,
-        "<p>Shows gear even when it is not equipped.</p>", is_visible_equip_sub_disabled);
     ui_add_toggle(left, "Mirror bow angle", s_varVisibleEquipMirrorBow,
         "<p>Flips the slung bow to Link's opposite shoulder.</p>", is_visible_equip_sub_disabled);
     ui_add_toggle(left, "Quiver on left belt", s_varVisibleEquipQuiverOnBelt,
@@ -1765,47 +1694,6 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
-    if (s_varFlurryRushHits != 0) {
-        UiControlDesc c = UI_CONTROL_DESC_INIT;
-        c.kind = UI_CONTROL_NUMBER;
-        c.label = "Flurry hits";
-        c.help_rml = "<p>How many swings the flurry has - exactly this many hits land when the "
-                     "enemy stays in reach (default: 4).</p>";
-        c.binding = UI_BINDING_CONFIG_VAR;
-        c.config_var = s_varFlurryRushHits;
-        c.min = 1;
-        c.max = 8;
-        c.step = 1;
-        c.suffix = " hits";
-        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
-    }
-    if (s_varFlurryRushWindow != 0) {
-        UiControlDesc c = UI_CONTROL_DESC_INIT;
-        c.kind = UI_CONTROL_NUMBER;
-        c.label = "Max window";
-        c.help_rml = "<p>Cap for the slow-motion window, in seconds (default: 5).</p>";
-        c.binding = UI_BINDING_CONFIG_VAR;
-        c.config_var = s_varFlurryRushWindow;
-        c.min = 1;
-        c.max = 10;
-        c.step = 1;
-        c.suffix = "s";
-        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
-    }
-    if (s_varFlurryRushIdleFrames != 0) {
-        UiControlDesc c = UI_CONTROL_DESC_INIT;
-        c.kind = UI_CONTROL_NUMBER;
-        c.label = "End when not attacking";
-        c.help_rml = "<p>The flurry ends early if you don't attack for this long "
-                     "(default: 45 frames).</p>";
-        c.binding = UI_BINDING_CONFIG_VAR;
-        c.config_var = s_varFlurryRushIdleFrames;
-        c.min = 10;
-        c.max = 150;
-        c.step = 5;
-        c.suffix = " frames";
-        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
-    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Puppet Zelda");
     ui_add_toggle(left, "Enabled", s_varPuppetZeldaPattern,
@@ -1861,8 +1749,10 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
     }
 
+#if 0
     ui_add_toggle(left, "Automatically assign suggested items", s_varBossRushSuggestedItems,
         "<p>Automatically assigns recommended items when entering a boss fight.</p>");
+#endif
 
     ui_add_toggle(left, "Refill after every boss fight", s_varBossRushRefillAfterFight,
         "<p>Refills health and item ammo to full upon returning to the chamber.</p>");
@@ -1888,10 +1778,6 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
 
     ui_add_toggle(left, "Separate Ganon fights", s_varBossRushSeparateGanon,
         "<p>Fights all 4 Ganon phases in sequence instead of separate statues.</p>");
-
-    ui_add_toggle(left, "Map portal", s_varBossRushPortal,
-        "<p>Press the portal button on the map screen (see Controls tab) to warp directly "
-        "into the Boss Rush chamber.</p>");
 
 #if 0
     {
@@ -2323,7 +2209,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descGeneralSkipCut = CONFIG_VAR_DESC_INIT;
         descGeneralSkipCut.name = "generalSkipCutscenes";
         descGeneralSkipCut.type = CONFIG_VAR_BOOL;
-        descGeneralSkipCut.default_bool = false;
+        descGeneralSkipCut.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descGeneralSkipCut, &s_varGeneralSkipCutscenes) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralSkipCutscenes, &g_configGeneralSkipCutscenes);
             svc_config->subscribe(mod_ctx, s_varGeneralSkipCutscenes, on_general_skip_cutscenes_changed, nullptr, nullptr);
@@ -2359,7 +2245,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descGeneralHumanWarp = CONFIG_VAR_DESC_INIT;
         descGeneralHumanWarp.name = "generalHumanWarpAnimation";
         descGeneralHumanWarp.type = CONFIG_VAR_BOOL;
-        descGeneralHumanWarp.default_bool = false;
+        descGeneralHumanWarp.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descGeneralHumanWarp, &s_varGeneralHumanWarp) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralHumanWarp, &g_configGeneralHumanWarpAnimation);
             svc_config->subscribe(mod_ctx, s_varGeneralHumanWarp, on_general_human_warp_changed, nullptr, nullptr);
@@ -2374,15 +2260,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varGeneralFasterMidnaCancel, on_general_faster_midna_cancel_changed, nullptr, nullptr);
         }
 
-        ConfigVarDesc descGeneralLockonLetterbox = CONFIG_VAR_DESC_INIT;
-        descGeneralLockonLetterbox.name = "generalLockonLetterbox";
-        descGeneralLockonLetterbox.type = CONFIG_VAR_BOOL;
-        descGeneralLockonLetterbox.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descGeneralLockonLetterbox, &s_varGeneralLockonLetterbox) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varGeneralLockonLetterbox, &g_configLockonNoLetterbox);
-            svc_config->subscribe(mod_ctx, s_varGeneralLockonLetterbox, on_general_lockon_letterbox_changed, nullptr, nullptr);
-        }
-
         g_configHudAutoFadeIdleSeconds = kHudAutoFadeIdleSeconds;
         g_configHudAutoFadeFadeSeconds = kHudAutoFadeFadeSeconds;
         g_configHudAutoFadeRestAlpha = kHudAutoFadeRestAlpha;
@@ -2395,19 +2272,10 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varHudAutoFade, on_hud_auto_fade_changed, nullptr, nullptr);
         }
 
-        ConfigVarDesc descGeneralSprintFovKick = CONFIG_VAR_DESC_INIT;
-        descGeneralSprintFovKick.name = "generalSprintFovKick";
-        descGeneralSprintFovKick.type = CONFIG_VAR_BOOL;
-        descGeneralSprintFovKick.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descGeneralSprintFovKick, &s_varGeneralSprintFovKick) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varGeneralSprintFovKick, &g_configSprintFovKickEnabled);
-            svc_config->subscribe(mod_ctx, s_varGeneralSprintFovKick, on_general_sprint_fov_kick_changed, nullptr, nullptr);
-        }
-
         ConfigVarDesc descDamageVignette = CONFIG_VAR_DESC_INIT;
         descDamageVignette.name = "damageVignetteEnabled";
         descDamageVignette.type = CONFIG_VAR_BOOL;
-        descDamageVignette.default_bool = false;
+        descDamageVignette.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descDamageVignette, &s_varDamageVignette) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varDamageVignette, &g_configDamageVignetteEnabled);
             svc_config->subscribe(mod_ctx, s_varDamageVignette, on_damage_vignette_changed, nullptr, nullptr);
@@ -2416,19 +2284,10 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descGeneralDrowningVignette = CONFIG_VAR_DESC_INIT;
         descGeneralDrowningVignette.name = "oxygenVignetteEnabled";
         descGeneralDrowningVignette.type = CONFIG_VAR_BOOL;
-        descGeneralDrowningVignette.default_bool = false;
+        descGeneralDrowningVignette.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descGeneralDrowningVignette, &s_varGeneralDrowningVignette) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralDrowningVignette, &g_configOxygenVignetteEnabled);
             svc_config->subscribe(mod_ctx, s_varGeneralDrowningVignette, on_oxygen_vignette_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descGeneralDrowningWarning = CONFIG_VAR_DESC_INIT;
-        descGeneralDrowningWarning.name = "drowningWarningEnabled";
-        descGeneralDrowningWarning.type = CONFIG_VAR_BOOL;
-        descGeneralDrowningWarning.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descGeneralDrowningWarning, &s_varGeneralDrowningWarning) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varGeneralDrowningWarning, &g_configDrowningWarningEnabled);
-            svc_config->subscribe(mod_ctx, s_varGeneralDrowningWarning, on_general_drowning_warning_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descDamageVignetteIntensity = CONFIG_VAR_DESC_INIT;
@@ -2456,7 +2315,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descHp = CONFIG_VAR_DESC_INIT;
         descHp.name = "hpBarsEnabled";
         descHp.type = CONFIG_VAR_BOOL;
-        descHp.default_bool = false;
+        descHp.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descHp, &s_varHpBars) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varHpBars, &g_configHpBarsEnabled);
             svc_config->subscribe(mod_ctx, s_varHpBars, on_hp_bars_changed, nullptr, nullptr);
@@ -2474,7 +2333,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descBossBar = CONFIG_VAR_DESC_INIT;
         descBossBar.name = "bossBarEnabled";
         descBossBar.type = CONFIG_VAR_BOOL;
-        descBossBar.default_bool = false;
+        descBossBar.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descBossBar, &s_varBossBar) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varBossBar, &g_configBossBarEnabled);
             svc_config->subscribe(mod_ctx, s_varBossBar, on_boss_bar_changed, nullptr, nullptr);
@@ -2483,7 +2342,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descDmg = CONFIG_VAR_DESC_INIT;
         descDmg.name = "damageNumbersEnabled";
         descDmg.type = CONFIG_VAR_BOOL;
-        descDmg.default_bool = false;
+        descDmg.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descDmg, &s_varDamageNumbers) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varDamageNumbers, &g_configDamageNumbersEnabled);
             svc_config->subscribe(mod_ctx, s_varDamageNumbers, on_damage_numbers_changed, nullptr, nullptr);
@@ -2492,21 +2351,10 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descEquip = CONFIG_VAR_DESC_INIT;
         descEquip.name = "visibleEquipmentEnabled";
         descEquip.type = CONFIG_VAR_BOOL;
-        descEquip.default_bool = false;
+        descEquip.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descEquip, &s_varVisibleEquip) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varVisibleEquip, &g_configVisibleEquipmentEnabled);
             svc_config->subscribe(mod_ctx, s_varVisibleEquip, on_visible_equip_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descEquipMode = CONFIG_VAR_DESC_INIT;
-        descEquipMode.name = "visibleEquipmentAlwaysShowUnlocked";
-        descEquipMode.type = CONFIG_VAR_BOOL;
-        descEquipMode.default_bool = true;
-        if (svc_config->register_var(mod_ctx, &descEquipMode, &s_varVisibleEquipMode) == MOD_OK) {
-            bool modeBool = true;
-            svc_config->get_bool(mod_ctx, s_varVisibleEquipMode, &modeBool);
-            g_configVisibleEquipDisplayMode = modeBool ? 1 : 0;
-            svc_config->subscribe(mod_ctx, s_varVisibleEquipMode, on_visible_equip_mode_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descEquipMirror = CONFIG_VAR_DESC_INIT;
@@ -2559,7 +2407,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descZ = CONFIG_VAR_DESC_INIT;
         descZ.name = "customZButtonEnabled";
         descZ.type = CONFIG_VAR_BOOL;
-        descZ.default_bool = false;
+        descZ.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descZ, &s_varCustomZButton) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varCustomZButton, &g_configZButtonEnabled);
             g_configCustomZButtonEnabled =
@@ -2617,7 +2465,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descFlurryRush = CONFIG_VAR_DESC_INIT;
         descFlurryRush.name = "flurryRushEnabled";
         descFlurryRush.type = CONFIG_VAR_BOOL;
-        descFlurryRush.default_bool = false;
+        descFlurryRush.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descFlurryRush, &s_varFlurryRush) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varFlurryRush, &g_configFlurryRushEnabled);
             svc_config->subscribe(mod_ctx, s_varFlurryRush, on_flurry_rush_changed, nullptr, nullptr);
@@ -2634,45 +2482,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             if (v > 80) v = 80;
             g_configFlurryRushSlowFactor = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varFlurryRushSlowFactor, on_flurry_rush_slow_factor_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descFlurryRushWindow = CONFIG_VAR_DESC_INIT;
-        descFlurryRushWindow.name = "flurryRushWindow";
-        descFlurryRushWindow.type = CONFIG_VAR_INT;
-        descFlurryRushWindow.default_int = 5;
-        if (svc_config->register_var(mod_ctx, &descFlurryRushWindow, &s_varFlurryRushWindow) == MOD_OK) {
-            int64_t v = 5;
-            svc_config->get_int(mod_ctx, s_varFlurryRushWindow, &v);
-            if (v < 1) v = 1;
-            if (v > 10) v = 10;
-            g_configFlurryRushWindowTicks = static_cast<int>(v * 30);
-            svc_config->subscribe(mod_ctx, s_varFlurryRushWindow, on_flurry_rush_window_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descFlurryRushHits = CONFIG_VAR_DESC_INIT;
-        descFlurryRushHits.name = "flurryRushHits";
-        descFlurryRushHits.type = CONFIG_VAR_INT;
-        descFlurryRushHits.default_int = 4;
-        if (svc_config->register_var(mod_ctx, &descFlurryRushHits, &s_varFlurryRushHits) == MOD_OK) {
-            int64_t v = 4;
-            svc_config->get_int(mod_ctx, s_varFlurryRushHits, &v);
-            if (v < 1) v = 1;
-            if (v > 8) v = 8;
-            g_configFlurryRushHits = static_cast<int>(v);
-            svc_config->subscribe(mod_ctx, s_varFlurryRushHits, on_flurry_rush_hits_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descFlurryRushIdleFrames = CONFIG_VAR_DESC_INIT;
-        descFlurryRushIdleFrames.name = "flurryRushIdleFrames";
-        descFlurryRushIdleFrames.type = CONFIG_VAR_INT;
-        descFlurryRushIdleFrames.default_int = 45;
-        if (svc_config->register_var(mod_ctx, &descFlurryRushIdleFrames, &s_varFlurryRushIdleFrames) == MOD_OK) {
-            int64_t v = 45;
-            svc_config->get_int(mod_ctx, s_varFlurryRushIdleFrames, &v);
-            if (v < 10) v = 10;
-            if (v > 150) v = 150;
-            g_configFlurryRushIdleFrames = static_cast<int>(v);
-            svc_config->subscribe(mod_ctx, s_varFlurryRushIdleFrames, on_flurry_rush_idle_frames_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descFlurryRushPerfectFrames = CONFIG_VAR_DESC_INIT;
@@ -2711,7 +2520,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaScaleWithHearts = CONFIG_VAR_DESC_INIT;
         descStaminaScaleWithHearts.name = "staminaScaleWithHearts";
         descStaminaScaleWithHearts.type = CONFIG_VAR_BOOL;
-        descStaminaScaleWithHearts.default_bool = false;
+        descStaminaScaleWithHearts.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descStaminaScaleWithHearts, &s_varStaminaScaleWithHearts) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaScaleWithHearts, &g_configStaminaScaleWithHearts);
             svc_config->subscribe(mod_ctx, s_varStaminaScaleWithHearts, on_stamina_scale_with_hearts_changed, nullptr, nullptr);
@@ -2720,9 +2529,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaPerHeart = CONFIG_VAR_DESC_INIT;
         descStaminaPerHeart.name = "staminaPerHeart";
         descStaminaPerHeart.type = CONFIG_VAR_INT;
-        descStaminaPerHeart.default_int = 30;
+        descStaminaPerHeart.default_int = 20;
         if (svc_config->register_var(mod_ctx, &descStaminaPerHeart, &s_varStaminaPerHeart) == MOD_OK) {
-            int64_t v = 30;
+            int64_t v = 20;
             svc_config->get_int(mod_ctx, s_varStaminaPerHeart, &v);
             g_configStaminaPerHeart = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varStaminaPerHeart, on_stamina_per_heart_changed, nullptr, nullptr);
@@ -2773,7 +2582,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSprint = CONFIG_VAR_DESC_INIT;
         descStaminaSprint.name = "staminaSprint";
         descStaminaSprint.type = CONFIG_VAR_BOOL;
-        descStaminaSprint.default_bool = false;
+        descStaminaSprint.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descStaminaSprint, &s_varStaminaSprint) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaSprint, &g_configStaminaSprint);
             svc_config->subscribe(mod_ctx, s_varStaminaSprint, on_stamina_sprint_changed, nullptr, nullptr);
@@ -2782,7 +2591,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSprintStartRoll = CONFIG_VAR_DESC_INIT;
         descStaminaSprintStartRoll.name = "staminaSprintStartRoll";
         descStaminaSprintStartRoll.type = CONFIG_VAR_BOOL;
-        descStaminaSprintStartRoll.default_bool = false;
+        descStaminaSprintStartRoll.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descStaminaSprintStartRoll, &s_varStaminaSprintStartRoll) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaSprintStartRoll, &g_configStaminaSprintStartRoll);
             svc_config->subscribe(mod_ctx, s_varStaminaSprintStartRoll, on_stamina_sprint_start_roll_changed, nullptr, nullptr);
@@ -2791,7 +2600,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaWolfSprint = CONFIG_VAR_DESC_INIT;
         descStaminaWolfSprint.name = "staminaWolfSprint";
         descStaminaWolfSprint.type = CONFIG_VAR_BOOL;
-        descStaminaWolfSprint.default_bool = false;
+        descStaminaWolfSprint.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descStaminaWolfSprint, &s_varStaminaWolfSprint) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaWolfSprint, &g_configStaminaWolfSprint);
             svc_config->subscribe(mod_ctx, s_varStaminaWolfSprint, on_stamina_wolf_sprint_changed, nullptr, nullptr);
@@ -2800,7 +2609,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaSprintSpeed.name = "staminaSprintSpeed";
         descStaminaSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaSprintSpeed.default_int = 140;
+        descStaminaSprintSpeed.default_int = 155;
         if (svc_config->register_var(mod_ctx, &descStaminaSprintSpeed, &s_varStaminaSprintSpeed) == MOD_OK) {
             int64_t v = 140;
             svc_config->get_int(mod_ctx, s_varStaminaSprintSpeed, &v);
@@ -2826,7 +2635,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSwimSprint = CONFIG_VAR_DESC_INIT;
         descStaminaSwimSprint.name = "staminaSwimSprint";
         descStaminaSwimSprint.type = CONFIG_VAR_BOOL;
-        descStaminaSwimSprint.default_bool = false;
+        descStaminaSwimSprint.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descStaminaSwimSprint, &s_varStaminaSwimSprint) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaSwimSprint, &g_configStaminaSwimSprint);
             svc_config->subscribe(mod_ctx, s_varStaminaSwimSprint, on_stamina_swim_sprint_changed, nullptr, nullptr);
@@ -2953,6 +2762,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varCollectionOrdonHeroAlways, on_collection_ordon_hero_always_changed, nullptr, nullptr);
         }
 
+#if 0
         ConfigVarDesc descBossRushSuggested = CONFIG_VAR_DESC_INIT;
         descBossRushSuggested.name = "bossRushSuggestedItems";
         descBossRushSuggested.type = CONFIG_VAR_BOOL;
@@ -2961,11 +2771,12 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_bool(mod_ctx, s_varBossRushSuggestedItems, &g_configBossRushSuggestedItems);
             svc_config->subscribe(mod_ctx, s_varBossRushSuggestedItems, on_boss_rush_suggested_items_changed, nullptr, nullptr);
         }
+#endif
 
         ConfigVarDesc descBossRushRefill = CONFIG_VAR_DESC_INIT;
         descBossRushRefill.name = "bossRushRefillAfterFight";
         descBossRushRefill.type = CONFIG_VAR_BOOL;
-        descBossRushRefill.default_bool = false;
+        descBossRushRefill.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descBossRushRefill, &s_varBossRushRefillAfterFight) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varBossRushRefillAfterFight, &g_configBossRushRefillAfterFight);
             svc_config->subscribe(mod_ctx, s_varBossRushRefillAfterFight, on_boss_rush_refill_after_fight_changed, nullptr, nullptr);
@@ -3014,7 +2825,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descBossRushTimer = CONFIG_VAR_DESC_INIT;
         descBossRushTimer.name = "bossRushTimer";
         descBossRushTimer.type = CONFIG_VAR_BOOL;
-        descBossRushTimer.default_bool = false;
+        descBossRushTimer.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descBossRushTimer, &s_varBossRushTimer) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varBossRushTimer, &g_configBossRushTimer);
             svc_config->subscribe(mod_ctx, s_varBossRushTimer, on_boss_rush_timer_changed, nullptr, nullptr);
@@ -3049,15 +2860,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         descBossRushAllPhasesBest.default_string = "";
         svc_config->register_var(mod_ctx, &descBossRushAllPhasesBest, &s_varBossRushAllPhasesBest);
         boss_rush_timer_init_all_phases_best(svc_config, mod_ctx, s_varBossRushAllPhasesBest);
-
-        ConfigVarDesc descBossRushPortal = CONFIG_VAR_DESC_INIT;
-        descBossRushPortal.name = "bossRushPortal";
-        descBossRushPortal.type = CONFIG_VAR_BOOL;
-        descBossRushPortal.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descBossRushPortal, &s_varBossRushPortal) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varBossRushPortal, &g_configBossRushPortal);
-            svc_config->subscribe(mod_ctx, s_varBossRushPortal, on_boss_rush_portal_changed, nullptr, nullptr);
-        }
 
         init_controls_config(svc_config, svc_hook, mod_ctx);
         init_stamina_bar_config(svc_config, mod_ctx);

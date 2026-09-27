@@ -24,7 +24,7 @@
 
 #include <cmath>
 
-bool g_configBossRushPortal = false;
+bool g_configBossRushPortal = true;
 
 static constexpr f32 kCompassBaseX = 398.0f;
 static constexpr f32 kCompassBaseY = 344.0f;

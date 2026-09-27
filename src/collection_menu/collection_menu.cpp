@@ -157,6 +157,7 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     s_linkleActive = collection_linkle_active();
     sync_collection_ordon_hero_page();
 
+    collectionlib_set_unequip_policy([]() { return true; });
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
     collectionlib_set_hd_layout_policy(&twilight_hd_collection);
 
