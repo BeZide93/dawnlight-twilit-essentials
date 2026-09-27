@@ -31,6 +31,8 @@ bool boss_rush_is_fight_retry_warp();
 bool is_in_boss_rush_chamber();
 bool boss_bar_boss_defeated_now();
 bool boss_bar_current_fight_state(const char** outLabel, bool& outEngaged);
+bool boss_rush_game_mode_is_active();
+bool boss_rush_game_mode_entering();
 
 namespace {
 
@@ -50,6 +52,7 @@ constexpr int kLeadFrames = 5;
 constexpr int kFightStartHoldFrames = 60;
 constexpr int kDefeatMinHoldFrames = 120;
 constexpr int kTurboReleaseWatchFrames = 6;
+constexpr int kGameModeEntryHoldFrames = 90;
 
 SetTimescaleFn s_setTimescale = nullptr;
 GetTimescaleFn s_getTimescale = nullptr;
@@ -69,6 +72,16 @@ bool s_wasFightLive = false;
 int s_fightStartFrames = -1;
 bool s_prevTurbo = false;
 int s_turboReleaseFrames = 0;
+int s_gameModeHoldFrames = 0;
+
+bool update_game_mode_entry_hold() {
+    if (boss_rush_game_mode_is_active() && boss_rush_game_mode_entering()) {
+        s_gameModeHoldFrames = kGameModeEntryHoldFrames;
+    } else if (s_gameModeHoldFrames > 0) {
+        --s_gameModeHoldFrames;
+    }
+    return s_gameModeHoldFrames > 0;
+}
 
 DEFINE_HOOK_SYMBOL("aurora_get_timescale", float(), AuroraGetTimescaleHook);
 DEFINE_HOOK_SYMBOL("aurora_set_timescale", void(float), AuroraSetTimescaleHook);
@@ -442,7 +455,8 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
 
     const bool defeatHold = is_boss_rush_defeat_hold();
     const bool startHold = is_boss_rush_fight_start_hold();
-    if (defeatHold || startHold) {
+    const bool gameModeHold = update_game_mode_entry_hold();
+    if (defeatHold || startHold || gameModeHold) {
         stop_fast_forward();
         s_confirmFrames = 0;
         return;
@@ -498,6 +512,7 @@ void shutdown_fast_forward_cutscenes() {
     s_fightStartFrames = -1;
     s_holdMinFrames = 0;
     s_turboReleaseFrames = 0;
+    s_gameModeHoldFrames = 0;
 }
 
 void update_hidden_run_watchdog() {
