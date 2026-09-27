@@ -41,6 +41,7 @@ bool boss_bar_boss_defeated_now();
 bool boss_bar_current_fight_state(const char** outLabel, bool& outEngaged);
 bool boss_rush_game_mode_is_active();
 bool boss_rush_game_mode_entering();
+bool boss_rush_stallord_fade_active();
 
 namespace {
 
@@ -479,7 +480,7 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
     const bool defeatHold = is_boss_rush_defeat_hold();
     const bool startHold = is_boss_rush_fight_start_hold();
     const bool gameModeHold = update_game_mode_entry_hold();
-    if (defeatHold || startHold || gameModeHold) {
+    if (defeatHold || startHold || gameModeHold || boss_rush_stallord_fade_active()) {
         stop_fast_forward();
         s_confirmFrames = 0;
         return;

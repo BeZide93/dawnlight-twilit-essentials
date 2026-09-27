@@ -3688,7 +3688,9 @@ static void blizzeta_phase2_hurry(fopAc_ac_c* yo) {
 
 static bool stallord_phase2_running(fopAc_ac_c* ds) {
     const daB_DS_c* d = reinterpret_cast<const daB_DS_c*>(ds);
-    return d->mAction == 3 && d->mMode >= 10 && d->mDead;
+    if (d->mAction != 3) return false;
+    if (d->mDead) return d->mMode >= 10;
+    return d->mBackboneLevel >= 2 && d->mMode <= 1;
 }
 
 static constexpr int kStallordTailSettleTicks = 15;
@@ -3795,6 +3797,64 @@ static bool stallord_tail_near_end() {
     return s_stallordTail && s_stallordTailQuiet >= kStallordTailSettleTicks;
 }
 
+static void stallord_camera_behind_link() {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    camera_process_class* cam = boss_rush_get_active_player_camera();
+    if (link == nullptr || cam == nullptr) return;
+    const cXyz& p = link->current.pos;
+    const s16 ang = link->shape_angle.y;
+    const f32 fx = cM_ssin(ang), fz = cM_scos(ang);
+    cXyz center(p.x + fx * 200.0f, p.y + 100.0f, p.z + fz * 200.0f);
+    cXyz eye(p.x - fx * 450.0f, p.y + 170.0f, p.z - fz * 450.0f);
+    cam->mCamera.Reset(center, eye);
+    cam->mCamera.Start();
+    cam->mCamera.QuickStart();
+    cam->mCamera.SetTrimSize(0);
+    cam->view.lookat.center.set(center.x, center.y, center.z);
+    cam->view.lookat.eye.set(eye.x, eye.y, eye.z);
+    fopCamM_SetAngleY(cam, ang);
+}
+
+static constexpr f32 kStallordFadeOutSpeed = 0.05f;
+static constexpr int kStallordCamHoldFrames = 30;
+static int s_stallordCamHoldFrames = 0;
+static bool s_stallordFadeActive = false;
+
+static void stallord_trace(bool i_hidden, int i_fadeState) {
+    static int s_ticks = 0;
+    static int s_last[9] = {-9, -9, -9, -9, -9, -9, -9, -9, -9};
+    if (i_hidden) s_ticks = 1800;
+    if (s_ticks <= 0) return;
+    --s_ticks;
+
+    daB_DS_c* p1 = stallord_find(daB_DS_c::TYPE_BATTLE_1);
+    daB_DS_c* p2 = stallord_find(daB_DS_c::TYPE_BATTLE_2);
+    fopAc_ac_c* wallAc = fopAcM_SearchByName(fpcNm_Obj_Lv4RailWall_e);
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    JUTFader* fader = mDoGph_gInf_c::getFader();
+    dEvt_control_c* evt = dComIfGp_getEvent();
+    const int cur[9] = {
+        i_fadeState,
+        p1 != nullptr ? p1->mMode : -1,
+        p2 != nullptr ? p2->mAction * 1000 + p2->mMode : -1,
+        p2 != nullptr ? static_cast<int>(p2->mIsDemo) : -1,
+        wallAc != nullptr ? static_cast<daObjLv4Wall_c*>(wallAc)->mMode : -1,
+        (dComIfGp_event_runCheck() && evt != nullptr) ? evt->mEventId : -2,
+        fader != nullptr ? fader->getStatus() : -1,
+        link != nullptr ? link->mProcID : -1,
+        link != nullptr ? fopAcM_GetRoomNo(link) : -1,
+    };
+    bool changed = false;
+    for (int i = 0; i < 9; i++) {
+        if (cur[i] != s_last[i]) changed = true;
+        s_last[i] = cur[i];
+    }
+    if (!changed) return;
+    rush_debug_logf("[ds-trace] fade=%d p1mode=%d p2=%d p2demo=%d wall=%d evt=%d fader=%d proc=%d room=%d y=%.0f",
+                    cur[0], cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7], cur[8],
+                    link != nullptr ? link->current.pos.y : 0.0f);
+}
+
 static fopAc_ac_c* phase2_boss(const char* name, s16* procName) {
     if (std::strcmp(name, "Stallord") == 0) {
         *procName = fpcNm_B_DS_e;
@@ -3841,7 +3901,7 @@ static void update_phase2_demo_skip() {
 
     if (running) {
         if (s_state == IDLE) {
-            mDoGph_gInf_c::fadeOut(kPhaseFadeSpeed);
+            mDoGph_gInf_c::fadeOut(procName == fpcNm_B_DS_e ? kStallordFadeOutSpeed : kPhaseFadeSpeed);
             s_state = FADING;
         } else if (s_state == FADING && mDoGph_gInf_c::getFadeRate() >= 1.0f) {
             s_state = FAST;
@@ -3850,6 +3910,7 @@ static void update_phase2_demo_skip() {
         if (s_state == FAST && procName == fpcNm_B_DS_e) {
             if (stallord_tail_near_end()) {
                 fast_forward_set_hidden_run(false);
+                s_stallordCamHoldFrames = kStallordCamHoldFrames;
                 s_state = SLOW;
             }
         } else if (s_state == FAST && boss != nullptr) {
@@ -3873,6 +3934,12 @@ static void update_phase2_demo_skip() {
         }
         s_state = IDLE;
     }
+    if (s_stallordCamHoldFrames > 0) {
+        --s_stallordCamHoldFrames;
+        stallord_camera_behind_link();
+    }
+    stallord_trace(procName == fpcNm_B_DS_e && running, s_state);
+    s_stallordFadeActive = procName == fpcNm_B_DS_e && s_state != IDLE;
     s_phase2Hidden = s_state != IDLE;
 }
 
@@ -4239,6 +4306,10 @@ bool is_in_boss_rush_chamber() {
         return false;
     }
     return is_in_chamber_room();
+}
+
+bool boss_rush_stallord_fade_active() {
+    return s_stallordFadeActive;
 }
 
 bool is_boss_rush_active() {
