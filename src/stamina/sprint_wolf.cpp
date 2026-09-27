@@ -1,5 +1,6 @@
 #include "sprint_wolf.hpp"
 
+#include "sprint_human.hpp"
 #include "stamina.hpp"
 #include "stamina_internal.hpp"
 #include "../controls/controls.hpp"
@@ -19,6 +20,7 @@ DEFINE_HOOK(&daAlink_c::procWolfMove, SprintWolfRedash);
 DEFINE_HOOK(&daAlink_c::procWolfDashInit, SprintWolfDashInit);
 DEFINE_HOOK(&daAlink_c::setFaceBasicTexture, SprintWolfTongueFace);
 DEFINE_HOOK(&daAlink_c::setDoubleAnimeWolf, SprintWolfRunAnm);
+DEFINE_HOOK(&daAlink_c::procWolfAutoJumpInit, SprintWolfAutoJump);
 
 static constexpr int kBurstIntervalFrames = 90;
 static constexpr f32 kWolfSprintDrainRate = 0.90f;
@@ -30,6 +32,35 @@ static int  s_sprintRunFrames = 0;
 static bool s_tongueOut      = false;
 
 static u32 s_sprintWindEmitter = 0;
+
+static bool s_wolfJumpBoost = false;
+
+static HookAction wolf_auto_jump_pre(ModContext*, void* args, void*, void*) {
+    s_wolfJumpBoost = false;
+    if (!g_configStaminaWolfSprint || !stamina_impl::in_gameplay() || !args) {
+        return HOOK_CONTINUE;
+    }
+    if (g_configStaminaSprintJumpDistance <= 1.0f || !s_wasSprinting) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    s_wolfJumpBoost = true;
+    return HOOK_CONTINUE;
+}
+
+static void wolf_auto_jump_post(ModContext*, void* args, void*, void*) {
+    if (!s_wolfJumpBoost || !args) return;
+    s_wolfJumpBoost = false;
+
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) return;
+
+    link->mNormalSpeed *= g_configStaminaSprintJumpDistance;
+    link->mMaxSpeed = link->mNormalSpeed;
+}
 
 static void stop_sprint_wind_effect() {
     if (s_sprintWindEmitter == 0) return;
@@ -196,6 +227,8 @@ ModResult init_sprint_wolf(const HookService* hook_svc) {
     mods::hook::add_post<SprintWolfDashInit>(hook_svc, wolf_dash_init_post);
     mods::hook::add_pre<SprintWolfTongueFace>(hook_svc, tongue_face_pre);
     mods::hook::add_pre<SprintWolfRunAnm>(hook_svc, wolf_run_anm_pre);
+    mods::hook::add_pre<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_pre);
+    mods::hook::add_post<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_post);
     return MOD_OK;
 }
 
@@ -204,5 +237,6 @@ void shutdown_sprint_wolf() {
     s_wasSprinting = false;
     s_sprintRunFrames = 0;
     s_tongueOut = false;
+    s_wolfJumpBoost = false;
     stop_sprint_wind_effect();
 }

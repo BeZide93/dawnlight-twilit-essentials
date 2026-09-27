@@ -26,6 +26,8 @@ static constexpr f32 kHouseAnimSpeedMul = 0.80f;
 float g_configStaminaSprintSpeed = 1.1f;
 bool g_configStaminaSprintStartRoll = false;
 
+float g_configStaminaSprintJumpDistance = 1.0f;
+
 static bool s_sprintLatched = false;
 static bool s_sprintBoost   = false;
 static bool s_sprintEngage  = false;
@@ -277,6 +279,37 @@ static HookAction sprint_jump_attack_pre(ModContext*, void* args, void* retval, 
 
 DEFINE_HOOK(&daAlink_c::itemEquip, SprintHumanItemEquip);
 
+static bool s_sprintJumpBoost = false;
+
+DEFINE_HOOK(&daAlink_c::procAutoJumpInit, SprintHumanAutoJump);
+
+static HookAction sprint_auto_jump_pre(ModContext*, void* args, void*, void*) {
+    s_sprintJumpBoost = false;
+    if (!g_configStaminaSprint || !stamina_impl::in_gameplay() || !args) {
+        return HOOK_CONTINUE;
+    }
+    if (g_configStaminaSprintJumpDistance <= 1.0f || !s_sprintLatched) {
+        return HOOK_CONTINUE;
+    }
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || link->checkHorseRide()) {
+        return HOOK_CONTINUE;
+    }
+    s_sprintJumpBoost = true;
+    return HOOK_CONTINUE;
+}
+
+static void sprint_auto_jump_post(ModContext*, void* args, void*, void*) {
+    if (!s_sprintJumpBoost || !args) return;
+    s_sprintJumpBoost = false;
+
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) return;
+
+    link->mNormalSpeed *= g_configStaminaSprintJumpDistance;
+    link->mMaxSpeed = link->mNormalSpeed;
+}
+
 static HookAction sprint_item_equip_pre(ModContext*, void* args, void*, void*) {
     if (!s_sprintLatched || args == nullptr) {
         return HOOK_CONTINUE;
@@ -299,12 +332,15 @@ ModResult init_sprint_human(const HookService* hook_svc) {
     mods::hook::add_post<SprintHumanPadRead>(hook_svc, sprint_pad_read_post);
     mods::hook::add_pre<SprintHumanJumpAttack>(hook_svc, sprint_jump_attack_pre);
     mods::hook::add_pre<SprintHumanItemEquip>(hook_svc, sprint_item_equip_pre);
+    mods::hook::add_pre<SprintHumanAutoJump>(hook_svc, sprint_auto_jump_pre);
+    mods::hook::add_post<SprintHumanAutoJump>(hook_svc, sprint_auto_jump_post);
     return MOD_OK;
 }
 
 void shutdown_sprint_human() {
     s_sprintLatched = s_sprintBoost = s_sprintEngage = false;
     s_sprintRollPending = false;
+    s_sprintJumpBoost = false;
     s_holdFrames = 0;
     stop_sprint_wind_effect();
 }
