@@ -1,4 +1,6 @@
 #include "flurry_rush.hpp"
+#include "../general/fast_forward_cutscenes.hpp"
+#include "flurry_interp.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_tn.h"
@@ -27,7 +29,7 @@ bool g_configFlurryRushEnabled = false;
 int g_configFlurryRushPerfectFrames = 30;
 int g_configFlurryRushSlowFactor = 30;
 int g_configFlurryRushWindowTicks = 90;
-int g_configFlurryRushHits = 6;
+int g_configFlurryRushHits = 8;
 int g_configFlurryRushIdleFrames = 45;
 
 namespace {
@@ -36,7 +38,6 @@ constexpr int kCooldownTicks = 45;
 constexpr int kPostRushGraceTicks = 30;
 constexpr s16 kFlourishAfterRushTicks = 300;
 constexpr int kMinRushTicks = 30;
-constexpr int kFinishSettleTicks = 3;
 constexpr f32 kFlurryApproachRange = 150.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
@@ -73,7 +74,6 @@ int s_postRushGrace = 0;
 f32 s_rushStartDist = 0.0f;
 u16 s_prevProc = 0;
 int s_hitCount = 0;
-int s_finishTicks = -1;
 int s_idleTicks = 0;
 fpc_ProcID s_targetId = fpcM_ERROR_PROCESS_ID_e;
 bool s_atHitPrev[5] = {};
@@ -115,15 +115,6 @@ void flog(const char* fmt, ...) {
     s_log->info(mod_ctx, buf);
 }
 
-using SetSimRateFn = void (*)(float);
-using GetSimRateFn = float (*)();
-SetSimRateFn s_setSimRate = nullptr;
-GetSimRateFn s_getSimRate = nullptr;
-using SetAuroraScaleFn = void (*)(float);
-SetAuroraScaleFn s_setAuroraScale = nullptr;
-float s_baselineRate = 30.0f;
-constexpr float kSimPeriod = 1.0f / 30.0f;
-
 using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
 void* s_frameInterpVar = nullptr;
 bool s_interpOverridden = false;
@@ -141,24 +132,12 @@ void override_frame_interp(bool enable) {
 }
 
 void slow_time() {
-    if (s_getSimRate != nullptr) {
-        s_baselineRate = s_getSimRate();
-    }
-    if (s_setAuroraScale != nullptr) {
-        s_setAuroraScale(s_baselineRate *
-                         (static_cast<f32>(g_configFlurryRushSlowFactor) / 100.0f) * kSimPeriod);
-    } else if (s_setSimRate != nullptr) {
-        s_setSimRate(s_baselineRate * (static_cast<f32>(g_configFlurryRushSlowFactor) / 100.0f));
-    }
+    general_set_slow_motion(static_cast<f32>(g_configFlurryRushSlowFactor) / 100.0f);
     override_frame_interp(true);
 }
 
 void restore_time() {
-    if (s_setAuroraScale != nullptr) {
-        s_setAuroraScale(s_baselineRate * kSimPeriod);
-    } else if (s_setSimRate != nullptr) {
-        s_setSimRate(s_baselineRate);
-    }
+    general_set_slow_motion(1.0f);
     override_frame_interp(false);
 }
 
@@ -200,7 +179,6 @@ void clear_rush_state() {
     s_pendingBonus = 0;
     s_pendingBonusTicks = 0;
     s_pendingBonusAtp = 0;
-    s_finishTicks = -1;
     s_idleTicks = 0;
     s_targetId = fpcM_ERROR_PROCESS_ID_e;
     s_execAccumulator = 0.0f;
@@ -661,6 +639,8 @@ void magnet_sword(daAlink_c* link) {
     link->mAtCps[0].SetStartEnd(start, center);
 }
 
+void run_extra_link_steps(daAlink_c* link);
+
 static void on_link_execute_post(ModContext*, void* args, void*, void*) {
     if (link_protected()) {
         daAlink_c* rushLink = mods::arg<daAlink_c*>(args, 0);
@@ -680,6 +660,10 @@ static void on_link_execute_post(ModContext*, void* args, void*, void*) {
     if (s_state != State::RUSH || s_reentering) return;
 
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    run_extra_link_steps(link);
+}
+
+void run_extra_link_steps(daAlink_c* link) {
     if (link == nullptr || link->checkEventRun()) return;
     if (s_stateTicks < kLinkSlowTicks) return;
 
@@ -837,6 +821,7 @@ static HookAction on_king_bulblin_damage_check_pre(ModContext*, void* args, void
 
 void install_hooks() {
     if (s_hooksInstalled || s_hookSvc == nullptr) return;
+    flurry_interp_install(s_hookSvc);
     mods::hook::add_post<FlurryRushSideStepInitHook>(s_hookSvc, on_sidestep_init_post);
     mods::hook::add_pre<FlurryRushDamageActionHook>(s_hookSvc, on_check_damage_action_pre);
     mods::hook::add_pre<FlurryRushSetDamagePointHook>(s_hookSvc, on_set_damage_point_pre);
@@ -871,7 +856,7 @@ bool flurry_rush_is_rush_active() {
 void flurry_rush_apply_enabled() {
     if (!s_hookSvcSet) return;
 
-    if (g_configFlurryRushEnabled && s_setSimRate != nullptr) {
+    if (g_configFlurryRushEnabled && general_timescale_available()) {
         install_hooks();
     } else {
         end_rush();
@@ -886,21 +871,6 @@ ModResult init_flurry_rush(const HookService* hook_svc, const LogService* log_sv
 
     mods::hook::add_post<FlurryRushAtCheckHook>(hook_svc, on_at_check_post);
 
-    if (hook_svc->resolve(mod_ctx, "dusk::game_clock::set_sim_rate",
-                          reinterpret_cast<void**>(&s_setSimRate), nullptr) != MOD_OK ||
-        hook_svc->resolve(mod_ctx, "dusk::game_clock::get_sim_rate",
-                          reinterpret_cast<void**>(&s_getSimRate), nullptr) != MOD_OK)
-    {
-        s_setSimRate = nullptr;
-        s_getSimRate = nullptr;
-        return MOD_OK;
-    }
-
-    s_baselineRate = s_getSimRate();
-
-    hook_svc->resolve(mod_ctx, "aurora::time::set_scale",
-                      reinterpret_cast<void**>(&s_setAuroraScale), nullptr);
-
     GetConfigVarFn getConfigVar = nullptr;
     if (hook_svc->resolve(mod_ctx, "dusk::config::GetConfigVar",
                           reinterpret_cast<void**>(&getConfigVar), nullptr) == MOD_OK &&
@@ -909,12 +879,14 @@ ModResult init_flurry_rush(const HookService* hook_svc, const LogService* log_sv
         s_frameInterpVar = getConfigVar("game.enableFrameInterpolation");
     }
 
+    flurry_interp_resolve(hook_svc);
+
     flurry_rush_apply_enabled();
     return MOD_OK;
 }
 
 void update_flurry_rush(const LogService*, ModContext*) {
-    if (s_hookSvc == nullptr || s_setSimRate == nullptr) return;
+    if (s_hookSvc == nullptr || !general_timescale_available()) return;
 
     if (s_cooldown > 0) s_cooldown--;
     if (s_postRushGrace > 0) s_postRushGrace--;
@@ -981,17 +953,8 @@ void update_flurry_rush(const LogService*, ModContext*) {
             }
         }
 
-        if (s_finishTicks < 0 && s_swingCount >= g_configFlurryRushHits && !s_swingOpen &&
-            s_pendingBonus == 0 && !is_attack_proc(static_cast<u16>(link->mProcID)))
-        {
-            s_finishTicks = kFinishSettleTicks;
-        }
-
-        if (s_finishTicks >= 0) {
-            s_finishTicks--;
-            if (s_finishTicks < 0) {
-                end_rush("flurry complete");
-            }
+        if (s_swingCount >= g_configFlurryRushHits && (!s_swingOpen || s_swingLanded)) {
+            end_rush("flurry complete");
             return;
         }
     }

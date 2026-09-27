@@ -1557,7 +1557,6 @@ void update_visible_equipment(const LogService *log_svc, ModContext *mod_ctx) {
 }
 
 void draw_visible_equipment(const LogService *, ModContext *) {}
-
 void shutdown_visible_equipment() {
   const LogService *log_svc = s_logSvc;
   ModContext *mod_ctx = s_modCtx;

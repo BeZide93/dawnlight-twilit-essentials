@@ -17,4 +17,6 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
 void shutdown_fast_forward_cutscenes();
 
 float general_get_aurora_timescale();
+bool general_timescale_available();
+void general_set_slow_motion(float scale);
 void fast_forward_set_hidden_run(bool on);

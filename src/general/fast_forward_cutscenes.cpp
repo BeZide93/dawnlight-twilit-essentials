@@ -89,8 +89,16 @@ DEFINE_HOOK_SYMBOL("aurora_set_timescale", void(float), AuroraSetTimescaleHook);
 bool s_hiddenRun = false;
 float s_hostScale = 1.0f;
 
+bool s_slowActive = false;
+float s_slowScale = 1.0f;
+float s_slowRestoreScale = 1.0f;
+
 float sane_host_scale(float scale) {
     return scale > 0.0f && scale < kHiddenRunScale ? scale : 1.0f;
+}
+
+float unslowed(float scale) {
+    return s_slowActive ? s_slowRestoreScale : scale;
 }
 
 bool clock_available();
@@ -116,6 +124,10 @@ HookAction on_aurora_set_timescale_pre(ModContext*, void* args, void*, void*) {
     if (s_hiddenRun) return HOOK_SKIP_ORIGINAL;
     if (s_active) {
         s_desiredScale = sane_host_scale(requested);
+        return HOOK_SKIP_ORIGINAL;
+    }
+    if (s_slowActive) {
+        s_slowRestoreScale = sane_host_scale(requested);
         return HOOK_SKIP_ORIGINAL;
     }
     return HOOK_CONTINUE;
@@ -222,6 +234,11 @@ float resolved_desired_scale() {
 void stop_fast_forward() {
     if (!s_active) return;
     s_active = false;
+    if (s_slowActive) {
+        s_slowRestoreScale = resolved_desired_scale();
+        if (!s_hiddenRun) force_set_timescale(s_slowScale);
+        return;
+    }
     own_set_timescale(resolved_desired_scale());
 }
 
@@ -488,11 +505,11 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
     if (shouldFastForward) {
         const float current = live_timescale();
         if (!s_active) {
-            s_desiredScale = sane_host_scale(current);
+            s_desiredScale = sane_host_scale(unslowed(current));
             s_active = true;
             own_set_timescale(targetScale);
         } else if (current != targetScale) {
-            s_desiredScale = sane_host_scale(current);
+            s_desiredScale = sane_host_scale(unslowed(current));
             own_set_timescale(targetScale);
         }
     } else if (s_active) {
@@ -521,7 +538,7 @@ void update_hidden_run_watchdog() {
     if (current >= kHiddenRunScale) {
         own_set_timescale(sane_host_scale(s_hostScale));
     } else if (current > 0.0f) {
-        s_hostScale = current;
+        s_hostScale = unslowed(current);
     }
 }
 
@@ -532,7 +549,8 @@ void fast_forward_set_hidden_run(bool on) {
         return;
     }
     if (on) {
-        s_hostScale = s_active ? sane_host_scale(s_desiredScale) : sane_host_scale(live_timescale());
+        s_hostScale = s_active ? sane_host_scale(s_desiredScale)
+                               : sane_host_scale(unslowed(live_timescale()));
         s_active = false;
         s_confirmFrames = 0;
         s_hiddenRun = true;
@@ -542,8 +560,38 @@ void fast_forward_set_hidden_run(bool on) {
         bool known = false;
         const bool turbo = turbo_held(known);
         if (known && !turbo && s_hostScale == kTurboScale) s_hostScale = 1.0f;
+        if (s_slowActive) {
+            s_slowRestoreScale = sane_host_scale(s_hostScale);
+            force_set_timescale(s_slowScale);
+            return;
+        }
         own_set_timescale(sane_host_scale(s_hostScale));
     }
+}
+
+bool general_timescale_available() {
+    return clock_available();
+}
+
+void general_set_slow_motion(float scale) {
+    if (!clock_available()) return;
+    if (scale > 0.0f && scale < 1.0f) {
+        if (!s_slowActive) {
+            s_slowRestoreScale = s_active ? sane_host_scale(s_desiredScale)
+                                          : sane_host_scale(live_timescale());
+            s_slowActive = true;
+        }
+        s_slowScale = scale;
+        if (!s_active && !s_hiddenRun) force_set_timescale(scale);
+        return;
+    }
+    if (!s_slowActive) return;
+    s_slowActive = false;
+    if (s_active || s_hiddenRun) return;
+    bool known = false;
+    const bool turbo = turbo_held(known);
+    if (known && !turbo && s_slowRestoreScale == kTurboScale) s_slowRestoreScale = 1.0f;
+    own_set_timescale(sane_host_scale(s_slowRestoreScale));
 }
 
 float general_get_aurora_timescale() {
