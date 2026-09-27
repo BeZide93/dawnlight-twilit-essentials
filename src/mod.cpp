@@ -1314,15 +1314,9 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
         is_epona_sub_disabled);
 
-    svc_ui->pane_add_section(mod_ctx, left, "Warping");
     ui_add_toggle(left, "Warp as human", s_varGeneralHumanWarp,
         "<p>Human Link warps with the light beam instead of turning into a wolf first.</p>");
 
-    svc_ui->pane_add_section(mod_ctx, left, "Midna");
-    ui_add_toggle(left, "Faster call cancel", s_varGeneralFasterMidnaCancel,
-        "<p>Lets you cancel Midna's call faster.</p>");
-
-    svc_ui->pane_add_section(mod_ctx, left, "Z Button Slot");
     if (isNativeZButtonEngine()) {
         svc_ui->pane_add_rml(mod_ctx, left,
             "<span style=\"color: #a8bcd4;\">This Dusklight build (Lazy Tweaks) already "
@@ -1333,10 +1327,13 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
             "Turn off its \"Third Item Slot\" setting and restart to use this one instead.</span>",
             nullptr);
     } else {
-        ui_add_toggle(left, "Enabled", s_varCustomZButton,
+        ui_add_toggle(left, "Enable third item slot", s_varCustomZButton,
             "<p>Enables a 3rd item slot on the Z button. Midna moves to a separate button - "
             "both can be changed in the Controls tab. Note: A restart may be required.</p>");
     }
+
+    ui_add_toggle(left, "Faster call cancel", s_varGeneralFasterMidnaCancel,
+        "<p>Lets you cancel Midna's call faster.</p>");
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
     ui_add_toggle(left, "Enabled", s_varStamina,
