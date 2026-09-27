@@ -2628,9 +2628,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaWolfSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaWolfSprintSpeed.name = "staminaWolfSprintSpeed";
         descStaminaWolfSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaWolfSprintSpeed.default_int = 125;
+        descStaminaWolfSprintSpeed.default_int = 155;
         if (svc_config->register_var(mod_ctx, &descStaminaWolfSprintSpeed, &s_varStaminaWolfSprintSpeed) == MOD_OK) {
-            int64_t v = 125;
+            int64_t v = 155;
             svc_config->get_int(mod_ctx, s_varStaminaWolfSprintSpeed, &v);
             if (v < 100) v = 100;
             if (v > 200) v = 200;
@@ -2650,9 +2650,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descStaminaSwimSprintSpeed = CONFIG_VAR_DESC_INIT;
         descStaminaSwimSprintSpeed.name = "staminaSwimSprintSpeed";
         descStaminaSwimSprintSpeed.type = CONFIG_VAR_INT;
-        descStaminaSwimSprintSpeed.default_int = 125;
+        descStaminaSwimSprintSpeed.default_int = 155;
         if (svc_config->register_var(mod_ctx, &descStaminaSwimSprintSpeed, &s_varStaminaSwimSprintSpeed) == MOD_OK) {
-            int64_t v = 125;
+            int64_t v = 155;
             svc_config->get_int(mod_ctx, s_varStaminaSwimSprintSpeed, &v);
             if (v < 100) v = 100;
             if (v > 200) v = 200;
@@ -2683,31 +2683,31 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             }
         }
 
-        struct StaminaCostVar { const char* name; ConfigVarHandle* handle; int* global; };
+        struct StaminaCostVar { const char* name; ConfigVarHandle* handle; int* global; int default_pct; };
         const StaminaCostVar staminaCostVars[] = {
-            { "staminaCostAttack",     &s_varStaminaCostAttack,     &g_configStaminaCostAttack },
-            { "staminaCostJumpAttack", &s_varStaminaCostJumpAttack, &g_configStaminaCostJumpAttack },
-            { "staminaCostSpin",       &s_varStaminaCostSpin,       &g_configStaminaCostSpin },
-            { "staminaCostRoll",       &s_varStaminaCostRoll,       &g_configStaminaCostRoll },
-            { "staminaCostSidestep",   &s_varStaminaCostSidestep,   &g_configStaminaCostSidestep },
-            { "staminaCostClimb",      &s_varStaminaCostClimb,      &g_configStaminaCostClimb },
-            { "staminaCostHang",       &s_varStaminaCostHang,       &g_configStaminaCostHang },
-            { "staminaCostCrawl",      &s_varStaminaCostCrawl,      &g_configStaminaCostCrawl },
-            { "staminaCostSwim",       &s_varStaminaCostSwim,       &g_configStaminaCostSwim },
-            { "staminaCostPushPull",   &s_varStaminaCostPushPull,   &g_configStaminaCostPushPull },
-            { "staminaCostWolfDash",   &s_varStaminaCostWolfDash,   &g_configStaminaCostWolfDash },
-            { "staminaCostSprint",     &s_varStaminaCostSprint,     &g_configStaminaCostSprint },
-            { "staminaCostWolfSprint", &s_varStaminaCostWolfSprint, &g_configStaminaCostWolfSprint },
-            { "staminaCostSwimSprint", &s_varStaminaCostSwimSprint, &g_configStaminaCostSwimSprint },
-            { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills },
+            { "staminaCostAttack",     &s_varStaminaCostAttack,     &g_configStaminaCostAttack,     100 },
+            { "staminaCostJumpAttack", &s_varStaminaCostJumpAttack, &g_configStaminaCostJumpAttack, 100 },
+            { "staminaCostSpin",       &s_varStaminaCostSpin,       &g_configStaminaCostSpin,       100 },
+            { "staminaCostRoll",       &s_varStaminaCostRoll,       &g_configStaminaCostRoll,       100 },
+            { "staminaCostSidestep",   &s_varStaminaCostSidestep,   &g_configStaminaCostSidestep,   100 },
+            { "staminaCostClimb",      &s_varStaminaCostClimb,      &g_configStaminaCostClimb,       15 },
+            { "staminaCostHang",       &s_varStaminaCostHang,       &g_configStaminaCostHang,        10 },
+            { "staminaCostCrawl",      &s_varStaminaCostCrawl,      &g_configStaminaCostCrawl,       10 },
+            { "staminaCostSwim",       &s_varStaminaCostSwim,       &g_configStaminaCostSwim,        10 },
+            { "staminaCostPushPull",   &s_varStaminaCostPushPull,   &g_configStaminaCostPushPull,    30 },
+            { "staminaCostWolfDash",   &s_varStaminaCostWolfDash,   &g_configStaminaCostWolfDash,    10 },
+            { "staminaCostSprint",     &s_varStaminaCostSprint,     &g_configStaminaCostSprint,      10 },
+            { "staminaCostWolfSprint", &s_varStaminaCostWolfSprint, &g_configStaminaCostWolfSprint,  10 },
+            { "staminaCostSwimSprint", &s_varStaminaCostSwimSprint, &g_configStaminaCostSwimSprint,  10 },
+            { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills, 100 },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
             d.name = cv.name;
             d.type = CONFIG_VAR_INT;
-            d.default_int = 100;
+            d.default_int = cv.default_pct;
             if (svc_config->register_var(mod_ctx, &d, cv.handle) == MOD_OK) {
-                int64_t v = 100;
+                int64_t v = cv.default_pct;
                 svc_config->get_int(mod_ctx, *cv.handle, &v);
                 *cv.global = static_cast<int>(v);
                 svc_config->subscribe(mod_ctx, *cv.handle, on_stamina_cost_changed, cv.global, nullptr);
