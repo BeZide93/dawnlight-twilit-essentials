@@ -15,3 +15,4 @@ void human_warp_cinematic_arrival();
 void human_warp_cinematic_end();
 
 void human_warp_arm_arrival_replay();
+bool human_warp_cinematic_active();

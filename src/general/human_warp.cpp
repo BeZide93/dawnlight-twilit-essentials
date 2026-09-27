@@ -614,6 +614,10 @@ void human_warp_arm_arrival_replay() {
     s_humanWarpArrivalFrames = 0;
 }
 
+bool human_warp_cinematic_active() {
+    return s_cineDeparture || s_cineArrival || s_objectWarpHumanHold;
+}
+
 void shutdown_human_warp() {
     s_humanWarpInFlight = false;
     s_humanWarpArrivalPending = false;

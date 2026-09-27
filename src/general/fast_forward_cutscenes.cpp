@@ -16,9 +16,9 @@
 #include "f_pc/f_pc_name.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
+#include "d/actor/d_a_midna.h"
+#include "human_warp.hpp"
 
-#include <cstdarg>
-#include <cstdio>
 #include <cstring>
 
 int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
@@ -316,12 +316,17 @@ bool is_midna_actor(fopAc_ac_c* actor) {
 }
 
 bool is_midna_event(dEvt_control_c* evt) {
+    if (evt == nullptr) return false;
     return is_midna_actor(evt->getPt1()) || is_midna_actor(evt->getPt2());
 }
 
-bool is_player_in_door_process() {
+bool is_talk_event(dEvt_control_c* evt) {
+    return evt != nullptr && evt->mEventStatus == 1 && evt->getMode() == dEvt_mode_TALK_e;
+}
+
+bool is_player_process_running() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
-    return link != nullptr && link->mProcID == daAlink_c::PROC_DOOR_OPEN;
+    return link != nullptr && link->checkEventRun();
 }
 
 bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
@@ -335,7 +340,11 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
 
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
 
-    if (allowDoors && is_player_in_door_process()) return true;
+    if (allowDoors && human_warp_cinematic_active()) return true;
+
+    if (is_talk_event(evt) || is_midna_event(evt)) return false;
+
+    if (allowDoors && is_player_process_running()) return true;
 
     if (evt == nullptr || evt->mEventStatus != 1) return false;
 
@@ -346,7 +355,7 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
         "DEFAULT_START",
         "KNOB_START",
     };
-    if (evt->mEventId >= 0) {
+    if (!allowDoors && evt->mEventId >= 0) {
         dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
         if (data != nullptr && data->getName() != nullptr) {
             for (const char* name : kNeverBoostEvents) {
@@ -359,8 +368,6 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
 
     if (!allowDoors && is_door_event(evt)) return false;
 
-    if (is_midna_event(evt)) return false;
-
     const int idx = static_cast<int>(evt->mOrderIdx);
     const u16 type = (idx >= 0 && idx < 8)
         ? evt->mOrder[idx].mEventType
@@ -368,51 +375,6 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     return type == dEvt_type_OTHER_e || type == dEvt_type_COMPULSORY_e ||
            type == dEvt_type_POTENTIAL_e ||
            (allowDoors && type == dEvt_type_DOOR_e);
-}
-
-const LogService* s_ffLogSvc = nullptr;
-ModContext* s_ffLogCtx = nullptr;
-
-void ff_log(const char* fmt, ...) {
-    if (s_ffLogSvc == nullptr || s_ffLogSvc->info == nullptr) return;
-    char msg[256];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(msg, sizeof(msg), fmt, args);
-    va_end(args);
-    s_ffLogSvc->info(s_ffLogCtx, msg);
-}
-
-void* s_lastLoggedEvt = nullptr;
-int s_lastLoggedEventId = -999;
-
-void log_event_once(dEvt_control_c* evt, bool allowDoors) {
-    if (evt == nullptr || evt->mEventStatus != 1) {
-        s_lastLoggedEvt = nullptr;
-        s_lastLoggedEventId = -999;
-        return;
-    }
-    if (evt == s_lastLoggedEvt && evt->mEventId == s_lastLoggedEventId) return;
-    s_lastLoggedEvt = evt;
-    s_lastLoggedEventId = evt->mEventId;
-
-    const char* name = "?";
-    if (evt->mEventId >= 0) {
-        dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
-        if (data != nullptr && data->getName() != nullptr) name = data->getName();
-    }
-    const u8 mode = evt->getMode();
-    const int idx = static_cast<int>(evt->mOrderIdx);
-    const u16 type = (idx >= 0 && idx < 8)
-        ? evt->mOrder[idx].mEventType
-        : static_cast<u16>(dEvt_type_OTHER_e);
-    const bool door = is_door_event(evt);
-    const bool midna = is_midna_event(evt);
-    const bool genuine = is_genuine_cutscene(evt, allowDoors);
-    ff_log("[ff] event id=%d name=%s mode=%d type=%d door=%d midna=%d allowDoors=%d genuine=%d skipFunc=%d",
-           evt->mEventId, name, static_cast<int>(mode), static_cast<int>(type),
-           door ? 1 : 0, midna ? 1 : 0, allowDoors ? 1 : 0, genuine ? 1 : 0,
-           evt->mSkipFunc != nullptr ? 1 : 0);
 }
 
 }
@@ -464,11 +426,8 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
 
 void update_hidden_run_watchdog();
 
-void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ctx_) {
+void update_fast_forward_cutscenes(const LogService*, ModContext*) {
     if (!clock_available()) return;
-
-    s_ffLogSvc = log_svc;
-    s_ffLogCtx = mod_ctx_;
 
     update_hidden_run_watchdog();
     update_turbo_release_watch();
@@ -491,9 +450,6 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
 
     const bool veryFast = g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_VERY_FAST;
     dEvt_control_c* evt = dComIfGp_getEvent();
-    if (g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_OFF) {
-        log_event_once(evt, veryFast);
-    }
     const bool genuine = is_genuine_cutscene(evt, veryFast);
 
     if (!genuine) {
@@ -514,14 +470,6 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* mod_ct
                                    s_confirmFrames >= kLeadFrames;
 
     const float targetScale = veryFast ? kVeryFastForwardScale : kFastForwardScale;
-
-    static int s_statusLogCooldown = 0;
-    if (--s_statusLogCooldown <= 0) {
-        s_statusLogCooldown = 20;
-        ff_log("[ff] status genuine=1 confirm=%d/%d active=%d skipWillHandle=%d live=%.2f desired=%.2f target=%.2f",
-               s_confirmFrames, kLeadFrames, s_active ? 1 : 0, skipWillHandle ? 1 : 0,
-               live_timescale(), s_desiredScale, targetScale);
-    }
 
     if (shouldFastForward) {
         const float current = live_timescale();
@@ -550,8 +498,6 @@ void shutdown_fast_forward_cutscenes() {
     s_fightStartFrames = -1;
     s_holdMinFrames = 0;
     s_turboReleaseFrames = 0;
-    s_lastLoggedEvt = nullptr;
-    s_lastLoggedEventId = -999;
 }
 
 void update_hidden_run_watchdog() {
