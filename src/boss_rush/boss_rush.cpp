@@ -2693,6 +2693,44 @@ static void update_blizzeta_instant_fight() {
     s_done = true;
 }
 
+static int stallord_arena_reset_phase1(void* i_actor, void*) {
+    fopAc_ac_c* ac = static_cast<fopAc_ac_c*>(i_actor);
+    if (ac == nullptr) return 0;
+    const s16 nm = fopAcM_GetName(ac);
+    const s8 room = static_cast<s8>(fopAcM_GetRoomNo(ac));
+    if (nm == fpcNm_Obj_Lv4RailWall_e) {
+        daObjLv4Wall_c* wall = static_cast<daObjLv4Wall_c*>(ac);
+        if (wall->mMode != daObjLv4Wall_c::MODE_WAIT || wall->mHeight != 0.0f) {
+            if (wall->getSwbit() != 0xFF) dComIfGs_offSwitch(wall->getSwbit(), room);
+            wall->mHeight = 0.0f;
+            wall->speed.y = 0.0f;
+            wall->mRotCounter = 0;
+            wall->mMoveCounter = 0;
+            wall->mMode = daObjLv4Wall_c::MODE_WAIT;
+            rush_debug_logf("[ds-p1] pillar reset for phase 1");
+        }
+    } else if (nm == fpcNm_Obj_Lv4Sand_e) {
+        daObjLv4Sand_c* sand = static_cast<daObjLv4Sand_c*>(ac);
+        if (sand->mMode != daObjLv4Sand_c::MODE_WAIT || sand->mHeight != 0.0f) {
+            if (sand->getSwbit() != 0xFF) dComIfGs_offSwitch(sand->getSwbit(), room);
+            sand->mHeight = 0.0f;
+            sand->speed.y = 0.0f;
+            sand->mMode = daObjLv4Sand_c::MODE_WAIT;
+            rush_debug_logf("[ds-p1] sand reset for phase 1");
+        }
+    } else if (nm == fpcNm_Obj_Lv4Bridge_e) {
+        daObjLv4Brg_c* brg = static_cast<daObjLv4Brg_c*>(ac);
+        if (brg->mMode != 0 || brg->field_0x5bc != 0.0f) {
+            if (brg->getSwbit() != 0xFF) dComIfGs_offSwitch(brg->getSwbit(), room);
+            brg->field_0x5bc = 0.0f;
+            brg->speed.y = 0.0f;
+            brg->mMode = 0;
+            rush_debug_logf("[ds-p1] bridge reset for phase 1");
+        }
+    }
+    return 0;
+}
+
 static void update_stallord_instant_fight() {
     static bool s_done = false;
     static u32 s_gen = ~0u;
@@ -2746,6 +2784,7 @@ static void update_stallord_instant_fight() {
             zone.getBit().offSwitch(8);
         }
     }
+    fopAcIt_Executor(stallord_arena_reset_phase1, nullptr);
 
     cDmr_SkipInfo = 1;
 
@@ -2769,90 +2808,6 @@ static void update_stallord_instant_fight() {
     s_done = true;
 }
 
-static int s_stallordP2CamFrames = 0;
-static bool s_stallordTransitionHidden = false;
-static int s_stallordArenaSnapFrames = 0;
-
-static int stallord_arena_snap_phase2(void* i_actor, void* i_count) {
-    fopAc_ac_c* ac = static_cast<fopAc_ac_c*>(i_actor);
-    if (ac == nullptr) return 0;
-    int* n = static_cast<int*>(i_count);
-    const s16 nm = fopAcM_GetName(ac);
-
-    if (nm == fpcNm_Obj_Lv4Sand_e) {
-        daObjLv4Sand_c* s = static_cast<daObjLv4Sand_c*>(ac);
-        s->mHeight = -3500.0f;
-        s->mMode = daObjLv4Sand_c::MODE_DEAD;
-        ++*n;
-    } else if (nm == fpcNm_Obj_Lv4RailWall_e) {
-        daObjLv4Wall_c* w = static_cast<daObjLv4Wall_c*>(ac);
-        w->mHeight = 3375.0f;
-        w->mMode = daObjLv4Wall_c::MODE_DEAD;
-        ++*n;
-    } else if (nm == fpcNm_Obj_Lv4Bridge_e) {
-        daObjLv4Brg_c* b = static_cast<daObjLv4Brg_c*>(ac);
-        b->current.pos.y = -100000.0f;
-        b->old.pos.y = -100000.0f;
-        ++*n;
-    } else if (nm == fpcNm_Obj_SwSpinner_e) {
-        daObjSwSpinner_c* sp = static_cast<daObjSwSpinner_c*>(ac);
-        sp->mPartBHeight = 50.0f;
-        sp->mCanUse = false;
-        ++*n;
-    }
-    return 0;
-}
-
-static constexpr int kStallordP2CamFrames = 12;
-
-static void stallord_phase2_camera(camera_process_class* cam) {
-    cam->mCamera.Reset(cXyz(1909.093f, -1502.426f, -1568.052f), cXyz(1933.030f, -1428.330f, -1773.810f),
-                       61.868f, 0);
-    cam->mCamera.Start();
-    cam->mCamera.SetTrimSize(0);
-}
-
-static void stallord_phase2_finalize(fopAc_ac_c* ds) {
-    camera_process_class* cam = boss_rush_get_active_player_camera();
-    daAlink_c* link = daAlink_getAlinkActorClass();
-    const s8 room = static_cast<s8>(fopAcM_GetRoomNo(ds));
-    const cXyz p(2088.60f, -1594.61f, -1337.98f);
-    const s16 faceYaw = cM_deg2s(356.0f);
-
-    dComIfGp_event_reset();
-    if (link != nullptr) {
-        daSpinner_c* spinner = link->getSpinnerActor();
-        if (spinner != nullptr) {
-            spinner->forceDelete();
-        }
-        link->cancelOriginalDemo();
-        link->current.pos = p;
-        link->old.pos = p;
-        link->shape_angle.y = faceYaw;
-        link->current.angle.y = faceYaw;
-        link->speed.set(0.0f, 0.0f, 0.0f);
-        link->speedF = 0.0f;
-    }
-    if (cam != nullptr) {
-        stallord_phase2_camera(cam);
-        s_stallordP2CamFrames = kStallordP2CamFrames;
-    }
-
-    bbi::stallord_prep_phase2_wait(ds);
-
-    dComIfGs_onZoneSwitch(6, room);
-    dComIfGs_onZoneSwitch(7, room);
-    dComIfGs_onZoneSwitch(8, room);
-    dComIfGs_setRestartRoom(p, faceYaw, 50);
-    dComIfGs_setRestartRoomParam((50 & 0x3F) | (0xFF << 24));
-    Z2GetAudioMgr()->bgmStart(Z2BGM_HARAGIGANT_BTL02, 0, 0);
-    Z2GetAudioMgr()->setDemoName("force_end");
-
-    int snapped = 0;
-    fopAcIt_Executor(stallord_arena_snap_phase2, &snapped);
-    s_stallordArenaSnapFrames = 40;
-}
-
 struct StallordSearch {
     u8 type;
     daB_DS_c* found;
@@ -2871,179 +2826,6 @@ static daB_DS_c* stallord_find(u8 type) {
     StallordSearch search{type, nullptr};
     fopAcIt_Executor(stallord_search_cb, &search);
     return search.found;
-}
-
-static bool s_stallordTransitionNearEnd = false;
-
-static void stallord_start_rail_wall(daB_DS_c* p2) {
-    fopAc_ac_c* wallAc = fopAcM_SearchByName(fpcNm_Obj_Lv4RailWall_e);
-    if (wallAc == nullptr) return;
-    daObjLv4Wall_c* wall = static_cast<daObjLv4Wall_c*>(wallAc);
-    if (wall->mMode != daObjLv4Wall_c::MODE_WAIT) return;
-    wall->speed.y = 0.0f;
-    wall->gravity = 0.0f;
-    wall->mMoveCounter = 0;
-    wall->mMode = daObjLv4Wall_c::MODE_MOVE;
-    p2->onDemo();
-    rush_debug_logf("[ds-p2] spinner switch activated, rail wall rising");
-}
-
-static void stallord_ride_spinner_switch() {
-    daAlink_c* link = daAlink_getAlinkActorClass();
-    fopAc_ac_c* swAc = fopAcM_SearchByName(fpcNm_Obj_SwSpinner_e);
-    if (link == nullptr || swAc == nullptr) return;
-    daObjSwSpinner_c* sw = static_cast<daObjSwSpinner_c*>(swAc);
-    cXyz pos = sw->current.pos;
-    pos.y += sw->mPartBHeight;
-    link->current.pos = pos;
-    link->old.pos = pos;
-    link->speed.set(0.0f, 0.0f, 0.0f);
-    link->speedF = 0.0f;
-}
-
-static void stallord_transition_assist() {
-    daB_DS_c* p2 = stallord_find(daB_DS_c::TYPE_BATTLE_2);
-    if (p2 == nullptr || p2->mAction != daB_DS_c::ACT_B2_OPENING_DEMO) return;
-    if (p2->mMode == 0 && !p2->mIsDemo && stallord_find(daB_DS_c::TYPE_BATTLE_1) == nullptr) {
-        stallord_start_rail_wall(p2);
-    }
-    if (p2->mMode == 2) stallord_ride_spinner_switch();
-}
-
-static bool stallord_link_settled() {
-    daAlink_c* link = daAlink_getAlinkActorClass();
-    if (link == nullptr) return true;
-    if (dComIfGp_event_runCheck() || link->checkEventRun()) return false;
-    if (!link->mLinkAcch.ChkGroundHit()) return false;
-    switch (link->mProcID) {
-    case daAlink_c::PROC_DAMAGE:
-    case daAlink_c::PROC_LARGE_DAMAGE:
-    case daAlink_c::PROC_LARGE_DAMAGE_UP:
-    case daAlink_c::PROC_LARGE_DAMAGE_WALL:
-    case daAlink_c::PROC_LAND_DAMAGE:
-    case daAlink_c::PROC_POLY_DAMAGE:
-        return false;
-    default:
-        return true;
-    }
-}
-
-static bool stallord_transition_fallback(bool& io_spawned) {
-    daB_DS_c* p2 = stallord_find(daB_DS_c::TYPE_BATTLE_2);
-    if (p2 == nullptr) {
-        daB_DS_c* p1 = stallord_find(daB_DS_c::TYPE_BATTLE_1);
-        if (p1 == nullptr || io_spawned) return false;
-        io_spawned = true;
-        daAlink_c* link = daAlink_getAlinkActorClass();
-        if (link != nullptr) link->cancelOriginalDemo();
-        dComIfGp_event_reset();
-        ActorSpawnParams sp{};
-        sp.parameters = fopAcM_GetParam(p1) | daB_DS_c::TYPE_BATTLE_2;
-        sp.argument = static_cast<int8_t>(0xFF);
-        sp.room_num = static_cast<int8_t>(fopAcM_GetRoomNo(p1));
-        sp.position = {p1->current.pos.x, p1->current.pos.y, p1->current.pos.z};
-        sp.angle = {0, 0, 0};
-        sp.scale = {1.0f, 1.0f, 1.0f};
-        ActorId p2Id{};
-        svc_actor->create_actor(s_modCtx, fpcNm_B_DS_e, &sp, &p2Id);
-        fopAcM_delete(p1);
-        return false;
-    }
-    daB_DS_c* p1 = stallord_find(daB_DS_c::TYPE_BATTLE_1);
-    if (p1 != nullptr) fopAcM_delete(p1);
-    stallord_phase2_finalize(p2);
-    return true;
-}
-
-static void update_stallord_phase_transition_skip() {
-    static constexpr int kTransitionWatchdogTicks = 4000;
-    static constexpr int kFallbackGiveUpTicks = 300;
-    static constexpr int kSettledTicks = 15;
-    static constexpr int kSettleGiveUpTicks = 900;
-    static constexpr int kSlowTicks = 20;
-    static u32  s_gen = ~0u;
-    static bool s_done = false;
-    static int  s_hiddenTicks = 0;
-    static int  s_readyTicks = 0;
-    static int  s_settledTicks = 0;
-    static int  s_slowTicks = 0;
-    static bool s_fallbackSpawned = false;
-    if (instant_fight_rearm(s_gen)) {
-        s_done = false; s_hiddenTicks = 0; s_readyTicks = 0; s_settledTicks = 0; s_slowTicks = 0;
-        s_fallbackSpawned = false;
-        s_stallordP2CamFrames = 0; s_stallordArenaSnapFrames = 0;
-        s_stallordTransitionHidden = false;
-        s_stallordTransitionNearEnd = false;
-        mDoGph_gInf_c::offFade();
-    }
-
-    if (s_stallordArenaSnapFrames > 0) {
-        --s_stallordArenaSnapFrames;
-        int n = 0;
-        fopAcIt_Executor(stallord_arena_snap_phase2, &n);
-    }
-
-    if (s_stallordP2CamFrames > 0) {
-        --s_stallordP2CamFrames;
-        camera_process_class* cam = boss_rush_get_active_player_camera();
-        if (cam != nullptr) stallord_phase2_camera(cam);
-    }
-
-    if (s_done) return;
-
-    const char* stage = dComIfGp_getStartStageName();
-    if (stage == nullptr || std::strcmp(stage, "D_MN10A") != 0) return;
-    if (!is_boss_rush_active() || s_returningToChamber) return;
-
-    const int t = boss_rush_target_index();
-    if (t < 0 || static_cast<size_t>(t) >= g_bossGalleryCount ||
-        std::strcmp(g_bossGalleryTable[t].displayName, "Stallord") != 0) {
-        return;
-    }
-
-    if (!s_stallordTransitionHidden) {
-        daB_DS_c* p1 = stallord_find(daB_DS_c::TYPE_BATTLE_1);
-        if (p1 != nullptr && bbi::stallord_p1_death_demo(p1)) {
-            s_stallordTransitionHidden = true;
-            s_stallordTransitionNearEnd = false;
-            s_hiddenTicks = 0;
-            s_readyTicks = 0;
-            s_settledTicks = 0;
-            s_slowTicks = 0;
-            s_fallbackSpawned = false;
-            rush_debug_logf("[ds-p2] phase 1 down, playing transition hidden");
-        }
-        return;
-    }
-
-    stallord_transition_assist();
-    daB_DS_c* p2 = stallord_find(daB_DS_c::TYPE_BATTLE_2);
-
-    bool finished = false;
-    if (p2 != nullptr && p2->mAction != daB_DS_c::ACT_B2_OPENING_DEMO) {
-        if (s_stallordTransitionNearEnd) {
-            finished = ++s_slowTicks >= kSlowTicks;
-        } else {
-            s_settledTicks = stallord_link_settled() ? s_settledTicks + 1 : 0;
-            if (s_settledTicks >= kSettledTicks || ++s_readyTicks >= kSettleGiveUpTicks) {
-                s_stallordTransitionNearEnd = true;
-            }
-        }
-    } else if (++s_hiddenTicks >= kTransitionWatchdogTicks) {
-        if (s_hiddenTicks == kTransitionWatchdogTicks) {
-            rush_debug_logf("[ds-p2] transition stalled, forcing phase 2");
-        }
-        finished = stallord_transition_fallback(s_fallbackSpawned) ||
-                   s_hiddenTicks >= kTransitionWatchdogTicks + kFallbackGiveUpTicks;
-    }
-
-    if (finished) {
-        daB_DS_c* ready = p2 != nullptr ? p2 : stallord_find(daB_DS_c::TYPE_BATTLE_2);
-        if (ready != nullptr) dComIfGs_onZoneSwitch(7, static_cast<s8>(fopAcM_GetRoomNo(ready)));
-        s_stallordTransitionHidden = false;
-        s_stallordTransitionNearEnd = false;
-        s_done = true;
-    }
 }
 
 static int argorok_peahat_cam_finish(void* i_actor, void*) {
@@ -3904,7 +3686,120 @@ static void blizzeta_phase2_hurry(fopAc_ac_c* yo) {
     if (y->mMode == 3 || y->mMode == 5 || y->mMode == 17) count_down_to_end(y->mActionTimer);
 }
 
+static bool stallord_phase2_running(fopAc_ac_c* ds) {
+    const daB_DS_c* d = reinterpret_cast<const daB_DS_c*>(ds);
+    return d->mAction == 3 && d->mMode >= 10 && d->mDead;
+}
+
+static constexpr int kStallordTailSettleTicks = 15;
+static constexpr int kStallordTailSlowTicks = 20;
+static constexpr int kStallordTailMaxTicks = 6000;
+static bool s_stallordTail = false;
+static int s_stallordTailQuiet = 0;
+static int s_stallordTailTicks = 0;
+static s16 s_stallordTailEventId = -1;
+
+static void stallord_tail_reset() {
+    s_stallordTail = false;
+    s_stallordTailQuiet = 0;
+    s_stallordTailTicks = 0;
+    s_stallordTailEventId = -1;
+}
+
+static void stallord_tail_start_pillar(daB_DS_c* p2) {
+    fopAc_ac_c* wallAc = fopAcM_SearchByName(fpcNm_Obj_Lv4RailWall_e);
+    if (wallAc == nullptr) return;
+    daObjLv4Wall_c* wall = static_cast<daObjLv4Wall_c*>(wallAc);
+    if (wall->mMode != daObjLv4Wall_c::MODE_WAIT) return;
+    if (wall->getSwbit() != 0xFF) {
+        g_dComIfG_gameInfo.info.onSwitch(wall->getSwbit(), fopAcM_GetRoomNo(wall));
+    }
+    wall->speed.y = 0.0f;
+    wall->gravity = 0.0f;
+    wall->mMoveCounter = 0;
+    wall->mMode = daObjLv4Wall_c::MODE_MOVE;
+    p2->onDemo();
+    rush_debug_logf("[ds-p2] spinner switch done, pillar rising");
+}
+
+static void stallord_tail_ride_switch() {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    fopAc_ac_c* swAc = fopAcM_SearchByName(fpcNm_Obj_SwSpinner_e);
+    if (link == nullptr || swAc == nullptr) return;
+    daObjSwSpinner_c* sw = static_cast<daObjSwSpinner_c*>(swAc);
+    cXyz pos = sw->current.pos;
+    pos.y += sw->mPartBHeight;
+    link->current.pos = pos;
+    link->old.pos = pos;
+    link->speed.set(0.0f, 0.0f, 0.0f);
+    link->speedF = 0.0f;
+}
+
+static bool stallord_tail_link_settled() {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr) return true;
+    if (dComIfGp_event_runCheck() || link->checkEventRun()) return false;
+    if (!link->mLinkAcch.ChkGroundHit()) return false;
+    switch (link->mProcID) {
+    case daAlink_c::PROC_DAMAGE:
+    case daAlink_c::PROC_LARGE_DAMAGE:
+    case daAlink_c::PROC_LARGE_DAMAGE_UP:
+    case daAlink_c::PROC_LARGE_DAMAGE_WALL:
+    case daAlink_c::PROC_LAND_DAMAGE:
+    case daAlink_c::PROC_POLY_DAMAGE:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool stallord_tail_update(fopAc_ac_c* p1, bool deathRunning) {
+    if (deathRunning) {
+        if (!s_stallordTail) rush_debug_logf("[ds-p2] phase 1 death demo, hiding transition");
+        s_stallordTail = true;
+        s_stallordTailQuiet = 0;
+        s_stallordTailTicks = 0;
+        return true;
+    }
+    if (!s_stallordTail || p1 != nullptr) {
+        stallord_tail_reset();
+        return false;
+    }
+    dEvt_control_c* evt = dComIfGp_getEvent();
+    const bool eventRunning = dComIfGp_event_runCheck() != 0;
+    if (eventRunning && evt != nullptr && evt->mEventId != s_stallordTailEventId) {
+        s_stallordTailEventId = evt->mEventId;
+        dEvDtEvent_c* data = s_stallordTailEventId >= 0
+            ? g_dComIfG_gameInfo.play.getEvtManager().getEventData(s_stallordTailEventId)
+            : nullptr;
+        rush_debug_logf("[ds-p2] follow-up event %d '%s' playing hidden", s_stallordTailEventId,
+                        (data != nullptr && data->getName() != nullptr) ? data->getName() : "?");
+    }
+    daB_DS_c* p2 = stallord_find(daB_DS_c::TYPE_BATTLE_2);
+    const bool p2InOpening = p2 != nullptr && p2->mAction == daB_DS_c::ACT_B2_OPENING_DEMO;
+    if (p2InOpening && p2->mMode == 0 && !p2->mIsDemo && !eventRunning) stallord_tail_start_pillar(p2);
+    if (p2InOpening && p2->mMode == 2) stallord_tail_ride_switch();
+
+    const bool phase2Ready = p2 != nullptr && !p2InOpening;
+    s_stallordTailQuiet = (phase2Ready && stallord_tail_link_settled()) ? s_stallordTailQuiet + 1 : 0;
+    ++s_stallordTailTicks;
+    if (s_stallordTailQuiet >= kStallordTailSettleTicks + kStallordTailSlowTicks ||
+        s_stallordTailTicks >= kStallordTailMaxTicks) {
+        stallord_tail_reset();
+        return false;
+    }
+    return true;
+}
+
+static bool stallord_tail_near_end() {
+    return s_stallordTail && s_stallordTailQuiet >= kStallordTailSettleTicks;
+}
+
 static fopAc_ac_c* phase2_boss(const char* name, s16* procName) {
+    if (std::strcmp(name, "Stallord") == 0) {
+        *procName = fpcNm_B_DS_e;
+        return stallord_find(daB_DS_c::TYPE_BATTLE_1);
+    }
     if (std::strcmp(name, "Diababa") == 0) *procName = fpcNm_B_BQ_e;
     else if (std::strcmp(name, "Morpheel") == 0) *procName = fpcNm_B_OB_e;
     else if (std::strcmp(name, "Blizzeta") == 0) *procName = fpcNm_B_YO_e;
@@ -3920,8 +3815,8 @@ static void update_phase2_demo_skip() {
 
     fopAc_ac_c* boss = nullptr;
     s16 procName = 0;
-    bool running = s_stallordTransitionHidden && is_boss_rush_active();
-    if (!running && is_boss_rush_active() && !s_returningToChamber) {
+    bool running = false;
+    if (is_boss_rush_active() && !s_returningToChamber) {
         const int t = boss_rush_target_index();
         if (t >= 0 && static_cast<size_t>(t) < g_bossGalleryCount) {
             boss = phase2_boss(g_bossGalleryTable[t].displayName, &procName);
@@ -3929,8 +3824,14 @@ static void update_phase2_demo_skip() {
         if (boss != nullptr) {
             if (procName == fpcNm_B_BQ_e) running = diababa_phase2_running(boss);
             else if (procName == fpcNm_B_OB_e) running = morpheel_phase2_running(boss);
+            else if (procName == fpcNm_B_DS_e) running = stallord_phase2_running(boss);
             else running = blizzeta_phase2_running(boss);
         }
+    }
+    if (procName == fpcNm_B_DS_e && s_killWatchdogFrames == 0 && s_pendingFightIndex == -1) {
+        running = stallord_tail_update(boss, running);
+    } else if (s_stallordTail) {
+        stallord_tail_reset();
     }
     if (running && boss != nullptr && s_killWatchdogFrames > 0) {
         s_killWatchdogFrames = 1;
@@ -3946,12 +3847,12 @@ static void update_phase2_demo_skip() {
             s_state = FAST;
         }
         if (s_state == FAST) fast_forward_set_hidden_run(true);
-        if (s_state == FAST && boss == nullptr && s_stallordTransitionHidden &&
-            s_stallordTransitionNearEnd) {
-            fast_forward_set_hidden_run(false);
-            s_state = SLOW;
-        }
-        if (s_state == FAST && boss != nullptr) {
+        if (s_state == FAST && procName == fpcNm_B_DS_e) {
+            if (stallord_tail_near_end()) {
+                fast_forward_set_hidden_run(false);
+                s_state = SLOW;
+            }
+        } else if (s_state == FAST && boss != nullptr) {
             if (phase2_near_end(boss, procName)) {
                 fast_forward_set_hidden_run(false);
                 s_state = SLOW;
@@ -3959,7 +3860,7 @@ static void update_phase2_demo_skip() {
                 diababa_phase2_hurry(boss);
             } else if (procName == fpcNm_B_OB_e) {
                 morpheel_phase2_hurry(boss);
-            } else {
+            } else if (procName == fpcNm_B_YO_e) {
                 blizzeta_phase2_hurry(boss);
             }
         }
@@ -4074,7 +3975,6 @@ static void on_boss_rush_alink_execute_post(ModContext*, void*, void*, void*) {
     update_deathsword_instant_fight();
     update_blizzeta_instant_fight();
     update_stallord_instant_fight();
-    update_stallord_phase_transition_skip();
     update_argorok_phase_transition_skip();
     update_phase2_demo_skip();
     update_horsebackganon_instant_fight();
@@ -5830,7 +5730,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_deathsword_instant_fight();
     update_blizzeta_instant_fight();
     update_stallord_instant_fight();
-    update_stallord_phase_transition_skip();
     update_phase2_demo_skip();
     update_horsebackganon_instant_fight();
     update_darknut_instant_fight();
