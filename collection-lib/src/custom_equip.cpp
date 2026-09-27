@@ -625,7 +625,6 @@ void load_model(Entry& e) {
 static bool s_customEquipSuppressed = false;
 
 Entry* active_entry(CustomEquipKind kind) {
-    if (s_customEquipSuppressed) return nullptr;
     int id = s_activeId[kind];
     return (id >= 0 && id < s_count) ? &s_entries[id] : nullptr;
 }
@@ -931,6 +930,7 @@ struct CustomEquipSaveBlob {
 };
 
 static void save_custom_equip_state(CustomEquipKind kind, u8 item) {
+    if (s_customEquipSuppressed) return;
     if (g_saveSvc != nullptr && g_modCtx != nullptr) {
         CustomEquipSaveBlob blob{};
         size_t size = sizeof(blob);
@@ -1195,23 +1195,55 @@ void custom_equip_deactivate(CustomEquipKind kind) {
     }
 }
 
-void custom_equip_set_suppressed(bool suppressed) {
-    s_customEquipSuppressed = suppressed;
-    if (suppressed) {
-        daAlink_c* pl = player();
-        if (pl && is_gameplay_ready()) {
-            if (s_originalLinkModel != nullptr && pl->mpLinkModel != s_originalLinkModel) {
-                restore_original_link_models(pl);
-                s_originalLinkModel = nullptr;
-                s_originalHatModel  = nullptr;
-                s_originalFaceModel = nullptr;
-                s_originalHandModel = nullptr;
-            }
-            pl->setShieldModel();
-            pl->setItemMatrix(0);
-            refresh_sword_model(pl);
-        }
+static int s_sessionStash[3] = { -1, -1, -1 };
+
+static void refresh_held_models() {
+    daAlink_c* pl = player();
+    if (pl == nullptr || !is_gameplay_ready()) return;
+    pl->setShieldModel();
+    pl->setItemMatrix(0);
+    refresh_sword_model(pl);
+}
+
+static void revert_player_models() {
+    daAlink_c* pl = player();
+    if (pl == nullptr || !is_gameplay_ready()) return;
+    if (s_originalLinkModel != nullptr && pl->mpLinkModel != s_originalLinkModel) {
+        restore_original_link_models(pl);
+        s_originalLinkModel = nullptr;
+        s_originalHatModel  = nullptr;
+        s_originalFaceModel = nullptr;
+        s_originalHandModel = nullptr;
     }
+    refresh_held_models();
+}
+
+void custom_equip_set_suppressed(bool suppressed) {
+    if (suppressed) {
+        if (!s_customEquipSuppressed) {
+            for (int k = 0; k < 3; k++) {
+                s_sessionStash[k] = s_activeId[k];
+                s_activeId[k] = -1;
+                s_prevEquipWasActive[k] = false;
+            }
+            s_customEquipSuppressed = true;
+            revert_player_models();
+        }
+        return;
+    }
+    if (!s_customEquipSuppressed) return;
+    const bool tunicChanged = s_activeId[CE_TUNIC] != s_sessionStash[CE_TUNIC];
+    if (tunicChanged) {
+        s_activeId[CE_TUNIC] = -1;
+        revert_player_models();
+    }
+    for (int k = 0; k < 3; k++) {
+        s_activeId[k] = s_sessionStash[k];
+        s_sessionStash[k] = -1;
+        s_prevEquipWasActive[k] = s_activeId[k] >= 0;
+    }
+    s_customEquipSuppressed = false;
+    refresh_held_models();
 }
 
 bool custom_equip_is_suppressed() {
@@ -1219,12 +1251,10 @@ bool custom_equip_is_suppressed() {
 }
 
 bool custom_equip_active(CustomEquipKind kind) {
-    if (s_customEquipSuppressed) return false;
     return s_activeId[kind] >= 0;
 }
 
 int custom_equip_active_id(CustomEquipKind kind) {
-    if (s_customEquipSuppressed) return -1;
     return s_activeId[kind];
 }
 
@@ -1297,7 +1327,7 @@ bool custom_equip_unlocked(int id) {
 
 bool custom_equip_equipped(int id) {
     const CustomEquipDef* d = custom_equip_get(id);
-    if (d == nullptr || s_customEquipSuppressed) return false;
+    if (d == nullptr) return false;
     if (custom_equip_has_model(id)) return s_activeId[d->kind] == id;
 
     const u8 base = custom_equip_resolved_base(*d);
@@ -1620,11 +1650,6 @@ void custom_equip_update() {
         s_restoredFromSave = false;
         s_prevEquipWasActive[0] = s_prevEquipWasActive[1] = s_prevEquipWasActive[2] = false;
         s_dollSwapActive = false;
-        return;
-    }
-
-    if (s_customEquipSuppressed) {
-        s_healPending = false;
         return;
     }
 

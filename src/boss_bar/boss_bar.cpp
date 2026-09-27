@@ -1316,6 +1316,13 @@ void update_boss_bar(const LogService*, ModContext*) {
                         ? static_cast<f32>(h) / static_cast<f32>(s_boss.maxHp)
                         : 1.0f;
 
+            if (best->name == fpcNm_E_DT_e && best->actor != nullptr &&
+                bbi::dekutoad_dying(best->actor)) {
+                s_boss.engaged = true;
+                s_boss.curHp = 0;
+                newLive = 0.0f;
+            }
+
             if (switchingSameBoss) {
                 s_boss.live01 = newLive;
                 s_boss.shownRatio = newLive;

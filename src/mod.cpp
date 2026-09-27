@@ -432,7 +432,6 @@ static ConfigVarHandle s_varBottlesQuickAccess = 0;
 static ConfigVarHandle s_varSheathedSpin = 0;
 static ConfigVarHandle s_varFlurryRush = 0;
 static ConfigVarHandle s_varFlurryRushPerfectFrames = 0;
-static ConfigVarHandle s_varFlurryRushSlowFactor = 0;
 static ConfigVarHandle s_varStamina = 0;
 static ConfigVarHandle s_varStaminaMax = 0;
 static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
@@ -687,15 +686,6 @@ static void on_flurry_rush_changed(ModContext*, ConfigVarHandle, const ConfigVar
     if (value) {
         g_configFlurryRushEnabled = value->bool_value;
         flurry_rush_apply_enabled();
-    }
-}
-
-static void on_flurry_rush_slow_factor_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        int64_t pct = value->int_value;
-        if (pct < 5) pct = 5;
-        if (pct > 80) pct = 80;
-        g_configFlurryRushSlowFactor = static_cast<int>(pct);
     }
 }
 
@@ -1684,19 +1674,6 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = " frames";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
-    if (s_varFlurryRushSlowFactor != 0) {
-        UiControlDesc c = UI_CONTROL_DESC_INIT;
-        c.kind = UI_CONTROL_NUMBER;
-        c.label = "Time scale";
-        c.help_rml = "<p>Game speed during the slow motion, as a percentage (default: 30%).</p>";
-        c.binding = UI_BINDING_CONFIG_VAR;
-        c.config_var = s_varFlurryRushSlowFactor;
-        c.min = 5;
-        c.max = 80;
-        c.step = 5;
-        c.suffix = "%";
-        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
-    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Puppet Zelda");
     ui_add_toggle(left, "Enabled", s_varPuppetZeldaPattern,
@@ -2474,19 +2451,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descFlurryRush, &s_varFlurryRush) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varFlurryRush, &g_configFlurryRushEnabled);
             svc_config->subscribe(mod_ctx, s_varFlurryRush, on_flurry_rush_changed, nullptr, nullptr);
-        }
-
-        ConfigVarDesc descFlurryRushSlowFactor = CONFIG_VAR_DESC_INIT;
-        descFlurryRushSlowFactor.name = "flurryRushSlowFactor";
-        descFlurryRushSlowFactor.type = CONFIG_VAR_INT;
-        descFlurryRushSlowFactor.default_int = 30;
-        if (svc_config->register_var(mod_ctx, &descFlurryRushSlowFactor, &s_varFlurryRushSlowFactor) == MOD_OK) {
-            int64_t v = 30;
-            svc_config->get_int(mod_ctx, s_varFlurryRushSlowFactor, &v);
-            if (v < 5) v = 5;
-            if (v > 80) v = 80;
-            g_configFlurryRushSlowFactor = static_cast<int>(v);
-            svc_config->subscribe(mod_ctx, s_varFlurryRushSlowFactor, on_flurry_rush_slow_factor_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descFlurryRushPerfectFrames = CONFIG_VAR_DESC_INIT;

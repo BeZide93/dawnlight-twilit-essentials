@@ -877,6 +877,31 @@ static HookAction on_beastganon_arrow_hit_pre(ModContext*, void* args, void* ret
 static s16 s_bmgPreHealth = 0;
 static int s_bmgPreAff = 0;
 
+DEFINE_HOOK(&daAlink_c::setDamagePoint, BossRushChamberDamagePointHook);
+DEFINE_HOOK(&daAlink_c::checkDamageAction, BossRushChamberDamageActionHook);
+
+static bool chamber_damage_blocked() {
+    return s_bossRushModeActive && is_in_boss_rush_chamber();
+}
+
+static HookAction on_chamber_damage_point_pre(ModContext*, void*, void* retval, void*) {
+    if (!chamber_damage_blocked()) return HOOK_CONTINUE;
+    if (retval != nullptr) *static_cast<int*>(retval) = 0;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction on_chamber_damage_action_pre(ModContext*, void* args, void* retval, void*) {
+    if (!chamber_damage_blocked()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) return HOOK_CONTINUE;
+    for (int i = 0; i < 3; i++) {
+        link->mTgCyls[i].ResetTgHit();
+    }
+    link->mCcStts.ClrTg();
+    if (retval != nullptr) *static_cast<BOOL*>(retval) = FALSE;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 DEFINE_HOOK(&daB_MGN_c::damage_check, BossRushBeastGanonDamageHook);
 
 static HookAction on_bmg_damage_pre(ModContext*, void* args, void*, void*) {
@@ -6212,6 +6237,8 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_pre<BossRushBeastGanonTransformFreezeHook>(hook_svc, on_beastganon_execute_pre);
         mods::hook::add_pre<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_pre);
         mods::hook::add_post<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_post);
+        mods::hook::add_pre<BossRushChamberDamagePointHook>(hook_svc, on_chamber_damage_point_pre);
+        mods::hook::add_pre<BossRushChamberDamageActionHook>(hook_svc, on_chamber_damage_action_pre);
 
         mods::hook::add_pre<BossRushBossDoorExecuteHook>(hook_svc, on_bossdoor_execute_pre);
         mods::hook::add_pre<BossRushDungeonReturnWarp>(hook_svc, on_dungeon_return_warp_pre);

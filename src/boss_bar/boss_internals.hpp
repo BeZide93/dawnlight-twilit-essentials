@@ -272,6 +272,10 @@ inline void fyrus_force_fight_start(fopAc_ac_c* a) {
 inline bool dekutoad_model_ready(fopAc_ac_c* a) {
     return reinterpret_cast<const daE_DT_c*>(a)->mpMorf != nullptr;
 }
+inline bool dekutoad_dying(fopAc_ac_c* a) {
+    const daE_DT_c* d = reinterpret_cast<const daE_DT_c*>(a);
+    return d->mAction == 9 || d->mDead != 0;
+}
 inline bool dekutoad_in_opening(fopAc_ac_c* a) {
     const daE_DT_c* d = reinterpret_cast<const daE_DT_c*>(a);
     return d->mAction == 0xA || d->mDemoMode != 0;
