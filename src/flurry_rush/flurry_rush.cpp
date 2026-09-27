@@ -36,7 +36,7 @@ constexpr int kCooldownTicks = 45;
 constexpr int kPostRushGraceTicks = 30;
 constexpr s16 kFlourishAfterRushTicks = 300;
 constexpr int kMinRushTicks = 30;
-constexpr int kFinishGraceTicks = 15;
+constexpr int kFinishSettleTicks = 3;
 constexpr f32 kFlurryApproachRange = 150.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
@@ -553,6 +553,11 @@ static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link != nullptr) clear_cut_recovery(link);
     if (s_reentering) return HOOK_CONTINUE;
+    if (s_swingCount >= g_configFlurryRushHits) {
+        interface_of_controller_pad& capPad = mDoCPd_c::getCpadInfo(PAD_1);
+        capPad.mPressedButtonFlags &= ~PAD_BUTTON_B;
+        capPad.mButtonFlags &= ~PAD_BUTTON_B;
+    }
     if (link == nullptr) return HOOK_CONTINUE;
     if (!link->mLinkAcch.ChkGroundHit()) return HOOK_CONTINUE;
 
@@ -976,8 +981,10 @@ void update_flurry_rush(const LogService*, ModContext*) {
             }
         }
 
-        if (s_finishTicks < 0 && s_hitCount >= g_configFlurryRushHits) {
-            s_finishTicks = kFinishGraceTicks;
+        if (s_finishTicks < 0 && s_swingCount >= g_configFlurryRushHits && !s_swingOpen &&
+            s_pendingBonus == 0 && !is_attack_proc(static_cast<u16>(link->mProcID)))
+        {
+            s_finishTicks = kFinishSettleTicks;
         }
 
         if (s_finishTicks >= 0) {

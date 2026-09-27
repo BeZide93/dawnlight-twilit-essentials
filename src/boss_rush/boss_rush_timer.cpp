@@ -2,6 +2,7 @@
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
 #include "../boss_bar/boss_bar.hpp"
+#include "boss_rush_darklink.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
@@ -30,7 +31,20 @@ int  s_idx      = -1;
 u32  s_finalCs  = 0;
 bool s_isRecord = false;
 
-u32  s_best[kMaxBossGalleryEntries] = {};
+constexpr size_t kDarkLinkBestSlot = kMaxBossGalleryEntries;
+constexpr size_t kBestSlotCount = kMaxBossGalleryEntries + 1;
+
+u32  s_best[kBestSlotCount] = {};
+
+int best_slot(int tableIndex) {
+    if (tableIndex < 0 || tableIndex >= static_cast<int>(kMaxBossGalleryEntries)) return -1;
+    if (static_cast<size_t>(tableIndex) < g_bossGalleryCount &&
+        std::strcmp(g_bossGalleryTable[tableIndex].displayName, "Darknut") == 0 &&
+        boss_rush_darklink_enabled()) {
+        return static_cast<int>(kDarkLinkBestSlot);
+    }
+    return tableIndex;
+}
 
 unsigned long long s_elapsedMs = 0;
 long long s_provisionalMs = 0;
@@ -70,7 +84,7 @@ void load_from_string(const char* s) {
         long cs = std::strtol(p, &end, 10);
         if (end == p) break;
         p = end;
-        if (idx >= 0 && idx < static_cast<long>(kMaxBossGalleryEntries) && cs > 0) {
+        if (idx >= 0 && idx < static_cast<long>(kBestSlotCount) && cs > 0) {
             s_best[idx] = static_cast<u32>(cs);
         }
         if (*p == ',') ++p;
@@ -82,7 +96,7 @@ void save_to_string() {
     char buf[512];
     buf[0] = '\0';
     size_t used = 0;
-    for (size_t i = 0; i < kMaxBossGalleryEntries; ++i) {
+    for (size_t i = 0; i < kBestSlotCount; ++i) {
         if (s_best[i] == 0) continue;
         char frag[24];
         int n = std::snprintf(frag, sizeof(frag), "%s%zu:%u",
@@ -120,11 +134,11 @@ void finalize() {
         return;
     }
 
-    const u32 prev = (s_idx >= 0 && s_idx < static_cast<int>(kMaxBossGalleryEntries))
-                         ? s_best[s_idx] : 0;
+    const int slot = best_slot(s_idx);
+    const u32 prev = slot >= 0 ? s_best[slot] : 0;
     s_isRecord = (prev == 0) || (s_finalCs < prev);
-    if (s_isRecord && s_idx >= 0 && s_idx < static_cast<int>(kMaxBossGalleryEntries)) {
-        s_best[s_idx] = s_finalCs;
+    if (s_isRecord && slot >= 0) {
+        s_best[slot] = s_finalCs;
         save_to_string();
         if (!s_chainRun) {
             Z2GetAudioMgr()->seStart(Z2SE_SY_LIGHT_DROP_COMPLETE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
@@ -304,9 +318,9 @@ bool boss_rush_timer_active_cs(unsigned int* outCs) {
 }
 
 bool boss_rush_timer_best_cs(int tableIndex, unsigned int* outCs) {
-    if (tableIndex < 0 || tableIndex >= static_cast<int>(kMaxBossGalleryEntries)) return false;
-    if (s_best[tableIndex] == 0) return false;
-    if (outCs) *outCs = s_best[tableIndex];
+    const int slot = best_slot(tableIndex);
+    if (slot < 0 || s_best[slot] == 0) return false;
+    if (outCs) *outCs = s_best[slot];
     return true;
 }
 

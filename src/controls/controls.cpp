@@ -54,6 +54,10 @@ static bool l_shoulder_raw_held() {
     return PADGetNativeButtonPressed(PAD_1) == kSdlLeftShoulderButton;
 }
 
+bool controls_l_shoulder_raw_held() {
+    return l_shoulder_raw_held();
+}
+
 static bool ui_blocks_game_input() {
     bool visible = true;
     if (svc_ui == nullptr || svc_ui->is_any_document_visible == nullptr ||

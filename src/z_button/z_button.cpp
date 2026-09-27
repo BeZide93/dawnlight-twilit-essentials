@@ -38,6 +38,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
 
     mods::hook::add_pre<SetActiveCursorHook>(hook_svc, on_set_active_cursor_pre);
     mods::hook::add_post<SetActiveCursorHook>(hook_svc, on_set_active_cursor_post);
+    mods::hook::add_post<SetActiveCursorHook>(hook_svc, on_set_active_cursor_l_combine_post);
     mods::hook::add_pre<SetSelectItemHook>(hook_svc, on_set_select_item_pre);
 
     z_mobile_init(hook_svc);

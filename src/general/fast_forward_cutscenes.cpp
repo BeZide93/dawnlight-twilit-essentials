@@ -10,11 +10,11 @@
 #include "d/d_meter2_info.h"
 #include "d/d_msg_object.h"
 #include "d/d_s_play.h"
+#include "dusk/settings.h"
 #include "d/d_stage.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_name.h"
 
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -35,32 +35,36 @@ using SetTimescaleFn = void (*)(float);
 using GetTimescaleFn = float (*)();
 using SetSimRateFn = void (*)(float);
 using GetSimRateFn = float (*)();
+using GetTransientSettingsFn = dusk::TransientSettings& (*)();
 
 constexpr float kBaseSimHz = 30.0f;
 
 constexpr float kFastForwardScale = 4.0f;
+constexpr float kTurboScale = 4.0f;
 constexpr float kHiddenRunScale = 16.0f;
 constexpr int kLeadFrames = 5;
 constexpr int kFightStartHoldFrames = 60;
 constexpr int kDefeatMinHoldFrames = 120;
-constexpr int kStuckWatchFrames = 30;
+constexpr int kTurboReleaseWatchFrames = 6;
 
 SetTimescaleFn s_setTimescale = nullptr;
 GetTimescaleFn s_getTimescale = nullptr;
+SetTimescaleFn s_setClockScale = nullptr;
+GetTimescaleFn s_getClockScale = nullptr;
 SetSimRateFn s_setSimRate = nullptr;
 GetSimRateFn s_getSimRate = nullptr;
+GetTransientSettingsFn s_getTransientSettings = nullptr;
 
 bool s_active = false;
-float s_restoreScale = 1.0f;
+float s_desiredScale = 1.0f;
 int s_confirmFrames = 0;
 bool s_holdActive = false;
 int s_holdSettleFrames = 0;
 int s_holdMinFrames = 0;
 bool s_wasFightLive = false;
 int s_fightStartFrames = -1;
-int s_stuckFrames = 0;
-int s_postBoostFrames = -1;
-bool s_extHoldsFastScale = false;
+bool s_prevTurbo = false;
+int s_turboReleaseFrames = 0;
 
 DEFINE_HOOK_SYMBOL("aurora_get_timescale", float(), AuroraGetTimescaleHook);
 DEFINE_HOOK_SYMBOL("aurora_set_timescale", void(float), AuroraSetTimescaleHook);
@@ -72,8 +76,11 @@ float sane_host_scale(float scale) {
     return scale > 0.0f && scale < kHiddenRunScale ? scale : 1.0f;
 }
 
-bool clock_available() {
-    return (s_setSimRate != nullptr && s_getSimRate != nullptr) || s_setTimescale != nullptr;
+bool clock_available();
+
+bool turbo_held(bool& known) {
+    known = s_getTransientSettings != nullptr;
+    return known && s_getTransientSettings().turboMode;
 }
 
 void on_aurora_get_timescale_post(ModContext*, void*, void* retval, void*) {
@@ -82,51 +89,135 @@ void on_aurora_get_timescale_post(ModContext*, void*, void* retval, void*) {
         *static_cast<float*>(retval) = s_hostScale;
         return;
     }
-    if (!s_active) return;
-    float shown = s_restoreScale;
-    if (!(shown > 0.0f) || shown == kFastForwardScale) shown = 1.0f;
-    *static_cast<float*>(retval) = shown;
+    if (s_active) *static_cast<float*>(retval) = s_desiredScale;
 }
 
 HookAction on_aurora_set_timescale_pre(ModContext*, void* args, void*, void*) {
     float& requested = mods::arg_ref<float>(args, 0);
     if (requested >= kHiddenRunScale) requested = 1.0f;
     if (requested > 0.0f) s_hostScale = requested;
-    s_extHoldsFastScale = requested == kFastForwardScale;
-    return s_hiddenRun ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
+    if (s_hiddenRun) return HOOK_SKIP_ORIGINAL;
+    if (s_active) {
+        s_desiredScale = sane_host_scale(requested);
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
+enum ClockBackend { kBackendC = 0, kBackendSimRate, kBackendCpp, kBackendCount };
+bool s_backendBad[kBackendCount] = {};
+int s_backend = -1;
+
+bool backend_available(int backend) {
+    switch (backend) {
+    case kBackendC:
+        return (AuroraSetTimescaleHook::g_orig != nullptr || s_setTimescale != nullptr) &&
+               (AuroraGetTimescaleHook::g_orig != nullptr || s_getTimescale != nullptr);
+    case kBackendSimRate:
+        return s_setSimRate != nullptr && s_getSimRate != nullptr;
+    case kBackendCpp:
+        return s_setClockScale != nullptr && s_getClockScale != nullptr;
+    default:
+        return false;
+    }
+}
+
+float backend_get(int backend) {
+    switch (backend) {
+    case kBackendC:
+        if (AuroraGetTimescaleHook::g_orig != nullptr) return AuroraGetTimescaleHook::g_orig();
+        return s_getTimescale();
+    case kBackendSimRate:
+        return s_getSimRate() / kBaseSimHz;
+    case kBackendCpp:
+        return s_getClockScale();
+    default:
+        return 1.0f;
+    }
+}
+
+void backend_set(int backend, float scale) {
+    switch (backend) {
+    case kBackendC:
+        if (AuroraSetTimescaleHook::g_orig != nullptr) {
+            AuroraSetTimescaleHook::g_orig(scale);
+        } else {
+            s_setTimescale(scale);
+        }
+        break;
+    case kBackendSimRate:
+        s_setSimRate(scale * kBaseSimHz);
+        break;
+    case kBackendCpp:
+        s_setClockScale(scale);
+        break;
+    default:
+        break;
+    }
+}
+
+int current_backend() {
+    if (s_backend >= 0 && !s_backendBad[s_backend]) return s_backend;
+    for (int b = 0; b < kBackendCount; b++) {
+        if (!s_backendBad[b] && backend_available(b)) {
+            s_backend = b;
+            return b;
+        }
+    }
+    s_backend = -1;
+    return -1;
 }
 
 float live_timescale() {
-    if (s_getSimRate != nullptr) return s_getSimRate() / kBaseSimHz;
-    if (AuroraGetTimescaleHook::g_orig) return AuroraGetTimescaleHook::g_orig();
-    return s_getTimescale ? s_getTimescale() : 1.0f;
+    const int backend = current_backend();
+    return backend >= 0 ? backend_get(backend) : 1.0f;
+}
+
+void force_set_timescale(float scale) {
+    for (int attempt = 0; attempt < kBackendCount; attempt++) {
+        const int backend = current_backend();
+        if (backend < 0) return;
+        backend_set(backend, scale);
+        const float readBack = backend_get(backend);
+        if (readBack == scale || (scale > 1.0f && readBack > 1.0f) || (scale < 1.0f && readBack < 1.0f)) {
+            return;
+        }
+        s_backendBad[backend] = true;
+    }
 }
 
 void own_set_timescale(float scale) {
-    if (s_setSimRate != nullptr) {
-        s_setSimRate(scale * kBaseSimHz);
-    } else if (AuroraSetTimescaleHook::g_orig) {
-        AuroraSetTimescaleHook::g_orig(scale);
-    } else if (s_setTimescale) {
-        s_setTimescale(scale);
-    }
+    if (live_timescale() == scale) return;
+    force_set_timescale(scale);
+}
+
+bool clock_available() {
+    return current_backend() >= 0;
+}
+
+float resolved_desired_scale() {
+    bool known = false;
+    const bool turbo = turbo_held(known);
+    if (known && !turbo && s_desiredScale == kTurboScale) return 1.0f;
+    return sane_host_scale(s_desiredScale);
 }
 
 void stop_fast_forward() {
     if (!s_active) return;
-    if (!s_extHoldsFastScale) own_set_timescale(s_restoreScale);
     s_active = false;
+    own_set_timescale(resolved_desired_scale());
 }
 
-int s_holdReasonDiag = 0;
-const char* hold_reason_name(int reason) {
-    switch (reason) {
-    case 1: return "fighting+defeated";
-    case 2: return "fighting+holdActive";
-    case 3: return "returning-to-chamber";
-    case 4: return "chamber-settle";
-    case 5: return "fight-start-hold";
-    default: return "none";
+void update_turbo_release_watch() {
+    bool known = false;
+    const bool turbo = turbo_held(known);
+    if (!known) return;
+    if (s_prevTurbo && !turbo) s_turboReleaseFrames = kTurboReleaseWatchFrames;
+    s_prevTurbo = turbo;
+    if (s_turboReleaseFrames <= 0) return;
+    --s_turboReleaseFrames;
+    if (!s_active && !s_hiddenRun && live_timescale() == kTurboScale) {
+        own_set_timescale(1.0f);
     }
 }
 
@@ -135,7 +226,6 @@ bool is_boss_rush_defeat_hold() {
         s_holdSettleFrames = 0;
         s_holdActive = false;
         s_holdMinFrames = 0;
-        s_holdReasonDiag = 0;
         return false;
     }
 
@@ -146,7 +236,6 @@ bool is_boss_rush_defeat_hold() {
         if (boss_bar_boss_defeated_now()) {
             s_holdActive = true;
             s_holdMinFrames = kDefeatMinHoldFrames;
-            s_holdReasonDiag = 1;
             return true;
         }
 
@@ -155,28 +244,23 @@ bool is_boss_rush_defeat_hold() {
         if (s_holdMinFrames <= 0 && boss_bar_current_fight_state(&label, engaged) && engaged) {
             s_holdActive = false;
         }
-        if (s_holdActive) s_holdReasonDiag = 2;
         return s_holdActive;
     }
 
     if (boss_rush_is_returning_to_chamber()) {
         s_holdSettleFrames = 0;
-        s_holdReasonDiag = 3;
         return true;
     }
 
     if (is_in_boss_rush_chamber() && !boss_rush_settle_window_active()) {
-        s_holdReasonDiag = s_holdActive ? 4 : 0;
         if (++s_holdSettleFrames > 30 && s_holdMinFrames <= 0) {
             s_holdSettleFrames = 0;
             s_holdActive = false;
-            s_holdReasonDiag = 0;
         }
         return s_holdActive;
     }
 
     s_holdSettleFrames = 0;
-    if (!s_holdActive) s_holdReasonDiag = 0;
     return s_holdActive;
 }
 
@@ -268,6 +352,22 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
     if (!hook_svc) return MOD_ERROR;
     if (hook_svc->resolve) {
         void* addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "aurora::time::set_scale", &addr, nullptr) == MOD_OK && addr) {
+            s_setClockScale = reinterpret_cast<SetTimescaleFn>(addr);
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "aurora::time::scale", &addr, nullptr) == MOD_OK && addr) {
+            s_getClockScale = reinterpret_cast<GetTimescaleFn>(addr);
+        }
+        if (s_setClockScale == nullptr || s_getClockScale == nullptr) {
+            s_setClockScale = nullptr;
+            s_getClockScale = nullptr;
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::getTransientSettings", &addr, nullptr) == MOD_OK && addr) {
+            s_getTransientSettings = reinterpret_cast<GetTransientSettingsFn>(addr);
+        }
+        addr = nullptr;
         if (hook_svc->resolve(mod_ctx, "dusk::game_clock::set_sim_rate", &addr, nullptr) == MOD_OK && addr) {
             s_setSimRate = reinterpret_cast<SetSimRateFn>(addr);
         }
@@ -293,101 +393,25 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
     return MOD_OK;
 }
 
-namespace {
-
-u32 s_diagKey = 0;
-
-void diag_log(const LogService* log_svc, const char* fmt, ...) {
-    if (log_svc == nullptr || log_svc->debug == nullptr) return;
-    char msg[320];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(msg, sizeof(msg), fmt, args);
-    va_end(args);
-    log_svc->debug(mod_ctx, msg);
-}
-
-void diag_gate(const LogService* log_svc, dEvt_control_c* evt, bool genuine) {
-    u32 key = genuine ? 0x80000000u : 0u;
-    char why[224] = "";
-    if (evt != nullptr) {
-        key |= 1u * evt->mEventStatus;
-        key |= u32(evt->getMode()) << 4;
-        key |= (u32(u16(evt->mEventId)) & 0xFFF) << 8;
-        key |= (evt->mSkipFunc != nullptr ? 1u : 0u) << 21;
-
-        const char* stageName = dComIfGp_getStartStageName();
-        if (stageName != nullptr &&
-            (std::strcmp(stageName, "F_SP102") == 0 || std::strcmp(stageName, "title") == 0)) {
-            key |= 1u << 22;
-            std::snprintf(why, sizeof(why), "stage=%s excluded", stageName);
-        } else if (dComIfGp_getPlayer(0) == nullptr) {
-            key |= 2u << 22;
-            std::snprintf(why, sizeof(why), "no player");
-        } else if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) {
-            key |= 3u << 22;
-            std::snprintf(why, sizeof(why), "paused");
-        } else if (evt->mEventStatus != 1) {
-            key |= 4u << 22;
-            std::snprintf(why, sizeof(why), "status=%d", (int)evt->mEventStatus);
-        } else {
-            const u8 mode = evt->getMode();
-            if (mode != dEvt_mode_DEMO_e && mode != dEvt_mode_COMPULSORY_e) {
-                key |= 5u << 22;
-                std::snprintf(why, sizeof(why), "mode=%d", (int)mode);
-            } else if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) {
-                key |= 7u << 22;
-                std::snprintf(why, sizeof(why), "talk/shop");
-            } else if (is_door_event(const_cast<dEvt_control_c*>(evt))) {
-                key |= 8u << 22;
-                std::snprintf(why, sizeof(why), "door event");
-            } else {
-                const int idx = static_cast<int>(evt->mOrderIdx);
-                const u16 type = (idx >= 0 && idx < 8)
-                    ? evt->mOrder[idx].mEventType
-                    : static_cast<u16>(dEvt_type_OTHER_e);
-                key |= (u32(type & 0xF) << 22) | (9u << 26);
-                std::snprintf(why, sizeof(why), "orderType=%d", (int)type);
-            }
-        }
-    }
-    if (key != s_diagKey) {
-        s_diagKey = key;
-        const char* name = "";
-        if (evt != nullptr && evt->mEventId >= 0) {
-            dEvDtEvent_c* data =
-                g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
-            if (data != nullptr && data->getName() != nullptr) name = data->getName();
-        }
-        diag_log(log_svc, "ff-cutscene: gate %s evt=%d name='%s' (%s)", genuine ? "OPEN" : "closed",
-                 evt != nullptr ? (int)evt->mEventId : -1, name, why);
-    }
-}
-
-}
-
 void update_hidden_run_watchdog();
 
-void update_fast_forward_cutscenes(const LogService* log_svc, ModContext*) {
+void update_fast_forward_cutscenes(const LogService*, ModContext*) {
     if (!clock_available()) return;
 
     update_hidden_run_watchdog();
+    update_turbo_release_watch();
 
     update_boss_rush_fight_start_hold();
 
+    if (s_hiddenRun) {
+        s_active = false;
+        s_confirmFrames = 0;
+        return;
+    }
+
     const bool defeatHold = is_boss_rush_defeat_hold();
     const bool startHold = is_boss_rush_fight_start_hold();
-    {
-        const int reason = defeatHold ? s_holdReasonDiag : (startHold ? 5 : 0);
-        static int s_lastHoldLogged = 0;
-        if (reason != s_lastHoldLogged) {
-            diag_log(log_svc, "ff-cutscene: hold %s -> %s",
-                     hold_reason_name(s_lastHoldLogged), hold_reason_name(reason));
-            s_lastHoldLogged = reason;
-        }
-    }
     if (defeatHold || startHold) {
-        if (s_active) diag_log(log_svc, "ff-cutscene: boost stopped (boss rush hold)");
         stop_fast_forward();
         s_confirmFrames = 0;
         return;
@@ -395,10 +419,8 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext*) {
 
     dEvt_control_c* evt = dComIfGp_getEvent();
     const bool genuine = is_genuine_cutscene(evt);
-    diag_gate(log_svc, evt, genuine);
 
     if (!genuine) {
-        if (s_active) diag_log(log_svc, "ff-cutscene: boost stopped (gate closed)");
         stop_fast_forward();
         s_confirmFrames = 0;
         return;
@@ -418,45 +440,15 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext*) {
     if (shouldFastForward) {
         const float current = live_timescale();
         if (!s_active) {
-            s_restoreScale = (current > 0.0f && current != kFastForwardScale)
-                                 ? current
-                                 : 1.0f;
-            own_set_timescale(kFastForwardScale);
+            s_desiredScale = sane_host_scale(current);
             s_active = true;
-            diag_log(log_svc, "ff-cutscene: boost ENGAGED, scale 1 -> %g (skipWillHandle=%d)",
-                     kFastForwardScale, skipWillHandle ? 1 : 0);
-        } else if (current != kFastForwardScale) {
-            s_restoreScale = (current > 0.0f && current != kFastForwardScale)
-                                 ? current
-                                 : 1.0f;
             own_set_timescale(kFastForwardScale);
-            diag_log(log_svc, "ff-cutscene: boost scale stomped to %g, reasserting",
-                     current);
+        } else if (current != kFastForwardScale) {
+            s_desiredScale = sane_host_scale(current);
+            own_set_timescale(kFastForwardScale);
         }
     } else if (s_active) {
         stop_fast_forward();
-    }
-
-    if (s_active) {
-        s_postBoostFrames = 0;
-        s_stuckFrames = 0;
-    } else if (s_postBoostFrames >= 0) {
-        if (s_postBoostFrames < 600) {
-            ++s_postBoostFrames;
-        } else {
-            s_postBoostFrames = -1;
-        }
-        if (!s_extHoldsFastScale && live_timescale() == kFastForwardScale) {
-            if (++s_stuckFrames > kStuckWatchFrames) {
-                own_set_timescale(s_restoreScale > 0.0f &&
-                                          s_restoreScale != kFastForwardScale
-                                      ? s_restoreScale
-                                      : 1.0f);
-                s_stuckFrames = 0;
-            }
-        } else {
-            s_stuckFrames = 0;
-        }
     }
 }
 
@@ -470,14 +462,12 @@ void shutdown_fast_forward_cutscenes() {
     s_holdSettleFrames = 0;
     s_wasFightLive = false;
     s_fightStartFrames = -1;
-    s_stuckFrames = 0;
-    s_postBoostFrames = -1;
-    s_extHoldsFastScale = false;
     s_holdMinFrames = 0;
+    s_turboReleaseFrames = 0;
 }
 
 void update_hidden_run_watchdog() {
-    if (s_hiddenRun) return;
+    if (s_hiddenRun || s_active) return;
     const float current = live_timescale();
     if (current >= kHiddenRunScale) {
         own_set_timescale(sane_host_scale(s_hostScale));
@@ -489,21 +479,26 @@ void update_hidden_run_watchdog() {
 void fast_forward_set_hidden_run(bool on) {
     if (!clock_available()) return;
     if (on == s_hiddenRun) {
-        if (on && live_timescale() != kHiddenRunScale) own_set_timescale(kHiddenRunScale);
+        if (on && live_timescale() != kHiddenRunScale) force_set_timescale(kHiddenRunScale);
         return;
     }
     if (on) {
-        s_hostScale = sane_host_scale(live_timescale());
+        s_hostScale = s_active ? sane_host_scale(s_desiredScale) : sane_host_scale(live_timescale());
+        s_active = false;
+        s_confirmFrames = 0;
         s_hiddenRun = true;
-        own_set_timescale(kHiddenRunScale);
+        force_set_timescale(kHiddenRunScale);
     } else {
         s_hiddenRun = false;
+        bool known = false;
+        const bool turbo = turbo_held(known);
+        if (known && !turbo && s_hostScale == kTurboScale) s_hostScale = 1.0f;
         own_set_timescale(sane_host_scale(s_hostScale));
     }
 }
 
 float general_get_aurora_timescale() {
-    if (s_active) return s_restoreScale;
+    if (s_active) return s_desiredScale;
     if (!clock_available()) return 1.0f;
     return live_timescale();
 }

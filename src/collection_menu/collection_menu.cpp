@@ -4,14 +4,42 @@
 
 #include <collection_lib/collection_lib.hpp>
 
+#include <cstring>
+
 bool g_configCollectionStarterEquip = false;
 bool g_configCollectionKeepOrdonShield = false;
 bool g_configCollectionShowOrdonHero = false;
 bool g_configCollectionOrdonHeroAlways = false;
 
 static cl::Page* s_ordonHeroPage = nullptr;
+static bool s_linkleActive = false;
 
 constexpr const char* kLinkleModId = "com.ditrey.linkle";
+
+bool collection_linkle_active() {
+    return is_mod_enabled(kLinkleModId);
+}
+
+// The Ordon Hero gear is made for Link's model, so it stays off with Linkle.
+bool collection_ordon_hero_enabled() {
+    return g_configCollectionShowOrdonHero && !collection_linkle_active();
+}
+
+constexpr const char* kOrdonHeroTunicName = "Ordon Hero";
+constexpr const char* kReinforcedShieldName = "Reinforced Shield";
+
+// Gear equipped before Linkle was turned on comes off, it has no Linkle model.
+static void unequip_ordon_hero_gear() {
+    const CustomEquipKind kinds[] = {CE_TUNIC, CE_SHIELD};
+    const char* const names[] = {kOrdonHeroTunicName, kReinforcedShieldName};
+    for (int i = 0; i < 2; ++i) {
+        const int id = collectionlib_active_id(kinds[i]);
+        const CustomEquipDef* def = id >= 0 ? custom_equip_get(id) : nullptr;
+        if (def != nullptr && def->name != nullptr && std::strcmp(def->name, names[i]) == 0) {
+            collectionlib_clear(kinds[i]);
+        }
+    }
+}
 
 static bool player_has_hero_clothes() {
     return dComIfGs_isCollectClothes(KOKIRI_CLOTHES_FLAG) ||
@@ -24,13 +52,14 @@ static bool player_has_ordon_shield() {
 }
 
 void sync_collection_ordon_hero_page() {
-    if (g_configCollectionShowOrdonHero && s_ordonHeroPage == nullptr) {
+    const bool enabled = collection_ordon_hero_enabled();
+    if (enabled && s_ordonHeroPage == nullptr) {
         cl::Page* p2 = new cl::Page();
         p2->add(cl::heart());
         p2->add(cl::crystal());
         p2->add(cl::fused_shadow());
         s_ordonHeroPage = p2;
-    } else if (!g_configCollectionShowOrdonHero && s_ordonHeroPage != nullptr) {
+    } else if (!enabled && s_ordonHeroPage != nullptr) {
         delete s_ordonHeroPage;
         s_ordonHeroPage = nullptr;
     }
@@ -67,7 +96,7 @@ static void register_starter_gear() {
         .unlocked = &starter_shield_unlocked,
     });
 
-    const bool linkle = is_mod_enabled(kLinkleModId);
+    const bool linkle = collection_linkle_active();
     get_slot(3, 1).insert({
         .kind = CE_TUNIC,
         .name = linkle ? "Linkle's Clothes" : "Ordon Clothes",
@@ -84,15 +113,15 @@ void register_custom_swords() {
 }
 
 void register_custom_shields() {
-    if (!g_configCollectionShowOrdonHero) {
+    if (!collection_ordon_hero_enabled()) {
         return;
     }
-    if (!g_configCollectionOrdonHeroAlways && !player_has_ordon_shield()) {
+    if (!g_configCollectionOrdonHeroAlways && !player_has_hero_clothes()) {
         return;
     }
     collectionlib_add_next_shield_slot({
         CE_SHIELD, 0,
-        "Reinforced Shield",
+        kReinforcedShieldName,
         "A traditional Ordon shield reinforced with metal. Stronger and will never burn.",
         "textures/clctres/reinforced_shield.bti",
         nullptr,
@@ -102,7 +131,7 @@ void register_custom_shields() {
 }
 
 void register_custom_tunics() {
-    if (!g_configCollectionShowOrdonHero) {
+    if (!collection_ordon_hero_enabled()) {
         return;
     }
     if (!g_configCollectionOrdonHeroAlways && !player_has_hero_clothes()) {
@@ -110,7 +139,7 @@ void register_custom_tunics() {
     }
     collectionlib_add_next_tunic_slot({
         CE_TUNIC, 0,
-        "Ordon Hero",
+        kOrdonHeroTunicName,
         "Traditional clothes worn by the hero of Ordon. Simple, but made for adventure.",
         "textures/clctres/ordonhero.bti",
         nullptr,
@@ -125,6 +154,7 @@ void register_custom_tunics() {
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc,
                                const SaveService* save_svc, ModContext* mod_ctx,
                                ModError* error) {
+    s_linkleActive = collection_linkle_active();
     sync_collection_ordon_hero_page();
 
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
@@ -141,7 +171,16 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
 }
 
 void update_collection_menu(const LogService*, ModContext*) {
-
+    // Linkle can be switched on or off while the game runs.
+    const bool linkle = collection_linkle_active();
+    if (linkle != s_linkleActive) {
+        s_linkleActive = linkle;
+        sync_collection_ordon_hero_page();
+        request_collection_menu_reload();
+    }
+    if (linkle) {
+        unequip_ordon_hero_gear();
+    }
     if (g_configCollectionStarterEquip && g_configCollectionKeepOrdonShield &&
         dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) &&
         !dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {

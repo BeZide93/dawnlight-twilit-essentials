@@ -1,5 +1,6 @@
 #include "boss_rush_models.hpp"
 #include "boss_rush_masterswd.hpp"
+#include "boss_rush_darklink.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush.hpp"
 #include "../util.hpp"
@@ -181,6 +182,7 @@ struct RuntimeSlot {
     mDoExt_brkAnm* brk = nullptr;
     mDoExt_btkAnm* btk = nullptr;
     bool resolved = false;
+    bool darkLink = false;
     mDoExt_invisibleModel deathSwordInvisModel;
     bool hasInvisModel = false;
 };
@@ -547,6 +549,7 @@ void reset_boss_rush_models() {
         slot.deathSwordInvisModel = mDoExt_invisibleModel{};
         slot.hasInvisModel = false;
         slot.resolved = false;
+        slot.darkLink = false;
     }
     for (int ti = 0; ti < 8; ++ti) {
         init_morph_tentacle(s_morphTent[ti], s_morphSink[ti]);
@@ -654,7 +657,7 @@ void unload_boss_rush_models() {
             slot.btk = nullptr;
         }
 
-        if (slot.resolved) {
+        if (slot.resolved && !slot.darkLink) {
             const BossGalleryEntry& boss = g_bossGalleryTable[i];
             unloadObjectArchive(boss.arcName);
             if (boss.animArcName != nullptr && boss.animArcName[0] != '\0') {
@@ -678,13 +681,18 @@ void unload_boss_rush_models() {
         }
 
         slot.resolved = false;
+        slot.darkLink = false;
     }
 
+    boss_rush_darklink_unload();
     unload_boss_rush_master_sword();
 }
 
 void draw_boss_rush_models(float floorY) {
     const size_t count = boss_rush_get_active_gallery_count();
+    bool darkLinkPending = false;
+    cXyz darkLinkPos;
+    csXyz darkLinkAngle;
 
     if (!s_loadOrderBuilt) {
         build_boss_rush_load_order();
@@ -699,6 +707,12 @@ void draw_boss_rush_models(float floorY) {
                 continue;
             }
             const BossGalleryEntry& boss = g_bossGalleryTable[tableIdx];
+
+            if (std::strcmp(boss.displayName, "Darknut") == 0 && boss_rush_darklink_enabled()) {
+                slot.resolved = true;
+                slot.darkLink = true;
+                continue;
+            }
 
             const int archiveStatus = loadObjectArchive(boss.arcName);
             const int animArchiveStatus = (kBossGalleryAnimEnabled && boss.animArcName != nullptr && boss.animArcName[0] != '\0')
@@ -861,7 +875,7 @@ void draw_boss_rush_models(float floorY) {
         const BossGalleryEntry& boss = g_bossGalleryTable[tableIdx];
         RuntimeSlot& slot = s_slots[tableIdx];
 
-        if (slot.model == nullptr && slot.subModel == nullptr) {
+        if (slot.model == nullptr && slot.subModel == nullptr && !slot.darkLink) {
             continue;
         }
 
@@ -877,6 +891,13 @@ void draw_boss_rush_models(float floorY) {
         if (boss.radialOffset != 0.0f) {
             pos.x += boss.radialOffset * (pos.x / kChamberCircleRadius);
             pos.z += boss.radialOffset * (pos.z / kChamberCircleRadius);
+        }
+
+        if (slot.darkLink) {
+            darkLinkPending = true;
+            darkLinkPos = pos;
+            darkLinkAngle = angle;
+            continue;
         }
 
         cXyz scale(boss.scale, boss.scale, boss.scale);
@@ -1052,4 +1073,8 @@ void draw_boss_rush_models(float floorY) {
     }
 
     draw_boss_rush_master_sword(floorY);
+
+    if (darkLinkPending) {
+        boss_rush_darklink_draw(darkLinkPos, darkLinkAngle);
+    }
 }

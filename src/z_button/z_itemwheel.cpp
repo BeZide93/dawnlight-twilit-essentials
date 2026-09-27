@@ -174,6 +174,66 @@ void on_set_active_cursor_post(ModContext*, void* args, void*, void*) {
     }
 }
 
+constexpr int kRingLTapFrames = 15;
+static dMenu_Ring_c* s_ringLRing = nullptr;
+static bool s_ringLPrev = false;
+static bool s_ringLMoved = false;
+static int s_ringLFrames = 0;
+static u8 s_ringLSlot = 0xFF;
+
+static bool ring_l_held() {
+    if (controls_l_shoulder_raw_held()) return true;
+    JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
+    return rawGamePad != nullptr && (rawGamePad->getButton() & PAD_TRIGGER_L) != 0;
+}
+
+static bool ring_ready_for_combine(dMenu_Ring_c* ring) {
+    return ring->mStatus == dMenu_Ring_c::STATUS_WAIT &&
+           ring->mOldStatus != dMenu_Ring_c::STATUS_EXPLAIN_FORCE &&
+           ring->mOldStatus != dMenu_Ring_c::STATUS_EXPLAIN &&
+           (ring->mpItemExplain == nullptr || ring->mpItemExplain->getStatus() == 0);
+}
+
+static void ring_l_combine(dMenu_Ring_c* ring) {
+    if (!ring_ready_for_combine(ring)) return;
+    const u8 item = dComIfGs_getItem(ring->mItemSlots[ring->mCurrentSlot], false);
+    if (ring->mPlayerIsWolf || item == dItemNo_NONE_e ||
+        (!ring->isMixItemOn() && !ring->isMixItemOff()))
+    {
+        Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        return;
+    }
+    for (int i = 0; i < 4; i++) {
+        ring->setSelectItemForce(i);
+    }
+    ring->setMixItem();
+}
+
+void on_set_active_cursor_l_combine_post(ModContext*, void* args, void*, void*) {
+    dMenu_Ring_c* ring = args != nullptr ? mods::arg<dMenu_Ring_c*>(args, 0) : nullptr;
+    if (ring == nullptr) return;
+
+    const bool held = ring_l_held();
+    if (ring != s_ringLRing) {
+        s_ringLRing = ring;
+        s_ringLPrev = held;
+        s_ringLMoved = true;
+        return;
+    }
+    if (held && !s_ringLPrev) {
+        s_ringLFrames = 0;
+        s_ringLSlot = ring->mCurrentSlot;
+        s_ringLMoved = !ring_ready_for_combine(ring);
+    }
+    if (held) {
+        ++s_ringLFrames;
+        if (ring->mCurrentSlot != s_ringLSlot) s_ringLMoved = true;
+    } else if (s_ringLPrev && !s_ringLMoved && s_ringLFrames <= kRingLTapFrames) {
+        ring_l_combine(ring);
+    }
+    s_ringLPrev = held;
+}
+
 HookAction on_set_item_pre(ModContext*, void* args, void*, void*) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !args) {
         return HOOK_CONTINUE;

@@ -1052,8 +1052,12 @@ static bool is_collection_starter_sub_disabled(ModContext*, void*) {
     return !g_configCollectionStarterEquip;
 }
 
+static bool is_collection_ordon_hero_disabled(ModContext*, void*) {
+    return collection_linkle_active();
+}
+
 static bool is_collection_ordon_hero_sub_disabled(ModContext*, void*) {
-    return !g_configCollectionShowOrdonHero;
+    return !collection_ordon_hero_enabled();
 }
 
 static bool is_stamina_sub_disabled(ModContext*, void*) {
@@ -1738,7 +1742,8 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Perfect dodge window";
         c.help_rml = "<p>How long after a dodge an attack still counts as a perfect dodge "
-                     "(default: 30).</p>";
+                     "(default: 30). An attack that would have hit - passing close to Link "
+                     "during the dodge - counts too.</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varFlurryRushPerfectFrames;
         c.min = 5;
@@ -1764,7 +1769,8 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Flurry hits";
-        c.help_rml = "<p>How many hits complete the flurry (default: 4).</p>";
+        c.help_rml = "<p>How many swings the flurry has - exactly this many hits land when the "
+                     "enemy stays in reach (default: 4).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varFlurryRushHits;
         c.min = 1;
@@ -1824,11 +1830,17 @@ static ModResult tab_menus(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_toggle(left, "Show Ordon Hero", s_varCollectionShowOrdonHero,
         "<p>Shows the extra Ordon Hero gear (Reinforced Shield and Ordon Hero tunic) "
         "on the Collection screen and creates a second page. Cycle pages with R and L - "
-        "hold them briefly.</p>");
+        "hold them briefly. Not available with the Linkle mod.</p>",
+        is_collection_ordon_hero_disabled);
+    if (collection_linkle_active()) {
+        svc_ui->pane_add_rml(mod_ctx, left,
+            "<span style=\"color: #a8bcd4;\">The Ordon Hero gear is made for Link and stays "
+            "off while the Linkle mod is enabled.</span>", nullptr);
+    }
     ui_add_toggle(left, "Show always Ordon Hero", s_varCollectionOrdonHeroAlways,
-        "<p>When off, the gear only appears once unlocked: the Reinforced Shield once you "
-        "own the Ordon Shield, the Ordon Hero tunic once you have the Hero's Clothes. "
-        "When on, both are always shown. Requires the Show Ordon Hero option.</p>",
+        "<p>When off, the Reinforced Shield and the Ordon Hero tunic only appear once "
+        "you have the Hero's Clothes. When on, both are always shown. "
+        "Requires the Show Ordon Hero option.</p>",
         is_collection_ordon_hero_sub_disabled);
     return MOD_OK;
 }

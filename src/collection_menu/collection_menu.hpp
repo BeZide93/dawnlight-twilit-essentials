@@ -12,6 +12,8 @@ extern bool g_configCollectionOrdonHeroAlways;
 
 void request_collection_menu_reload();
 void sync_collection_ordon_hero_page();
+bool collection_linkle_active();
+bool collection_ordon_hero_enabled();
 
 struct SaveService;
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc, const SaveService* save_svc, ModContext* mod_ctx, ModError* error);

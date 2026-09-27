@@ -4,6 +4,7 @@
 #include "boss_rush_masterswd.hpp"
 #include "boss_rush_timer.hpp"
 #include "boss_rush_timer_v2.hpp"
+#include "boss_rush_darklink.hpp"
 #include "../boss_bar/boss_bar.hpp"
 
 #include "d/actor/d_a_alink.h"
@@ -120,6 +121,9 @@ void draw_boss_rush_texts(float floorY) {
         }
 
         const char* displayName = boss.displayName;
+        if (std::strcmp(displayName, "Darknut") == 0 && boss_rush_darklink_enabled()) {
+            displayName = "Dark Link";
+        }
         if (!g_configBossRushSeparateGanon &&
             std::strcmp(displayName, "Ganondorf") == 0) {
             displayName = "Ganondorf (All Phases)";

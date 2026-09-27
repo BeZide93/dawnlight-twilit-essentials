@@ -566,7 +566,7 @@ ModResult init_boss_rush_gamemode(ModContext* mod_ctx) {
     }
 
     const char* fullName =
-        is_mod_enabled(kDawnlightModId) ? "Bossrush [TE]" : "Bossrush";
+        is_mod_enabled(kDawnlightModId) ? "Boss Rush [TE]" : "Boss Rush";
     const GameModeDesc desc = {
         .struct_size = sizeof(GameModeDesc),
         .game_mode_id = kGameModeId,

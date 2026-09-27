@@ -57,6 +57,7 @@ add_mod(twilit_essentials
             src/boss_bar/boss_bar.cpp
             src/boss_rush/boss_rush.cpp
             src/boss_rush/boss_rush_models.cpp
+            src/boss_rush/boss_rush_darklink.cpp
             src/boss_rush/boss_rush_masterswd.cpp
             src/boss_rush/boss_rush_texts.cpp
             src/boss_rush/boss_rush_midna.cpp

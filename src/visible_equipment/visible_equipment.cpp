@@ -1371,11 +1371,12 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
       !alink->checkPlayerNoDraw() && !isInWarpVisual(alink);
   const bool sceneStable = isSceneDrawStable();
 
-  bool wantShowBow = cacheOk && isHuman && playerDrawn && sceneStable &&
-                     g_configVisibleEquipShowBow && checkShouldShowBow();
+  const bool bowGear = cacheOk && isHuman && g_configVisibleEquipShowBow && checkShouldShowBow();
+  const bool lanternGear =
+      cacheOk && isHuman && g_configVisibleEquipShowLantern && checkShouldShowLantern();
+  bool wantShowBow = bowGear && playerDrawn && sceneStable;
   bool wantShowQuiver = wantShowBow;
-  bool wantShowLantern = cacheOk && isHuman && playerDrawn && sceneStable &&
-                         g_configVisibleEquipShowLantern && checkShouldShowLantern();
+  bool wantShowLantern = lanternGear && playerDrawn && sceneStable;
 
   if (wantShowBow || s_bowWarp.visible) {
     if (s_customBowModel == nullptr) {
@@ -1415,21 +1416,21 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
 
   if (inWarp) {
     if (s_gearShaderCapable[0]) {
-      s_bowWarp = {true, 1.0f};
+      s_bowWarp = {bowGear, bowGear ? 1.0f : 0.0f};
       if (s_customBowModel != nullptr && s_customBowModel->getModelData() != nullptr) {
         applyWarpSRT(s_customBowModel->getModelData(), alink->current.pos,
                      alink->field_0x3478, alink->field_0x347c, "bow");
       }
     }
     if (s_gearShaderCapable[1]) {
-      s_quiverWarp = {true, 1.0f};
+      s_quiverWarp = {bowGear, bowGear ? 1.0f : 0.0f};
       if (s_customQuiverModel != nullptr && s_customQuiverModel->getModelData() != nullptr) {
         applyWarpSRT(s_customQuiverModel->getModelData(), alink->current.pos,
                      alink->field_0x3478, alink->field_0x347c, "quiver");
       }
     }
     if (s_gearShaderCapable[2] && lanternModel != nullptr) {
-      s_lanternWarp = {true, 1.0f};
+      s_lanternWarp = {lanternGear, lanternGear ? 1.0f : 0.0f};
       J3DModelData *lanternData = lanternModel->getModelData();
       if (lanternData != nullptr) {
         applyWarpSRT(lanternData, alink->current.pos,

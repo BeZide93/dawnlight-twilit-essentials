@@ -50,6 +50,7 @@ extern ConfigVarHandle g_controlsMidnaVar;
 
 bool controls_midna_on_l();
 bool controls_l_shoulder_held();
+bool controls_l_shoulder_raw_held();
 u32 controls_l_shoulder_pad_mask();
 
 bool controls_binding_blocked(int b);

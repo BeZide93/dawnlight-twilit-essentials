@@ -1,4 +1,5 @@
 #include "boss_bar.hpp"
+#include "../boss_rush/boss_rush_darklink.hpp"
 #include "boss_internals.hpp"
 #include "../stamina/stamina.hpp"
 #include "../compat/twilight_hd.hpp"
@@ -1095,7 +1096,8 @@ void update_boss_bar(const LogService*, ModContext*) {
             s_boss.valid = true;
             s_boss.id = best->id;
             s_boss.name = best->name;
-            s_boss.label = best->def->label;
+            s_boss.label = (best->name == fpcNm_B_TN_e && boss_rush_darklink_enabled()) ? "Dark Link"
+                                                                                         : best->def->label;
             s_boss.miniboss = best->def->miniboss;
             s_boss.custom = best->hasRatio || best->def->aggregate;
 
@@ -1637,6 +1639,7 @@ static const char* boss_full_title(const char* label) {
         {"Dangoro",          "Dangoro, the Goron Guardian"},
         {"Ook",              "Ook, the Forest Thief"},
         {"Darknut",          "Darknut, the Iron Knight"},
+        {"Dark Link",        "Dark Link, the Hero's Shadow"},
         {"Aeralfos",         "Aeralfos, the Sky Guard"},
     };
     if (label) {
