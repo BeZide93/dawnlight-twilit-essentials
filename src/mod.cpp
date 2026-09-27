@@ -2212,7 +2212,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descGeneralSkipCut = CONFIG_VAR_DESC_INIT;
         descGeneralSkipCut.name = "generalSkipCutscenes";
         descGeneralSkipCut.type = CONFIG_VAR_BOOL;
-        descGeneralSkipCut.default_bool = true;
+        descGeneralSkipCut.default_bool = false;
         if (svc_config->register_var(mod_ctx, &descGeneralSkipCut, &s_varGeneralSkipCutscenes) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralSkipCutscenes, &g_configGeneralSkipCutscenes);
             svc_config->subscribe(mod_ctx, s_varGeneralSkipCutscenes, on_general_skip_cutscenes_changed, nullptr, nullptr);
