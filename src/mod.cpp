@@ -5,6 +5,7 @@
 #include "general/oxygen_vignette.hpp"
 #include "general/sprint_fov_kick.hpp"
 #include "general/horse_cam.hpp"
+#include "general/free_cam_distance.hpp"
 
 #include "general/human_warp.hpp"
 #include "general/faster_midna_cancel.hpp"
@@ -409,6 +410,8 @@ static ConfigVarHandle s_varGeneralFastForwardCutscenes = 0;
 static ConfigVarHandle s_varGeneralFastForwardSpeed = 0;
 static ConfigVarHandle s_varGeneralDominionSword = 0;
 static ConfigVarHandle s_varHorseCamNoRecenter = 0;
+static ConfigVarHandle s_varFreeCamDistance = 0;
+static ConfigVarHandle s_varFreeCamDistanceZTarget = 0;
 static ConfigVarHandle s_varGeneralHumanWarp = 0;
 static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
@@ -615,6 +618,18 @@ static bool is_boss_rush_fight_toggle_disabled(ModContext*, void*) {
 static void on_horse_cam_no_recenter_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configHorseCamNoRecenter = value->bool_value;
+    }
+}
+
+static void on_free_cam_distance_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configFreeCamDistance = static_cast<int>(value->int_value);
+    }
+}
+
+static void on_free_cam_distance_z_target_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configFreeCamDistanceZTarget = value->bool_value;
     }
 }
 
@@ -1571,6 +1586,13 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+
+    svc_ui->pane_add_section(mod_ctx, left, "Camera");
+    ui_add_percent(left, "Free camera distance", s_varFreeCamDistance,
+        "<p>Camera distance to Link while the Free Camera is active.",
+        50, 500, 5);
+    ui_add_toggle(left, "Allow for Z target", s_varFreeCamDistanceZTarget,
+        "<p>Also applies the free camera distance while Z-targeting.</p>");
     return MOD_OK;
 }
 
@@ -2284,6 +2306,26 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descHorseCamNoRecenter, &s_varHorseCamNoRecenter) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varHorseCamNoRecenter, &g_configHorseCamNoRecenter);
             svc_config->subscribe(mod_ctx, s_varHorseCamNoRecenter, on_horse_cam_no_recenter_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descFreeCamDistance = CONFIG_VAR_DESC_INIT;
+        descFreeCamDistance.name = "freeCamDistance";
+        descFreeCamDistance.type = CONFIG_VAR_INT;
+        descFreeCamDistance.default_int = 100;
+        if (svc_config->register_var(mod_ctx, &descFreeCamDistance, &s_varFreeCamDistance) == MOD_OK) {
+            int64_t distance = 100;
+            svc_config->get_int(mod_ctx, s_varFreeCamDistance, &distance);
+            g_configFreeCamDistance = static_cast<int>(distance);
+            svc_config->subscribe(mod_ctx, s_varFreeCamDistance, on_free_cam_distance_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descFreeCamDistanceZTarget = CONFIG_VAR_DESC_INIT;
+        descFreeCamDistanceZTarget.name = "freeCamDistanceZTarget";
+        descFreeCamDistanceZTarget.type = CONFIG_VAR_BOOL;
+        descFreeCamDistanceZTarget.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descFreeCamDistanceZTarget, &s_varFreeCamDistanceZTarget) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varFreeCamDistanceZTarget, &g_configFreeCamDistanceZTarget);
+            svc_config->subscribe(mod_ctx, s_varFreeCamDistanceZTarget, on_free_cam_distance_z_target_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descGeneralHumanWarp = CONFIG_VAR_DESC_INIT;

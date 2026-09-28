@@ -6,3 +6,6 @@
 /tools/generate_logo.py
 /tools/logo_base.png
 __pycache__/
+/tools/banner.png
+/tools/banner_gui.py
+/tools/make_banner.py
