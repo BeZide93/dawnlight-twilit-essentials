@@ -51,6 +51,7 @@ add_mod(twilit_essentials
             src/general/oxygen_vignette.cpp
             src/general/sprint_fov_kick.cpp
             src/general/free_cam_distance.cpp
+            src/general/no_battle_music.cpp
             src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp
             src/boss_bar/boss_bar.cpp

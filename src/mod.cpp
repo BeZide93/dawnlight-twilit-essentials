@@ -6,6 +6,7 @@
 #include "general/sprint_fov_kick.hpp"
 #include "general/horse_cam.hpp"
 #include "general/free_cam_distance.hpp"
+#include "general/no_battle_music.hpp"
 
 #include "general/human_warp.hpp"
 #include "general/faster_midna_cancel.hpp"
@@ -416,6 +417,7 @@ static ConfigVarHandle s_varGeneralHumanWarp = 0;
 static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
+static ConfigVarHandle s_varGeneralNoBattleMusic = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varDamageVignetteIntensity = 0;
@@ -929,6 +931,12 @@ static void on_general_human_warp_changed(ModContext*, ConfigVarHandle, const Co
 static void on_general_faster_midna_cancel_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configFasterMidnaCancel = value->bool_value;
+    }
+}
+
+static void on_general_no_battle_music_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configNoBattleMusic = value->bool_value;
     }
 }
 
@@ -1567,6 +1575,9 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>On Epona, the camera stays where you point it with the C-Stick.</p>");
     ui_add_toggle(left, "Enable HUD auto fade", s_varHudAutoFade,
         "<p>Fades the whole HUD out while Link stands still, and back in the moment he moves.</p>");
+    ui_add_toggle(left, "Remove enemy combat music", s_varGeneralNoBattleMusic,
+        "<p>Enemies no longer switch the music to the battle theme, the area music keeps "
+        "playing. Boss and miniboss music is unchanged.</p>");
 
     svc_ui->pane_add_section(mod_ctx, left, "Indicator");
     ui_add_toggle(left, "Damage vignette", s_varDamageVignette,
@@ -2344,6 +2355,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descGeneralFasterMidnaCancel, &s_varGeneralFasterMidnaCancel) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralFasterMidnaCancel, &g_configFasterMidnaCancel);
             svc_config->subscribe(mod_ctx, s_varGeneralFasterMidnaCancel, on_general_faster_midna_cancel_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descGeneralNoBattleMusic = CONFIG_VAR_DESC_INIT;
+        descGeneralNoBattleMusic.name = "generalNoBattleMusic";
+        descGeneralNoBattleMusic.type = CONFIG_VAR_BOOL;
+        descGeneralNoBattleMusic.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descGeneralNoBattleMusic, &s_varGeneralNoBattleMusic) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralNoBattleMusic, &g_configNoBattleMusic);
+            svc_config->subscribe(mod_ctx, s_varGeneralNoBattleMusic, on_general_no_battle_music_changed, nullptr, nullptr);
         }
 
         g_configHudAutoFadeIdleSeconds = kHudAutoFadeIdleSeconds;

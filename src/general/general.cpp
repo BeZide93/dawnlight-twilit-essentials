@@ -6,6 +6,7 @@
 #include "hud_auto_fade.hpp"
 #include "sprint_fov_kick.hpp"
 #include "free_cam_distance.hpp"
+#include "no_battle_music.hpp"
 
 #include "d/d_com_inf_game.h"
 
@@ -25,6 +26,7 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     init_hud_auto_fade(hook_svc, error);
     init_sprint_fov_kick(hook_svc, error);
     init_free_cam_distance(hook_svc, error);
+    init_no_battle_music(hook_svc, error);
     return MOD_OK;
 }
 
@@ -71,4 +73,5 @@ void shutdown_general() {
     shutdown_hud_auto_fade();
     shutdown_sprint_fov_kick();
     shutdown_free_cam_distance();
+    shutdown_no_battle_music();
 }
