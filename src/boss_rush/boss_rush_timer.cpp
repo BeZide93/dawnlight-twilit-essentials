@@ -39,8 +39,7 @@ u32  s_best[kBestSlotCount] = {};
 int best_slot(int tableIndex) {
     if (tableIndex < 0 || tableIndex >= static_cast<int>(kMaxBossGalleryEntries)) return -1;
     if (static_cast<size_t>(tableIndex) < g_bossGalleryCount &&
-        std::strcmp(g_bossGalleryTable[tableIndex].displayName, "Darknut") == 0 &&
-        boss_rush_darklink_enabled()) {
+        std::strcmp(g_bossGalleryTable[tableIndex].displayName, kDarkLinkGalleryName) == 0) {
         return static_cast<int>(kDarkLinkBestSlot);
     }
     return tableIndex;

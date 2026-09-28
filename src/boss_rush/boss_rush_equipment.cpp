@@ -1,4 +1,5 @@
 #include "boss_rush_equipment.hpp"
+#include "boss_rush_darklink.hpp"
 
 #include "global.h"
 #include "d/actor/d_a_alink.h"
@@ -79,6 +80,7 @@ constexpr GearRule kRules[] = {
     {"Beast Ganon",    20, IT_BOW,           7, true,  0},
     {"Horseback Ganon",20, IT_BOW,           7, true,  0},
     {"Ganondorf",      20, IT_BOW,           7, true,  0},
+    {kDarkLinkGalleryName, 20, IT_BOW,       7, true,  0},
 };
 
 const GearRule* find_rule(const char* name) {

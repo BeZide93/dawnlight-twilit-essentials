@@ -708,7 +708,7 @@ void draw_boss_rush_models(float floorY) {
             }
             const BossGalleryEntry& boss = g_bossGalleryTable[tableIdx];
 
-            if (std::strcmp(boss.displayName, "Darknut") == 0 && boss_rush_darklink_enabled()) {
+            if (std::strcmp(boss.displayName, kDarkLinkGalleryName) == 0) {
                 slot.resolved = true;
                 slot.darkLink = true;
                 continue;

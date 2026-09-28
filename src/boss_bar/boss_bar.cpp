@@ -191,10 +191,15 @@ static const BossDef kBossTable[] = {
     { fpcNm_E_PZ_e,     "Phantom Zant",     true,  true,  nullptr,                false, bbi::phantomzant_engaged, bbi::phantomzant_ignore },
 };
 
+static const BossDef kDarkLinkBossDef = { -1, kDarkLinkGalleryName, true, true, nullptr };
+
+static s16 s_darkLinkProfile = -1;
+
 static const BossDef* classifyBoss(s16 name) {
     for (const auto& def : kBossTable) {
         if (def.name == name) return &def;
     }
+    if (s_darkLinkProfile >= 0 && name == s_darkLinkProfile) return &kDarkLinkBossDef;
     return nullptr;
 }
 
@@ -972,6 +977,7 @@ static int collectBossCallback(void* pActor, void*) {
     const BossDef* def = classifyBoss(nm);
     if (!def) return 0;
     if (def->ignoreFn && def->ignoreFn(a)) return 0;
+    if (nm == fpcNm_B_TN_e && boss_rush_darklink_replaces_darknut(a)) return 0;
 
     if (def->miniboss) {
         if (dComIfGs_isStageMiddleBoss()) return 0;
@@ -1024,6 +1030,7 @@ void boss_bar_force_reset() {
 }
 
 void update_boss_bar(const LogService*, ModContext*) {
+    s_darkLinkProfile = boss_rush_darklink_actor_profile();
     if (s_bossBarPreviewFrames > 0) s_bossBarPreviewFrames--;
     if (!g_configBossBarEnabled && !boss_rush_is_fighting_here()) {
         reset_state();
@@ -1096,8 +1103,7 @@ void update_boss_bar(const LogService*, ModContext*) {
             s_boss.valid = true;
             s_boss.id = best->id;
             s_boss.name = best->name;
-            s_boss.label = (best->name == fpcNm_B_TN_e && boss_rush_darklink_enabled()) ? "Dark Link"
-                                                                                         : best->def->label;
+            s_boss.label = best->def->label;
             s_boss.miniboss = best->def->miniboss;
             s_boss.custom = best->hasRatio || best->def->aggregate;
 

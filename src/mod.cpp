@@ -13,6 +13,7 @@
 #include "hp_bars/hp_bars.hpp"
 #include "boss_bar/boss_bar.hpp"
 #include "boss_rush/boss_rush.hpp"
+#include "boss_rush/boss_rush_darklink.hpp"
 #include "boss_rush/boss_rush_models.hpp"
 #include "boss_rush/boss_rush_equipment.hpp"
 #include "boss_rush/boss_rush_timer.hpp"
@@ -484,6 +485,7 @@ static ConfigVarHandle s_varBossRushSuggestedItems = 0;
 #endif
 static ConfigVarHandle s_varBossRushRefillAfterFight = 0;
 static ConfigVarHandle s_varBossRushSeparateGanon = 0;
+static ConfigVarHandle s_varBossRushDarkLink = 0;
 static ConfigVarHandle s_varBossRushVanillaGear = 0;
 static ConfigVarHandle s_varBossRushPortal = 0;
 static ConfigVarHandle s_varBossRushTimer = 0;
@@ -577,6 +579,15 @@ static void on_master_rush_difficulty_changed(ModContext*, ConfigVarHandle, cons
 static void on_boss_rush_separate_ganon_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossRushSeparateGanon = value->bool_value;
+        if (is_in_boss_rush_chamber()) {
+            reset_boss_rush_models();
+        }
+    }
+}
+
+static void on_boss_rush_dark_link_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configBossRushDarkLink = value->bool_value;
         if (is_in_boss_rush_chamber()) {
             reset_boss_rush_models();
         }
@@ -1792,6 +1803,10 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     ui_add_toggle(left, "Separate Ganon fights", s_varBossRushSeparateGanon,
         "<p>Fights all 4 Ganon phases in sequence instead of separate statues.</p>");
 
+    ui_add_toggle(left, "Enable Dark Link", s_varBossRushDarkLink,
+        "<p>Adds a Dark Link statue after Ganondorf when the Dark Link mod is installed. "
+        "The Darknut statue always stays the normal Darknut fight.</p>");
+
     ui_add_toggle(left, "Show boss rush portal", s_varBossRushPortal,
         "<p>Shows the warp portal on the map while a Boss Rush is active.</p>");
 
@@ -2827,6 +2842,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descBossRushSeparateGanon, &s_varBossRushSeparateGanon) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varBossRushSeparateGanon, &g_configBossRushSeparateGanon);
             svc_config->subscribe(mod_ctx, s_varBossRushSeparateGanon, on_boss_rush_separate_ganon_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descBossRushDarkLink = CONFIG_VAR_DESC_INIT;
+        descBossRushDarkLink.name = "bossRushDarkLink";
+        descBossRushDarkLink.type = CONFIG_VAR_BOOL;
+        descBossRushDarkLink.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descBossRushDarkLink, &s_varBossRushDarkLink) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varBossRushDarkLink, &g_configBossRushDarkLink);
+            svc_config->subscribe(mod_ctx, s_varBossRushDarkLink, on_boss_rush_dark_link_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descBossRushVanillaGear = CONFIG_VAR_DESC_INIT;

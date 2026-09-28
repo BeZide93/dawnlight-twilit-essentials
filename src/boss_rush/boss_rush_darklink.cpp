@@ -5,7 +5,10 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "d/d_resorce.h"
+#include "d/d_stage.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_b_tn.h"
+#include "mods/hook.hpp"
 #include "m_Do/m_Do_dvd_thread.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
@@ -655,15 +658,21 @@ void draw_at(J3DModel* model, MtxP mtx) {
 
 }
 
-bool boss_rush_darklink_enabled() {
-#if USE_DARK_LINK
+bool g_configBossRushDarkLink = true;
+
+bool boss_rush_darklink_mod_installed() {
     static int s_checkCountdown = 0;
-    static bool s_enabled = false;
+    static bool s_installed = false;
     if (--s_checkCountdown <= 0) {
         s_checkCountdown = 120;
-        s_enabled = is_mod_enabled(kDarkLinkModId);
+        s_installed = is_mod_enabled(kDarkLinkModId);
     }
-    return s_enabled;
+    return s_installed;
+}
+
+bool boss_rush_darklink_enabled() {
+#if USE_DARK_LINK
+    return g_configBossRushDarkLink && boss_rush_darklink_mod_installed();
 #else
     return false;
 #endif
@@ -735,4 +744,72 @@ void boss_rush_darklink_unload() {
     if (s_state == State::Mounting) return;
     release_all();
     s_state = State::Idle;
+}
+
+DEFINE_HOOK(&daB_TN_c::execute, BossRushVanillaDarknutExecuteHook);
+DEFINE_HOOK(&daB_TN_c::draw, BossRushVanillaDarknutDrawHook);
+
+namespace {
+
+constexpr int32_t kVanillaDarknutHookPriority = 1000;
+constexpr const char* kDarknutStage = "D_MN06B";
+constexpr const char* kDarkLinkActorName = "DarkLnk";
+constexpr int kActorProfileRefreshFrames = 300;
+
+using SearchNameFn = dStage_objectNameInf* (*)(const char*);
+SearchNameFn s_searchName = nullptr;
+
+HookAction on_vanilla_darknut_execute_pre(ModContext*, void* args, void* retval, void*) {
+    if (!boss_rush_wants_vanilla_darknut()) return HOOK_CONTINUE;
+    const int result = BossRushVanillaDarknutExecuteHook::g_orig(mods::arg<daB_TN_c*>(args, 0));
+    if (retval != nullptr) *static_cast<int*>(retval) = result;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction on_vanilla_darknut_draw_pre(ModContext*, void* args, void* retval, void*) {
+    if (!boss_rush_wants_vanilla_darknut()) return HOOK_CONTINUE;
+    const int result = BossRushVanillaDarknutDrawHook::g_orig(mods::arg<daB_TN_c*>(args, 0));
+    if (retval != nullptr) *static_cast<int*>(retval) = result;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+}
+
+bool boss_rush_darklink_replaces_darknut(const fopAc_ac_c* darknut) {
+    if (darknut == nullptr || boss_rush_wants_vanilla_darknut() ||
+        !boss_rush_darklink_mod_installed()) {
+        return false;
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr && std::strcmp(stage, kDarknutStage) == 0 &&
+           static_cast<const daB_TN_c*>(darknut)->mType == 0;
+}
+
+s16 boss_rush_darklink_actor_profile() {
+    static s16 s_profile = -1;
+    static int s_countdown = 0;
+    if (s_searchName == nullptr) {
+        return -1;
+    }
+    if (--s_countdown <= 0) {
+        s_countdown = kActorProfileRefreshFrames;
+        const dStage_objectNameInf* info = s_searchName(kDarkLinkActorName);
+        s_profile = info != nullptr ? info->procname : static_cast<s16>(-1);
+    }
+    return s_profile;
+}
+
+ModResult init_boss_rush_darklink(const HookService* hook_svc) {
+    void* searchName = nullptr;
+    if (hook_svc->resolve(mod_ctx, "dStage_searchName", &searchName, nullptr) == MOD_OK) {
+        s_searchName = reinterpret_cast<SearchNameFn>(searchName);
+    }
+
+    HookOptions options = HOOK_OPTIONS_INIT;
+    options.priority = kVanillaDarknutHookPriority;
+    ModResult result = mods::hook::add_pre<BossRushVanillaDarknutExecuteHook>(
+        hook_svc, on_vanilla_darknut_execute_pre, &options);
+    if (result != MOD_OK) return result;
+    return mods::hook::add_pre<BossRushVanillaDarknutDrawHook>(
+        hook_svc, on_vanilla_darknut_draw_pre, &options);
 }

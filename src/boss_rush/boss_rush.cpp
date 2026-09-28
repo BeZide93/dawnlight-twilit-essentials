@@ -2,6 +2,7 @@
 #include "boss_rush_midna.hpp"
 #include "boss_rush_collection.hpp"
 #include "boss_rush_common.hpp"
+#include "boss_rush_darklink.hpp"
 #include "boss_rush_models.hpp"
 #include "boss_rush_masterswd.hpp"
 #include "boss_rush_texts.hpp"
@@ -185,6 +186,9 @@ static const cXyz kBlizzetaFightSpawnPos{-200.0f, 2.0f, 580.0f};
 
 static const cXyz kDarknutFightSpawnPos{150.0f, -350.0f, 600.0f};
 
+static const cXyz kDarkLinkFightSpawnPos{3.9859f, -400.0f, 626.412f};
+static const s16 kDarkLinkFightAngle = static_cast<s16>(-0x8000);
+
 static const cXyz kZantFightSpawnPos{0.0f, 0.0f, 0.0f};
 
 static const cXyz kArmogohmaFightSpawnPos{0.0f, 0.0f, 2391.84f};
@@ -242,6 +246,9 @@ const BossGalleryEntry g_bossGalleryTable[] = {
     {"Ganondorf",    "Hyrule Castle",       "B_gnd",  "egnd.bmd",   nullptr,  "egnd_wait02.bck",   "D_MN09B", 1, 0,  0, 0.8f,  0.0f,  260.0f, 0.0f,
      nullptr, nullptr, nullptr, nullptr, nullptr, g_ganondorfParts, kGanondorfPartCount, nullptr, "egnd_core_beat.brk",
      nullptr, nullptr, &kGanondorfFightSpawnPos, kGanondorfFightAngle},
+    {kDarkLinkGalleryName, "Temple of Time", "Kmdl",  "al.bmd",     nullptr,  "",                  "D_MN06B", 0, 51, 0, 1.0f,  0.0f,  260.0f, 0.0f,
+     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
+     nullptr, nullptr, nullptr, nullptr, &kDarkLinkFightSpawnPos, kDarkLinkFightAngle},
 };
 const size_t g_bossGalleryCount = sizeof(g_bossGalleryTable) / sizeof(g_bossGalleryTable[0]);
 
@@ -253,19 +260,19 @@ bool g_configBossRushRefillAfterFight = false;
 bool g_configBossRushSeparateGanon = false;
 
 bool is_boss_gallery_entry_filtered(size_t tableIdx) {
+    const char* name = g_bossGalleryTable[tableIdx].displayName;
+    if (std::strcmp(name, kDarkLinkGalleryName) == 0) {
+        return !boss_rush_darklink_enabled();
+    }
     if (g_configBossRushSeparateGanon) {
         return false;
     }
-    const char* name = g_bossGalleryTable[tableIdx].displayName;
     return std::strcmp(name, "Puppet Zelda") == 0 ||
            std::strcmp(name, "Beast Ganon") == 0 ||
            std::strcmp(name, "Horseback Ganon") == 0;
 }
 
 size_t boss_rush_get_active_gallery_count() {
-    if (g_configBossRushSeparateGanon) {
-        return g_bossGalleryCount;
-    }
     size_t count = 0;
     for (size_t i = 0; i < g_bossGalleryCount; ++i) {
         if (!is_boss_gallery_entry_filtered(i)) {
@@ -276,9 +283,6 @@ size_t boss_rush_get_active_gallery_count() {
 }
 
 size_t boss_rush_get_active_gallery_table_index(size_t circleSlot) {
-    if (g_configBossRushSeparateGanon) {
-        return circleSlot;
-    }
     size_t activeIdx = 0;
     for (size_t i = 0; i < g_bossGalleryCount; ++i) {
         if (!is_boss_gallery_entry_filtered(i)) {
@@ -634,6 +638,14 @@ int boss_rush_current_target_index() {
         return -1;
     }
     return idx;
+}
+
+bool boss_rush_wants_vanilla_darknut() {
+    if (!s_bossRushModeActive) {
+        return false;
+    }
+    const int idx = boss_rush_target_index();
+    return idx >= 0 && std::strcmp(g_bossGalleryTable[idx].displayName, "Darknut") == 0;
 }
 
 bool boss_rush_is_fight_retry_warp() {
@@ -1159,7 +1171,7 @@ static void apply_boss_suggested_items(const BossGalleryEntry& boss) {
         assign_select_item(SELECT_ITEM_X, SLOT_10);
     } else if (std::strcmp(name, "Blizzeta") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_6);
-    } else if (std::strcmp(name, "Darknut") == 0) {
+    } else if (std::strcmp(name, "Darknut") == 0 || std::strcmp(name, kDarkLinkGalleryName) == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_6);
     } else if (std::strcmp(name, "Armogohma") == 0) {
         assign_select_item(SELECT_ITEM_X, SLOT_4);
@@ -3108,6 +3120,43 @@ static void update_darknut_instant_fight() {
     s_done = true;
 }
 
+static constexpr int kDarkLinkVictoryDelayFrames = 240;
+
+static void update_dark_link_victory() {
+    static u32 s_gen = ~0u;
+    static bool s_sawDarknutActor = false;
+    static int s_goneFrames = 0;
+    if (instant_fight_rearm(s_gen)) {
+        s_sawDarknutActor = false;
+        s_goneFrames = 0;
+    }
+
+    if (!is_in_chamber_room() || s_returningToChamber || s_pendingFightIndex != -1 ||
+        !boss_rush_is_fighting_here()) {
+        s_goneFrames = 0;
+        return;
+    }
+    const int t = boss_rush_target_index();
+    if (t < 0 || std::strcmp(g_bossGalleryTable[t].displayName, kDarkLinkGalleryName) != 0) {
+        return;
+    }
+
+    if (fopAcM_SearchByName(fpcNm_B_TN_e) != nullptr) {
+        s_sawDarknutActor = true;
+        s_goneFrames = 0;
+        return;
+    }
+    if (!s_sawDarknutActor || dComIfGp_isEnableNextStage() || dComIfGs_getLife() == 0) {
+        return;
+    }
+    if (++s_goneFrames < kDarkLinkVictoryDelayFrames) {
+        return;
+    }
+    s_sawDarknutActor = false;
+    s_goneFrames = 0;
+    boss_bar_force_defeat_event();
+}
+
 static int s_armogohmaCamArmFrames = 0;
 
 static void update_armogohma_camera() {
@@ -3373,6 +3422,7 @@ static bool boss_starts_with_sword_drawn(const BossGalleryEntry& boss) {
     if (std::strcmp(n, "Deku Toad") == 0) return true;
     if (std::strcmp(n, "Darkhammer") == 0) return true;
     if (std::strcmp(n, "Darknut") == 0) return true;
+    if (std::strcmp(n, kDarkLinkGalleryName) == 0) return true;
     if (std::strcmp(n, "Puppet Zelda") == 0) return true;
     if (std::strcmp(n, "Ganondorf") == 0) return true;
     return false;
@@ -5056,6 +5106,7 @@ static void commit_boss_rush_fight_warp(size_t i, daAlink_c* link,
         std::strcmp(boss.displayName, "Deku Toad") == 0 ||
         std::strcmp(boss.displayName, "Darkhammer") == 0 ||
         std::strcmp(boss.displayName, "Darknut") == 0 ||
+        std::strcmp(boss.displayName, kDarkLinkGalleryName) == 0 ||
         std::strcmp(boss.displayName, "Puppet Zelda") == 0 ||
         std::strcmp(boss.displayName, "Ganondorf") == 0) {
         lastMode |= 0x28000000;
@@ -5265,7 +5316,8 @@ static fopAc_ac_c* boss_rush_find_current_boss_actor() {
     else if (std::strcmp(name, "Stallord") == 0) profile = fpcNm_B_DS_e;
     else if (std::strcmp(name, "Darkhammer") == 0) profile = fpcNm_E_TH_e;
     else if (std::strcmp(name, "Blizzeta") == 0) profile = fpcNm_B_YO_e;
-    else if (std::strcmp(name, "Darknut") == 0) profile = fpcNm_B_TN_e;
+    else if (std::strcmp(name, "Darknut") == 0 ||
+             std::strcmp(name, kDarkLinkGalleryName) == 0) profile = fpcNm_B_TN_e;
     else if (std::strcmp(name, "Armogohma") == 0) profile = fpcNm_B_GM_e;
     else if (std::strcmp(name, "Aeralfos") == 0) profile = fpcNm_B_GG_e;
     else if (std::strcmp(name, "Argorok") == 0) profile = fpcNm_B_DR_e;
@@ -6008,6 +6060,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         }
     }
 
+    update_dark_link_victory();
+
     if (s_killWatchdogFrames > 0) {
         --s_killWatchdogFrames;
         fopAc_ac_c* dying = boss_rush_find_current_boss_actor();
@@ -6309,6 +6363,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_post<BossRushMeterDrawHook>(hook_svc, on_boss_rush_meter_draw_post);
         mods::hook::add_post<BossRushActionStringHook>(hook_svc, on_action_string_post);
         mods::hook::add_pre<BossRushDefeatOverrideHook>(hook_svc, on_defeat_check_pre);
+        init_boss_rush_darklink(hook_svc);
         mods::hook::add_pre<BossRushSwitchOverrideHook>(hook_svc, on_switch_check_pre);
         mods::hook::add_pre<BossRushDanSwitchHook>(hook_svc, on_dan_switch_check_pre);
         mods::hook::add_pre<BossRushZoneSwitchHook>(hook_svc, on_zone_switch_check_pre);

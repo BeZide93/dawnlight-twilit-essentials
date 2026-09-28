@@ -121,9 +121,6 @@ void draw_boss_rush_texts(float floorY) {
         }
 
         const char* displayName = boss.displayName;
-        if (std::strcmp(displayName, "Darknut") == 0 && boss_rush_darklink_enabled()) {
-            displayName = "Dark Link";
-        }
         if (!g_configBossRushSeparateGanon &&
             std::strcmp(displayName, "Ganondorf") == 0) {
             displayName = "Ganondorf (All Phases)";
