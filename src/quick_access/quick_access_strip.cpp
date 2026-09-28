@@ -101,6 +101,7 @@ static bool item_state_badge(u8 itemNo) {
 void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
     qa_pointer_set_strip_center(screenW * 0.5f);
+    qa_page_anim_tick();
     if (qa_side_page_active()) {
         quick_access_side_page_strip_draw(screenW, screenH, alpha);
         return;
@@ -114,7 +115,9 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     const f32 totalSpan = (QA_QUICK_SLOTS - 1) * BOX_SPACING;
     qa_draw_msg_window(centerX - 140.0f, 34.0f + slide, 280.0f, 52.0f, s_menuAlpha);
 
-    const u8 slotAlpha = static_cast<u8>(s_menuAlpha * 255.0f);
+    const f32 pageOffset = qa_page_anim_offset();
+    const f32 pageAlphaRate = qa_page_anim_alpha();
+    const u8 slotAlpha = static_cast<u8>(s_menuAlpha * 255.0f * pageAlphaRate);
 
     u8 assigned = qa_strip_assigned_item();
 
@@ -127,7 +130,7 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         s_stripScale[i] += ((isSelected ? 1.16f : 1.0f) - s_stripScale[i]) * 0.28f;
         const f32 half = BOX_HALF * s_stripScale[i];
 
-        const f32 cx = centerX - totalSpan * 0.5f + static_cast<f32>(i) * BOX_SPACING;
+        const f32 cx = centerX - totalSpan * 0.5f + static_cast<f32>(i) * BOX_SPACING + pageOffset;
         const f32 cy = centerY + slide;
 
         qa_draw_collection_slot(cx, cy, half * 2.0f, slotAlpha, isSelected,
@@ -170,7 +173,7 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         s_selectedSlot = 0;
     }
     quick_access_strip_cursor_request(
-        centerX - totalSpan * 0.5f + static_cast<f32>(s_selectedSlot) * BOX_SPACING,
+        centerX - totalSpan * 0.5f + static_cast<f32>(s_selectedSlot) * BOX_SPACING + pageOffset,
         centerY + slide);
 
     if (s_selectedSlot != SLOT_NONE) {
@@ -182,12 +185,14 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
                 const f32 fontW = 9.0f;
                 const f32 fontH = 11.5f;
                 f32 textW = qa_get_text_width(labelBuf, fontW);
-                const f32 textX = centerX - textW * 0.5f;
+                const f32 textX = centerX - textW * 0.5f + pageOffset;
                 const f32 textY = BAR_Y - BOX_HALF - 22.0f + slide;
+                const u8 labelAlpha = static_cast<u8>(alpha * pageAlphaRate);
 
-                JUtility::TColor creamTop(255, 248, 210, alpha);
-                JUtility::TColor goldBot(235, 185, 65, alpha);
-                qa_draw_text(labelBuf, textX, textY + 10.0f, fontW, fontH, creamTop, goldBot, alpha);
+                JUtility::TColor creamTop(255, 248, 210, labelAlpha);
+                JUtility::TColor goldBot(235, 185, 65, labelAlpha);
+                qa_draw_text(labelBuf, textX, textY + 10.0f, fontW, fontH, creamTop, goldBot,
+                             labelAlpha);
             }
         }
     }

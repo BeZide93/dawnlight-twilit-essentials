@@ -202,6 +202,7 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate, boo
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     (void)glow;
     qa_pointer_set_radial_center(centerX, centerY);
+    qa_page_anim_tick();
     if (qa_side_page_active()) {
         quick_access_side_page_draw(centerX, centerY, alpha);
         return;
@@ -213,14 +214,19 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
 
     qa_radial_draw_wheel(centerX, centerY, alpha, s_menuAlpha);
 
+    const u8 frameAlpha = alpha;
+    const f32 pageAlphaRate = qa_page_anim_alpha();
+    const f32 slotCenterX = centerX + qa_page_anim_offset();
+    alpha = static_cast<u8>(alpha * pageAlphaRate);
+
     u8 active[QA_QUICK_SLOTS];
     const int activeCount = qa_get_active_items(active);
 
     const f32 slotCoords[QA_QUICK_SLOTS][2] = {
-        { centerX, centerY - radius },
-        { centerX, centerY + radius },
-        { centerX - radius, centerY },
-        { centerX + radius, centerY },
+        { slotCenterX, centerY - radius },
+        { slotCenterX, centerY + radius },
+        { slotCenterX - radius, centerY },
+        { slotCenterX + radius, centerY },
     };
 
     for (int i = 0; i < QA_QUICK_SLOTS; i++) {
@@ -264,7 +270,7 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     if (s_selectedSlot != SLOT_NONE && s_selectedSlot < activeCount && cursor != nullptr) {
         cursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
         cursor->setPos(slotCoords[s_selectedSlot][0], slotCoords[s_selectedSlot][1]);
-        cursor->setAlphaRate(s_menuAlpha);
+        cursor->setAlphaRate(s_menuAlpha * pageAlphaRate);
         cursor->draw();
 
         J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
@@ -299,6 +305,7 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
         }
     }
 
+    alpha = frameAlpha;
     qa_draw_page_buttons(centerX, centerY, alpha);
 
     const f32 screenH = centerY * 2.0f;

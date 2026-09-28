@@ -39,6 +39,10 @@ constexpr f32 kPi = 3.14159265f;
 constexpr f32 kStickDeadzone = 0.35f;
 
 int s_page = QA_PAGE_ITEMS;
+f32 s_pageAnimT = 0.0f;
+int s_pageAnimDir = 0;
+constexpr f32 kPageAnimDecay = 0.78f;
+constexpr f32 kPageAnimDistance = 56.0f;
 int s_tunicSelected = SLOT_NONE;
 int s_bottleSelected = SLOT_NONE;
 f32 s_bottleScale[kBottleSlots] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -294,12 +298,12 @@ void draw_label_at(const char* label, f32 x, f32 y, u8 alpha) {
                  JUtility::TColor(235, 185, 65, alpha), alpha);
 }
 
-void draw_ring_cursor(f32 x, f32 y) {
+void draw_ring_cursor(f32 x, f32 y, f32 alphaRate) {
     dSelect_cursor_c* cursor = qa_sel_cursor(0);
     if (cursor == nullptr) return;
     cursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
     cursor->setPos(x, y);
-    cursor->setAlphaRate(s_menuAlpha);
+    cursor->setAlphaRate(s_menuAlpha * alphaRate);
     cursor->draw();
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port != nullptr) port->setup2D();
@@ -350,8 +354,22 @@ bool qa_side_page_active() {
     return s_page != QA_PAGE_ITEMS;
 }
 
+void qa_page_anim_tick() {
+    s_pageAnimT *= kPageAnimDecay;
+    if (s_pageAnimT < 0.01f) s_pageAnimT = 0.0f;
+}
+
+f32 qa_page_anim_offset() {
+    return static_cast<f32>(s_pageAnimDir) * kPageAnimDistance * s_pageAnimT;
+}
+
+f32 qa_page_anim_alpha() {
+    return 1.0f - s_pageAnimT;
+}
+
 void qa_page_reset() {
     s_page = QA_PAGE_ITEMS;
+    s_pageAnimT = 0.0f;
     s_tunicSelected = SLOT_NONE;
     s_bottleSelected = SLOT_NONE;
     s_lPrev = controls_l_shoulder_raw_held();
@@ -362,6 +380,8 @@ void qa_page_step(int dir) {
     const int next = s_page + dir;
     if (next < QA_PAGE_BOTTLES || next > QA_PAGE_TUNICS) return;
     s_page = next;
+    s_pageAnimT = 1.0f;
+    s_pageAnimDir = dir;
     s_tunicSelected = SLOT_NONE;
     s_bottleSelected = SLOT_NONE;
     s_selectedSlot = SLOT_NONE;
@@ -530,6 +550,9 @@ void quick_access_side_page_strip_draw(f32 screenW, f32 screenH, u8 alpha) {
     const f32 slide = -(1.0f - s_menuAlpha) * 16.0f;
     const f32 cy = QA_STRIP_BAR_Y + slide;
     const bool bottles = s_page == QA_PAGE_BOTTLES;
+    const u8 frameAlpha = alpha;
+    const f32 pageOffset = qa_page_anim_offset();
+    alpha = static_cast<u8>(alpha * qa_page_anim_alpha());
 
     qa_draw_msg_window(centerX - 140.0f, 34.0f + slide, 280.0f, 52.0f, s_menuAlpha);
 
@@ -542,7 +565,7 @@ void quick_access_side_page_strip_draw(f32 screenW, f32 screenH, u8 alpha) {
         const bool isSel = selected == i;
         f32& scale = bottles ? s_bottleScale[i] : s_tunicScale[i];
         scale += ((isSel ? 1.16f : 1.0f) - scale) * 0.28f;
-        const f32 x = qa_side_strip_slot_x(i, centerX);
+        const f32 x = qa_side_strip_slot_x(i, centerX) + pageOffset;
         if (bottles) {
             draw_bottle_slot(i, x, cy, QA_STRIP_BOX_HALF * 2.0f, scale, alpha, isSel);
         } else {
@@ -551,17 +574,18 @@ void quick_access_side_page_strip_draw(f32 screenW, f32 screenH, u8 alpha) {
     }
 
     if (selected != SLOT_NONE) {
-        quick_access_strip_cursor_request(qa_side_strip_slot_x(selected, centerX), cy);
+        quick_access_strip_cursor_request(qa_side_strip_slot_x(selected, centerX) + pageOffset, cy);
         char label[64] = "";
         if (bottles) {
             qa_item_label(qa_bottle_item(selected), label, sizeof(label));
         } else {
             std::snprintf(label, sizeof(label), "%s", collection_tunic_name(selected));
         }
-        draw_label_at(label, centerX, QA_STRIP_BAR_Y - QA_STRIP_BOX_HALF - 12.0f + slide, alpha);
+        draw_label_at(label, centerX + pageOffset, QA_STRIP_BAR_Y - QA_STRIP_BOX_HALF - 12.0f + slide,
+                      alpha);
     }
 
-    qa_draw_page_buttons_strip(centerX, cy, alpha);
+    qa_draw_page_buttons_strip(centerX, cy, frameAlpha);
     quick_access_strip_cursor_present();
     qa_hud_scale_end();
 }
@@ -570,19 +594,23 @@ void quick_access_side_page_draw(f32 centerX, f32 centerY, u8 alpha) {
     qa_hud_scale_begin(centerX, centerY);
     centerY -= (1.0f - s_menuAlpha) * 16.0f;
     const bool bottles = s_page == QA_PAGE_BOTTLES;
+    const u8 frameAlpha = alpha;
+    const f32 pageOffset = qa_page_anim_offset();
+    const f32 pageAlphaRate = qa_page_anim_alpha();
 
     qa_radial_draw_wheel(centerX, centerY, alpha, s_menuAlpha, bottles);
+    alpha = static_cast<u8>(alpha * pageAlphaRate);
     if (!bottles) {
         const JUtility::TColor spokeColor(120, 100, 50, static_cast<u8>(alpha * 0.45f));
         for (int t = 0; t < COLLECTION_TUNIC_COUNT; t++) {
-            draw_spoke(centerX, centerY, tunic_angle(t), kTunicRadius, 2.0f, spokeColor);
+            draw_spoke(centerX + pageOffset, centerY, tunic_angle(t), kTunicRadius, 2.0f, spokeColor);
         }
     }
 
     const int selected = bottles ? s_bottleSelected : s_tunicSelected;
     f32 pos[COLLECTION_TUNIC_COUNT][2];
     for (int i = 0; i < qa_side_slot_count(); i++) {
-        qa_side_slot_center(i, centerX, centerY, &pos[i][0], &pos[i][1]);
+        qa_side_slot_center(i, centerX + pageOffset, centerY, &pos[i][0], &pos[i][1]);
         const bool isSel = selected == i;
         f32& scale = bottles ? s_bottleScale[i] : s_tunicScale[i];
         const bool usable = bottles ? qa_bottle_owned(i) : collection_tunic_unlocked(i);
@@ -595,7 +623,7 @@ void quick_access_side_page_draw(f32 centerX, f32 centerY, u8 alpha) {
     }
 
     if (selected != SLOT_NONE) {
-        draw_ring_cursor(pos[selected][0], pos[selected][1]);
+        draw_ring_cursor(pos[selected][0], pos[selected][1], pageAlphaRate);
         char label[64] = "";
         if (bottles) {
             qa_item_label(qa_bottle_item(selected), label, sizeof(label));
@@ -605,7 +633,7 @@ void quick_access_side_page_draw(f32 centerX, f32 centerY, u8 alpha) {
         draw_label_at(label, pos[selected][0], pos[selected][1] + 32.0f, alpha);
     }
 
-    qa_draw_page_buttons(centerX, centerY, alpha);
+    qa_draw_page_buttons(centerX, centerY, frameAlpha);
     qa_hud_scale_end();
 }
 
