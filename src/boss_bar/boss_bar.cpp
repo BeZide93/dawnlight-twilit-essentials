@@ -1652,7 +1652,7 @@ static const char* boss_full_title(const char* label) {
         {"Dangoro",          "Dangoro, the Goron Guardian"},
         {"Ook",              "Ook, the Forest Thief"},
         {"Darknut",          "Darknut, the Iron Knight"},
-        {"Dark Link",        "Dark Link, the Hero's Shadow"},
+        {"Dark Link",        "Dark Link, the Twili Imposter"},
         {"Aeralfos",         "Aeralfos, the Sky Guard"},
     };
     if (label) {
