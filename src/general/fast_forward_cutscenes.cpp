@@ -26,6 +26,8 @@ int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
 
 float g_configGeneralFastForwardSpeed = 8.0f;
 
+#define ENABLE_FF_LOG 0
+
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
     if (speed > 15.0f) speed = 15.0f;
@@ -394,6 +396,15 @@ bool is_item_get_event(dEvt_control_c* evt) {
            std::strcmp(data->getName(), "DEFAULT_GETITEM") == 0;
 }
 
+bool is_dialogue_active(dEvt_control_c* evt) {
+    if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) return true;
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (link != nullptr && link->mProcID == daAlink_c::PROC_TALK) return true;
+    if (evt == nullptr || evt->mEventStatus != 1 || evt->mEventId < 0) return false;
+    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+    return data != nullptr && data->getName() != nullptr && std::strstr(data->getName(), "TALK") != nullptr;
+}
+
 bool is_chest_open_event(dEvt_control_c* evt) {
     if (evt == nullptr || evt->mEventStatus != 1) return false;
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
@@ -416,6 +427,8 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     if (dComIfGp_getPlayer(0) == nullptr) return false;
 
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
+
+    if (is_dialogue_active(evt)) return false;
 
     if (allowDoors && is_chest_open_event(evt)) return true;
 
@@ -525,7 +538,7 @@ FfLogState s_ffLog;
 
 void log_fast_forward_event(const LogService* log_svc, ModContext* ctx, dEvt_control_c* evt,
                             bool genuine, bool boosted) {
-    if (log_svc == nullptr || ctx == nullptr) return;
+    if (!ENABLE_FF_LOG || log_svc == nullptr || ctx == nullptr) return;
 
     FfLogState now;
     now.genuine = genuine;
