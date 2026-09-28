@@ -19,6 +19,7 @@
 #include "d/actor/d_a_midna.h"
 #include "human_warp.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
@@ -366,6 +367,45 @@ bool is_player_process_running() {
     return link != nullptr && link->checkEventRun();
 }
 
+bool is_item_get_proc() {
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (link == nullptr) return false;
+    switch (link->mProcID) {
+    case daAlink_c::PROC_GET_ITEM:
+    case daAlink_c::PROC_OPEN_TREASURE:
+    case daAlink_c::PROC_BOTTLE_GET:
+    case daAlink_c::PROC_GRASS_WHISTLE_GET:
+    case daAlink_c::PROC_LOOK_UP_TO_GET_ITEM:
+    case daAlink_c::PROC_HORSE_GET_KEY:
+    case daAlink_c::PROC_CANOE_FISHING_GET:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_item_get_event(dEvt_control_c* evt) {
+    if (evt == nullptr || evt->mEventStatus != 1) return false;
+    const int idx = static_cast<int>(evt->mOrderIdx);
+    if (idx >= 0 && idx < 8 && evt->mOrder[idx].mEventType == dEvt_type_TREASURE_e) return true;
+    if (evt->mEventId < 0) return false;
+    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+    return data != nullptr && data->getName() != nullptr &&
+           std::strcmp(data->getName(), "DEFAULT_GETITEM") == 0;
+}
+
+bool is_chest_open_event(dEvt_control_c* evt) {
+    if (evt == nullptr || evt->mEventStatus != 1) return false;
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (link == nullptr || link->mProcID == daAlink_c::PROC_GET_ITEM) return false;
+    const int idx = static_cast<int>(evt->mOrderIdx);
+    if (idx >= 0 && idx < 8 && evt->mOrder[idx].mEventType == dEvt_type_TREASURE_e) return true;
+    if (evt->mEventId < 0) return false;
+    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+    return data != nullptr && data->getName() != nullptr &&
+           std::strncmp(data->getName(), "DEFAULT_TREASURE", 16) == 0;
+}
+
 bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     const char* stageName = dComIfGp_getStartStageName();
     if (stageName != nullptr &&
@@ -376,6 +416,10 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     if (dComIfGp_getPlayer(0) == nullptr) return false;
 
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
+
+    if (allowDoors && is_chest_open_event(evt)) return true;
+
+    if (is_item_get_proc() || is_item_get_event(evt)) return false;
 
     if (allowDoors && human_warp_cinematic_active()) return true;
 
@@ -463,7 +507,72 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
 
 void update_hidden_run_watchdog();
 
-void update_fast_forward_cutscenes(const LogService*, ModContext*) {
+namespace {
+
+struct FfLogState {
+    s16 eventId = -2;
+    u8 status = 0xFF;
+    u8 mode = 0xFF;
+    u16 type = 0xFFFF;
+    int proc = -1;
+    s16 pt1 = -2;
+    s16 pt2 = -2;
+    bool genuine = false;
+    bool boosted = false;
+};
+
+FfLogState s_ffLog;
+
+void log_fast_forward_event(const LogService* log_svc, ModContext* ctx, dEvt_control_c* evt,
+                            bool genuine, bool boosted) {
+    if (log_svc == nullptr || ctx == nullptr) return;
+
+    FfLogState now;
+    now.genuine = genuine;
+    now.boosted = boosted;
+    if (evt != nullptr) {
+        now.eventId = evt->mEventId;
+        now.status = evt->mEventStatus;
+        now.mode = evt->getMode();
+        const int idx = static_cast<int>(evt->mOrderIdx);
+        now.type = (idx >= 0 && idx < 8) ? evt->mOrder[idx].mEventType : 0xFFFF;
+        now.pt1 = evt->getPt1() != nullptr ? fopAcM_GetProfName(evt->getPt1()) : -1;
+        now.pt2 = evt->getPt2() != nullptr ? fopAcM_GetProfName(evt->getPt2()) : -1;
+    }
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    now.proc = link != nullptr ? static_cast<int>(link->mProcID) : -1;
+
+    const bool linkEvent = link != nullptr && link->checkEventRun();
+    const bool changed = now.eventId != s_ffLog.eventId || now.status != s_ffLog.status ||
+                         now.mode != s_ffLog.mode || now.type != s_ffLog.type ||
+                         now.pt1 != s_ffLog.pt1 || now.pt2 != s_ffLog.pt2 ||
+                         now.genuine != s_ffLog.genuine || now.boosted != s_ffLog.boosted ||
+                         (now.proc != s_ffLog.proc && (linkEvent || now.status == 1));
+    if (!changed) return;
+    s_ffLog = now;
+    if (now.status != 1 && !linkEvent && !boosted) return;
+
+    const char* name = "-";
+    if (evt != nullptr && evt->mEventId >= 0) {
+        dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+        if (data != nullptr && data->getName() != nullptr) name = data->getName();
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    char msg[256];
+    std::snprintf(msg, sizeof(msg),
+                  "[ff] %s | event '%s' id=%d status=%d mode=%d type=%d | pt1=%d pt2=%d | "
+                  "link proc=%d eventRun=%d | stage=%s",
+                  boosted ? "FAST" : (genuine ? "cutscene, normal speed" : "normal"), name,
+                  static_cast<int>(now.eventId), static_cast<int>(now.status),
+                  static_cast<int>(now.mode), static_cast<int>(now.type),
+                  static_cast<int>(now.pt1), static_cast<int>(now.pt2), now.proc,
+                  linkEvent ? 1 : 0, stage != nullptr ? stage : "-");
+    log_svc->info(ctx, msg);
+}
+
+}
+
+void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* ff_ctx) {
     if (!clock_available()) return;
 
     update_hidden_run_watchdog();
@@ -493,6 +602,7 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
     if (!genuine) {
         stop_fast_forward();
         s_confirmFrames = 0;
+        log_fast_forward_event(log_svc, ff_ctx, evt, false, false);
         return;
     }
 
@@ -508,6 +618,7 @@ void update_fast_forward_cutscenes(const LogService*, ModContext*) {
                                    s_confirmFrames >= kLeadFrames;
 
     const float targetScale = g_configGeneralFastForwardSpeed;
+    log_fast_forward_event(log_svc, ff_ctx, evt, true, shouldFastForward);
 
     if (shouldFastForward) {
         const float current = live_timescale();
