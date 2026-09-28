@@ -26,8 +26,11 @@
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_graphic.h"
 #include "Z2AudioLib/Z2SeMgr.h"
+#include "dusk/config_var.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <string_view>
 
 bool g_configBossRushPortal = true;
 
@@ -50,6 +53,37 @@ static J2DPane*   s_goldPortalRoot   = nullptr;
 static f32        s_goldPortalW      = 0.0f;
 
 static dSelect_cursor_c* s_hoverBracket = nullptr;
+
+static const dusk::config::ConfigVar<bool>* s_mirrorModeVar = nullptr;
+
+static bool is_mirror_mode() {
+    return s_mirrorModeVar != nullptr && s_mirrorModeVar->getValue();
+}
+
+static const LogService* s_diagLog = nullptr;
+static ModContext* s_diagCtx = nullptr;
+static f32 s_diagLastKey = -99999.0f;
+
+static void log_portal_layout(dMenu_Fmap2DBack_c* back, f32 posX, f32 posY) {
+    if (s_diagLog == nullptr || s_diagCtx == nullptr || back == nullptr) return;
+    J2DScreen* base = back->mpBaseScreen;
+    const f32 baseTx = base != nullptr ? base->getTranslateX() : -1.0f;
+    const f32 baseSx = base != nullptr ? base->getScaleX() : -1.0f;
+    const f32 key = mDoGph_gInf_c::getWidthF() + mDoGph_gInf_c::getSafeMinXF() * 7.0f +
+                    mDoGph_gInf_c::hudAspectScaleUp * 1000.0f + baseTx * 13.0f + baseSx * 3000.0f +
+                    (is_mirror_mode() ? 50000.0f : 0.0f);
+    if (key == s_diagLastKey) return;
+    s_diagLastKey = key;
+    char msg[512];
+    std::snprintf(msg, sizeof(msg),
+        "[portal-diag] mirror=%d minX=%.2f width=%.2f safeMinX=%.2f safeW=%.2f scaleUp=%.4f "
+        "gScale=%.4f fb=%.0fx%.0f baseTx=%.2f baseSx=%.4f transX=%.2f axis=%.2f pos=%.2f,%.2f",
+        is_mirror_mode() ? 1 : 0, mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getWidthF(),
+        mDoGph_gInf_c::getSafeMinXF(), mDoGph_gInf_c::getSafeWidthF(),
+        mDoGph_gInf_c::hudAspectScaleUp, mDoGph_gInf_c::getScale(), mDoGph_gInf_c::getWidth(),
+        mDoGph_gInf_c::getHeight(), baseTx, baseSx, back->mTransX, back->field_0x11dc, posX, posY);
+    s_diagLog->info(s_diagCtx, msg);
+}
 
 static J2DTextBox* s_hoverLabel = nullptr;
 
@@ -110,6 +144,9 @@ static void get_portal_screen_pos(dMenu_Fmap2DBack_c* back, f32* outX, f32* outY
     if (back) {
         *outX += back->mTransX;
         *outY += back->mTransZ;
+        if (is_mirror_mode()) {
+            *outX = back->getMirrorPosX(*outX, 0.0f);
+        }
     }
 }
 
@@ -297,6 +334,7 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
 
     f32 posX = 0.0f, posY = 0.0f;
     get_portal_screen_pos(back, &posX, &posY);
+    log_portal_layout(back, posX, posY);
 
     ensure_portal_screen();
 
@@ -377,8 +415,19 @@ void update_boss_rush_portal(const LogService* log_svc, ModContext* mod_ctx) {
     s_warpDelay   = 0;
 }
 
-ModResult init_boss_rush_portal(const HookService* hook_svc, const LogService*, ModContext*) {
+ModResult init_boss_rush_portal(const HookService* hook_svc, const LogService* log_svc, ModContext* ctx) {
     if (!hook_svc) return MOD_OK;
+    s_diagLog = log_svc;
+    s_diagCtx = ctx;
+
+    void* addr = nullptr;
+    if (ctx != nullptr &&
+        hook_svc->resolve(ctx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK &&
+        addr != nullptr) {
+        using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
+        s_mirrorModeVar = static_cast<const dusk::config::ConfigVar<bool>*>(
+            reinterpret_cast<GetConfigVarFn>(addr)("game.enableMirrorMode"));
+    }
 
     mods::hook::add_pre<BossRushPortalRegionMap>(hook_svc, fmap_region_map_pre);
     mods::hook::add_pre<BossRushPortalAllMap>(hook_svc, fmap_all_map_pre);
