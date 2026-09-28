@@ -175,6 +175,25 @@ void draw_shoulder_button(bool left, const char* label, f32 anchorX, f32 y, u8 a
                  alpha);
 }
 
+void draw_tunic_icon(J2DPicture* pic, const ResTIMG* tex, J2DPicture* pic2, f32 sx, f32 sy,
+                     f32 scale, u8 alpha) {
+    f32 w = 32.0f * scale;
+    f32 h = 32.0f * scale;
+    if (tex != nullptr && tex->width > 0 && tex->height > 0 && tex->width != tex->height) {
+        if (tex->width > tex->height) {
+            h = w * static_cast<f32>(tex->height) / static_cast<f32>(tex->width);
+        } else {
+            w = h * static_cast<f32>(tex->width) / static_cast<f32>(tex->height);
+        }
+    }
+    pic->setAlpha(alpha);
+    pic->draw(sx - w * 0.5f, sy - h * 0.5f, w, h, false, false, false);
+    if (pic2 != nullptr) {
+        pic2->setAlpha(alpha);
+        pic2->draw(sx - w * 0.5f, sy - h * 0.5f, w, h, false, false, false);
+    }
+}
+
 int nearest_unlocked_tunic(f32 angle) {
     int best = SLOT_NONE;
     f32 bestDiff = 10.0f;
@@ -284,20 +303,20 @@ void quick_access_tunic_draw(f32 centerX, f32 centerY, u8 alpha) {
         qa_draw_collection_slot(sx, sy, 40.0f * scale, alpha, selected,
                                 collection_tunic_equipped(t));
 
+        const u8 iconItem = collection_tunic_icon_item(t);
+        J2DPicture* itemPic = nullptr;
+        ResTIMG* itemImg = nullptr;
+        J2DPicture* itemPic2 = nullptr;
+        if (iconItem != dItemNo_NONE_e &&
+            qa_get_item_icon(iconItem, &itemPic, &itemImg, &itemPic2)) {
+            draw_tunic_icon(itemPic, itemImg, itemPic2, sx, sy, scale, alpha);
+            continue;
+        }
+
         const ResTIMG* tex = nullptr;
         J2DPicture* pic = tunic_picture(t, &tex);
         if (pic != nullptr) {
-            f32 w = 32.0f * scale;
-            f32 h = 32.0f * scale;
-            if (tex->width > 0 && tex->height > 0 && tex->width != tex->height) {
-                if (tex->width > tex->height) {
-                    h = w * static_cast<f32>(tex->height) / static_cast<f32>(tex->width);
-                } else {
-                    w = h * static_cast<f32>(tex->width) / static_cast<f32>(tex->height);
-                }
-            }
-            pic->setAlpha(alpha);
-            pic->draw(sx - w * 0.5f, sy - h * 0.5f, w, h, false, false, false);
+            draw_tunic_icon(pic, tex, nullptr, sx, sy, scale, alpha);
         }
     }
 

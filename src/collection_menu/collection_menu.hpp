@@ -30,6 +30,7 @@ bool collection_tunic_equipped(int tunic);
 bool collection_tunic_equip(int tunic);
 const char* collection_tunic_name(int tunic);
 ResTIMG* collection_tunic_icon(int tunic);
+unsigned char collection_tunic_icon_item(int tunic);
 
 struct SaveService;
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc, const SaveService* save_svc, ModContext* mod_ctx, ModError* error);

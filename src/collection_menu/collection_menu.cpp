@@ -3,7 +3,7 @@
 #include "../compat/twilight_hd.hpp"
 
 #include <collection_lib/collection_lib.hpp>
-#include "d/actor/d_a_player.h"
+#include "d/actor/d_a_alink.h"
 #include "d/d_meter2_info.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 
@@ -158,9 +158,36 @@ ResTIMG* cl_load_icon(const char* path, IconArcRef iconArc);
 bool custom_equip_toggle(int id);
 void collectionlib_run_slot_registration();
 
-constexpr u16 kHeroClothesIconId = 0x5F;
-constexpr u16 kZoraArmorIconId = 0x4F;
-constexpr u16 kMagicArmorIconId = 0x42;
+DEFINE_HOOK(&daAlink_c::execute, CollectionTunicChangeExecuteHook);
+
+static bool s_safeClothesChange = false;
+
+static HookAction on_tunic_change_execute_pre(ModContext*, void* args, void*, void*) {
+    if (!s_safeClothesChange) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr) return HOOK_CONTINUE;
+    if (link->getClothesChangeWaitTimer() == 0) {
+        s_safeClothesChange = false;
+        return HOOK_CONTINUE;
+    }
+    link->loadModelDVD();
+    if (link->getClothesChangeWaitTimer() == 0) {
+        s_safeClothesChange = false;
+        return HOOK_CONTINUE;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static void start_safe_clothes_change(daAlink_c* link) {
+    s_safeClothesChange = true;
+    link->setClothesChange(0);
+}
+
+static bool link_can_change_clothes(daAlink_c* link) {
+    return link != nullptr && !link->checkWolf() && link->getClothesChangeWaitTimer() == 0 &&
+           !link->checkEventRun() && !link->checkRide() && !link->checkPlayerFly() &&
+           link->mLinkAcch.ChkGroundHit();
+}
 
 static int find_ordon_hero_tunic_id() {
     for (int pass = 0; pass < 2; ++pass) {
@@ -221,21 +248,23 @@ bool collection_tunic_equipped(int tunic) {
 
 bool collection_tunic_equip(int tunic) {
     if (!collection_tunic_unlocked(tunic)) return false;
-    daPy_py_c* pl = daPy_getPlayerActorClass();
-    if (pl == nullptr || pl->getClothesChangeWaitTimer() != 0) return false;
+    daAlink_c* link = daAlink_getAlinkActorClass();
     if (collection_tunic_equipped(tunic)) return true;
+    if (!link_can_change_clothes(link)) return false;
 
     if (tunic == COLLECTION_TUNIC_ORDON_HERO) {
         const int id = find_ordon_hero_tunic_id();
-        return id >= 0 && custom_equip_toggle(id);
+        const u8 before = dComIfGs_getSelectEquipClothes();
+        if (id < 0 || !custom_equip_toggle(id)) return false;
+        if (dComIfGs_getSelectEquipClothes() != before) start_safe_clothes_change(link);
+        return true;
     }
 
     const u8 item = native_tunic_item(tunic);
     if (item == dItemNo_NONE_e) return false;
     if (custom_equip_active(CE_TUNIC)) collectionlib_clear(CE_TUNIC);
     dMeter2Info_setCloth(item, false);
-    dComIfGs_setSelectEquipClothes(item);
-    pl->setClothesChange(0);
+    start_safe_clothes_change(link);
     Z2GetAudioMgr()->seStart(Z2SE_SY_ITEM_SET_X, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     dMeter2Info_set2DVibration();
     return true;
@@ -252,15 +281,16 @@ const char* collection_tunic_name(int tunic) {
     }
 }
 
+u8 collection_tunic_icon_item(int tunic) {
+    return tunic == COLLECTION_TUNIC_ORDON ? static_cast<u8>(dItemNo_NONE_e) : native_tunic_item(tunic);
+}
+
 ResTIMG* collection_tunic_icon(int tunic) {
     switch (tunic) {
     case COLLECTION_TUNIC_ORDON:
         return cl_load_icon(collection_linkle_active() ? "textures/ordon_clothes_linkle.bti"
                                                        : "textures/ordon_clothes.bti",
                             nullptr);
-    case COLLECTION_TUNIC_HERO: return cl_load_icon(nullptr, kHeroClothesIconId);
-    case COLLECTION_TUNIC_ZORA: return cl_load_icon(nullptr, kZoraArmorIconId);
-    case COLLECTION_TUNIC_MAGIC: return cl_load_icon(nullptr, kMagicArmorIconId);
     case COLLECTION_TUNIC_ORDON_HERO: return cl_load_icon("textures/clctres/ordonhero.bti", nullptr);
     default: return nullptr;
     }
@@ -275,6 +305,10 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     collectionlib_set_unequip_policy([]() { return true; });
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
     collectionlib_set_hd_layout_policy(&twilight_hd_collection);
+
+    if (hook_svc != nullptr) {
+        mods::hook::add_pre<CollectionTunicChangeExecuteHook>(hook_svc, on_tunic_change_execute_pre);
+    }
 
     collectionlib_set_register_callback([]() {
         register_starter_gear();
