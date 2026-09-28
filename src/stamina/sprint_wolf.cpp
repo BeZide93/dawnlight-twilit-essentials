@@ -21,6 +21,7 @@ DEFINE_HOOK(&daAlink_c::procWolfDashInit, SprintWolfDashInit);
 DEFINE_HOOK(&daAlink_c::setFaceBasicTexture, SprintWolfTongueFace);
 DEFINE_HOOK(&daAlink_c::setDoubleAnimeWolf, SprintWolfRunAnm);
 DEFINE_HOOK(&daAlink_c::procWolfAutoJumpInit, SprintWolfAutoJump);
+DEFINE_HOOK(&daAlink_c::setWolfAnmVoice, SprintWolfVoiceAnm);
 
 static constexpr int kBurstIntervalFrames = 90;
 static constexpr f32 kWolfSprintDrainRate = 0.90f;
@@ -30,6 +31,8 @@ static int  s_burstTimer     = 0;
 static bool s_wasSprinting   = false;
 static int  s_sprintRunFrames = 0;
 static bool s_tongueOut      = false;
+static int  s_burstCount     = 0;
+static int  s_dashVoiceSuppress = 0;
 
 static u32 s_sprintWindEmitter = 0;
 
@@ -168,11 +171,21 @@ static void wolf_dash_init_post(ModContext*, void* args, void*, void*) {
     s_burstTimer = 0;
 }
 
+static HookAction wolf_voice_anm_pre(ModContext*, void*, void*, void*) {
+    if (s_dashVoiceSuppress > 0) {
+        s_dashVoiceSuppress--;
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
 static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     refresh_wolf_tongue(link);
     if (!sprint_wanted(link)) {
         s_burstTimer = 0;
+        s_burstCount = 0;
+        s_dashVoiceSuppress = 0;
         if (s_wasSprinting && s_sprintRunFrames >= kMinSprintRunFrames && link) {
             link->field_0x30d0 = 0;
             link->offNoResetFlg1(daPy_py_c::FLG1_DASH_MODE);
@@ -203,6 +216,9 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
 
     if (++s_burstTimer < kBurstIntervalFrames) return HOOK_CONTINUE;
     s_burstTimer = 0;
+    if (s_burstCount++ > 0) {
+        s_dashVoiceSuppress = kBurstIntervalFrames + 10;
+    }
 
     link->procWolfDashInit();
     apply_dash_speed(link);
@@ -229,6 +245,7 @@ ModResult init_sprint_wolf(const HookService* hook_svc) {
     mods::hook::add_pre<SprintWolfRunAnm>(hook_svc, wolf_run_anm_pre);
     mods::hook::add_pre<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_pre);
     mods::hook::add_post<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_post);
+    mods::hook::add_pre<SprintWolfVoiceAnm>(hook_svc, wolf_voice_anm_pre);
     return MOD_OK;
 }
 
@@ -238,5 +255,7 @@ void shutdown_sprint_wolf() {
     s_sprintRunFrames = 0;
     s_tongueOut = false;
     s_wolfJumpBoost = false;
+    s_burstCount = 0;
+    s_dashVoiceSuppress = 0;
     stop_sprint_wind_effect();
 }
