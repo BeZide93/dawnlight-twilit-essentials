@@ -485,6 +485,7 @@ static ConfigVarHandle s_varBossRushSuggestedItems = 0;
 static ConfigVarHandle s_varBossRushRefillAfterFight = 0;
 static ConfigVarHandle s_varBossRushSeparateGanon = 0;
 static ConfigVarHandle s_varBossRushVanillaGear = 0;
+static ConfigVarHandle s_varBossRushPortal = 0;
 static ConfigVarHandle s_varBossRushTimer = 0;
 static ConfigVarHandle s_varBossRushShowBestTimer = 0;
 static ConfigVarHandle s_varBossRushBestTimes = 0;
@@ -552,6 +553,12 @@ static void on_boss_rush_suggested_items_changed(ModContext*, ConfigVarHandle, c
 static void on_boss_rush_refill_after_fight_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossRushRefillAfterFight = value->bool_value;
+    }
+}
+
+static void on_boss_rush_portal_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configBossRushPortal = value->bool_value;
     }
 }
 
@@ -1785,6 +1792,9 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     ui_add_toggle(left, "Separate Ganon fights", s_varBossRushSeparateGanon,
         "<p>Fights all 4 Ganon phases in sequence instead of separate statues.</p>");
 
+    ui_add_toggle(left, "Show boss rush portal", s_varBossRushPortal,
+        "<p>Shows the warp portal on the map while a Boss Rush is active.</p>");
+
 #if 0
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
@@ -2826,6 +2836,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descBossRushVanillaGear, &s_varBossRushVanillaGear) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varBossRushVanillaGear, &g_configBossRushVanillaGear);
             svc_config->subscribe(mod_ctx, s_varBossRushVanillaGear, on_boss_rush_vanilla_gear_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descBossRushPortal = CONFIG_VAR_DESC_INIT;
+        descBossRushPortal.name = "bossRushPortal";
+        descBossRushPortal.type = CONFIG_VAR_BOOL;
+        descBossRushPortal.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descBossRushPortal, &s_varBossRushPortal) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varBossRushPortal, &g_configBossRushPortal);
+            svc_config->subscribe(mod_ctx, s_varBossRushPortal, on_boss_rush_portal_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descBossRushTimer = CONFIG_VAR_DESC_INIT;

@@ -150,7 +150,7 @@ static void draw_portal_icon(f32 cx, f32 cy, f32 size, u8 alpha) {
 
     s_portalCursor->onUpdateFlag();
     s_portalCursor->setAlphaRate(static_cast<f32>(alpha) / 255.0f);
-    s_portalCursor->setPos(cx + 1.5f, cy);
+    s_portalCursor->setPos(cx - 0.8f, cy - 0.9f);
     s_portalCursor->setScale(size / s_portalCursorNativeW);
     s_portalCursor->draw();
     s_portalCursor->resetUpdateFlag();
@@ -238,7 +238,7 @@ void quick_access_wolf_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         if (slotIsSong[i]) {
             draw_wolf_icon(slotX[i], slotY[i], 32.0f * scale, alpha);
         } else {
-            draw_portal_icon(slotX[i], slotY[i], 32.0f * scale, alpha);
+            draw_portal_icon(slotX[i], slotY[i], 36.0f * scale, alpha);
         }
     }
 
