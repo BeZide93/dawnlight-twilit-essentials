@@ -134,7 +134,7 @@ void register_custom_shields() {
 }
 
 void register_custom_tunics() {
-    collectionlib_set_unequipped_tunic("/res/Object/alSumou.arc");
+    collectionlib_set_unequipped_tunic("/res/Object/alSumou.arc", 0xFFFF, dItemNo_WEAR_KOKIRI_e, 0xF0A878u);
 
     if (!collection_ordon_hero_enabled()) {
         return;

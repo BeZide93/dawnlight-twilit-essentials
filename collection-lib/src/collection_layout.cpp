@@ -293,13 +293,15 @@ int collectionlib_register_slot(const CustomEquipDef& def) {
     return def.item != 0 ? set_custom(r, def.item, def) : add_next(r, def);
 }
 
-int collectionlib_set_unequipped_tunic(const char* modelArc, u32 bodyFileId, u8 baseItem) {
+int collectionlib_set_unequipped_tunic(const char* modelArc, u32 bodyFileId, u8 baseItem,
+                                       unsigned int padColor) {
     CustomEquipDef d{};
     d.kind = CE_TUNIC;
     d.item = kClUnequippedTunicItem;
     d.modelArc = modelArc;
     d.modelFileId = bodyFileId;
     d.baseItem = baseItem;
+    d.padColor = padColor;
     s_unequippedTunicId = custom_equip_upsert(d);
     return s_unequippedTunicId;
 }
