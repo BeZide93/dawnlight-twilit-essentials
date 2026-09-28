@@ -100,6 +100,7 @@ constexpr u16 kClUnequipMsg = 0x437;
 constexpr u16 kClItemNameMsg = 0x165;
 constexpr int kClMaxCols = 6;
 constexpr u8  kClNoCell = 0xFF;
+constexpr u8  kClUnequippedTunicItem = 0xFF;
 
 enum class ClColType : u8 { Empty, Native, Custom };
 
@@ -138,6 +139,8 @@ bool layout_uses_base_item(u8 itemNo);
 
 bool layout_has_stand_in(u8 itemNo);
 
+int layout_unequipped_tunic();
+
 void collectionlib_run_slot_registration();
 
 u16 layout_name_msg(int r, u8 x);
@@ -151,6 +154,7 @@ bool custom_equip_unlocked(int id);
 bool custom_equip_equipped(int id);
 
 bool custom_equip_toggle(int id);
+bool custom_equip_unequip_tunic();
 ResTIMG* custom_equip_icon(int id);
 u8 custom_equip_resolved_base(const CustomEquipDef& def);
 

@@ -1334,6 +1334,18 @@ bool custom_equip_equipped(int id) {
     return s_activeId[d->kind] < 0 && base != dItemNo_NONE_e && current_vanilla(d->kind) == base;
 }
 
+bool custom_equip_unequip_tunic() {
+    const int id = layout_unequipped_tunic();
+    if (id < 0 || id >= s_count || !custom_equip_has_model(id) || s_activeId[CE_TUNIC] == id) {
+        return false;
+    }
+    s_equipDebounce = 8;
+    custom_equip_activate(id);
+    set_vanilla_equip(CE_TUNIC, custom_equip_resolved_base(s_entries[id].def), false);
+    equip_sound(false);
+    return true;
+}
+
 bool custom_equip_toggle(int id) {
     if (id < 0 || id >= s_count || s_equipDebounce > 0) return false;
     const CustomEquipDef& d = s_entries[id].def;
@@ -1342,7 +1354,8 @@ bool custom_equip_toggle(int id) {
 
     if (custom_equip_equipped(id)) {
 
-        if (!cl_unequip_enabled() || kind == CE_TUNIC) return false;
+        if (!cl_unequip_enabled()) return false;
+        if (kind == CE_TUNIC) return custom_equip_unequip_tunic();
         s_equipDebounce = 8;
         if (s_activeId[kind] == id) custom_equip_clear(kind);
         set_vanilla_equip(kind, dItemNo_NONE_e, true);

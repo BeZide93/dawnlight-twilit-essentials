@@ -45,6 +45,10 @@ int collectionlib_add_next_tunic_slot(const CustomEquipDef& def);
 
 int collectionlib_register_slot(const CustomEquipDef& def);
 
+int collectionlib_set_unequipped_tunic(const char* modelArc, u32 bodyFileId = 0xFFFF,
+                                       u8 baseItem = dItemNo_WEAR_KOKIRI_e);
+bool collectionlib_unequipped_tunic_active();
+
 int  collectionlib_remove_slot(u8 row, u8 item);
 int  collectionlib_clear_all_slots();
 CollectionSlot collectionlib_get_slot(u8 row, u8 item);

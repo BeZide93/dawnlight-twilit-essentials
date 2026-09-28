@@ -22,6 +22,7 @@ const u8 kSpareCells[kClRows][6] = {
 };
 
 ClColumn s_cols[kClRows][kClMaxCols + 1];
+int s_unequippedTunicId = -1;
 void (*s_registerFn)() = nullptr;
 bool s_registering = false;
 
@@ -46,6 +47,7 @@ u8 alloc_cell(int r) {
 }
 
 void reset_native() {
+    s_unequippedTunicId = -1;
     for (auto& row : s_cols) {
         for (auto& col : row) col = ClColumn{};
     }
@@ -97,6 +99,7 @@ int add_next(int r, const CustomEquipDef& def) {
 }
 
 bool referenced(int id) {
+    if (id == s_unequippedTunicId) return true;
     for (auto& row : s_cols) {
         for (auto& col : row) {
             if (col.type == ClColType::Custom && col.customId == id) return true;
@@ -155,6 +158,11 @@ int layout_custom_at_cell(int r, u8 x) {
 }
 
 void layout_on_custom_removed(int id) {
+    if (s_unequippedTunicId == id) {
+        s_unequippedTunicId = -1;
+    } else if (s_unequippedTunicId > id) {
+        s_unequippedTunicId--;
+    }
     for (auto& row : s_cols) {
         for (auto& col : row) {
             if (col.type != ClColType::Custom) continue;
@@ -284,6 +292,23 @@ int collectionlib_register_slot(const CustomEquipDef& def) {
     if (r < 0 || r >= kClRows) return -1;
     return def.item != 0 ? set_custom(r, def.item, def) : add_next(r, def);
 }
+
+int collectionlib_set_unequipped_tunic(const char* modelArc, u32 bodyFileId, u8 baseItem) {
+    CustomEquipDef d{};
+    d.kind = CE_TUNIC;
+    d.item = kClUnequippedTunicItem;
+    d.modelArc = modelArc;
+    d.modelFileId = bodyFileId;
+    d.baseItem = baseItem;
+    s_unequippedTunicId = custom_equip_upsert(d);
+    return s_unequippedTunicId;
+}
+
+bool collectionlib_unequipped_tunic_active() {
+    return s_unequippedTunicId >= 0 && custom_equip_active_id(CE_TUNIC) == s_unequippedTunicId;
+}
+
+int layout_unequipped_tunic() { return s_unequippedTunicId; }
 
 int collectionlib_remove_slot(u8 row, u8 item) {
     return CollectionSlotRef{row, item}.remove() ? 0 : -1;

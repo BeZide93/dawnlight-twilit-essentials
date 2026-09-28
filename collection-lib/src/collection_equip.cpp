@@ -68,6 +68,10 @@ void set_vanilla(int r, u8 item) {
     }
 }
 
+bool row_can_unequip(int r) {
+    return cl_unequip_enabled() && (r != 2 || layout_unequipped_tunic() >= 0);
+}
+
 int custom_under_cursor(dMenu_Collect2D_c* c) {
     if (c->mCursorY >= kClRows) return -1;
     return layout_custom_at_cell(c->mCursorY, c->mCursorX);
@@ -89,9 +93,13 @@ HookAction handle_change(void* args, int r) {
     const u8 target = native_target(r, x);
 
     if (!custom_equip_active(kind)) {
-        if (r != 2 && target != dItemNo_NONE_e && current_equip(r) == target && cl_unequip_enabled()) {
-            set_vanilla(r, dItemNo_NONE_e);
-            equip_feedback(false);
+        if (target != dItemNo_NONE_e && current_equip(r) == target && row_can_unequip(r)) {
+            if (r == 2) {
+                if (!custom_equip_unequip_tunic()) return HOOK_CONTINUE;
+            } else {
+                set_vanilla(r, dItemNo_NONE_e);
+                equip_feedback(false);
+            }
             screen_refresh_frames(c);
             return HOOK_SKIP_ORIGINAL;
         }
@@ -147,12 +155,12 @@ void on_wait_proc_post(ModContext*, void* args, void*, void*) {
     if (id >= 0) {
         u16 str = 0;
         if (!c->mIsWolf && custom_equip_unlocked(id)) {
-            str = (r != 2 && cl_unequip_enabled() && custom_equip_equipped(id)) ? kClUnequipMsg : kClEquipMsg;
+            str = (row_can_unequip(r) && custom_equip_equipped(id)) ? kClUnequipMsg : kClEquipMsg;
         }
         c->setAButtonString(str);
         return;
     }
-    if (r != 2 && cl_unequip_enabled() && !c->mIsWolf && layout_col_of_cell(r, x) != 0 &&
+    if (row_can_unequip(r) && !c->mIsWolf && layout_col_of_cell(r, x) != 0 &&
         c->field_0x22d[x][r] != 0 && native_cell_equipped(r, x)) {
         c->setAButtonString(kClUnequipMsg);
     }
