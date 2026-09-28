@@ -11,9 +11,9 @@
 #include <cmath>
 #include <cstdio>
 
-static const f32 BOX_HALF = 20.0f;
-static const f32 BOX_SPACING = 56.0f;
-static const f32 BAR_Y = 60.0f;
+static const f32 BOX_HALF = QA_STRIP_BOX_HALF;
+static const f32 BOX_SPACING = QA_STRIP_BOX_SPACING;
+static const f32 BAR_Y = QA_STRIP_BAR_Y;
 
 static f32 s_stripScale[QA_QUICK_SLOTS] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -100,6 +100,11 @@ static bool item_state_badge(u8 itemNo) {
 
 void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
+    qa_pointer_set_strip_center(screenW * 0.5f);
+    if (qa_tunic_page_active()) {
+        quick_access_tunic_strip_draw(screenW, screenH, alpha);
+        return;
+    }
     qa_hud_scale_begin(screenW * 0.5f, 0.0f);
     const f32 centerX = screenW * 0.5f;
     const f32 centerY = BAR_Y;
@@ -187,6 +192,7 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
         }
     }
 
+    qa_draw_page_buttons_strip(centerX, BAR_Y + slide, alpha);
     quick_access_strip_cursor_present();
     qa_hud_scale_end();
     qa_hud_scale_begin(screenW * 0.5f, screenH);

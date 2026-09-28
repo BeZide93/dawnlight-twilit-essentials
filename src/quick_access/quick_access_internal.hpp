@@ -28,6 +28,9 @@ enum QuickAccessAppearance {
 };
 
 static const int QA_TAP_FRAMES = 8;
+static const f32 QA_STRIP_BOX_HALF = 20.0f;
+static const f32 QA_STRIP_BOX_SPACING = 56.0f;
+static const f32 QA_STRIP_BAR_Y = 60.0f;
 
 extern bool s_menuOpen;
 extern bool s_editMode;
@@ -104,6 +107,23 @@ void qa_tunic_confirm();
 void qa_draw_page_buttons(f32 centerX, f32 centerY, u8 alpha);
 void quick_access_tunic_draw(f32 centerX, f32 centerY, u8 alpha);
 void quick_access_tunics_shutdown();
+void qa_page_toggle();
+bool qa_page_button_rect(f32* left, f32* top, f32* right, f32* bottom);
+void qa_tunic_slot_center(int tunic, f32 centerX, f32 centerY, f32* x, f32* y);
+int qa_tunic_slot_count();
+void qa_tunic_hover(int tunic);
+void qa_tunic_pick(int tunic);
+void qa_pointer_hover_item_slot(int slot);
+void qa_pointer_pick_item_slot(int slot);
+void qa_pointer_close_menu();
+void qa_pointer_set_radial_center(f32 centerX, f32 centerY);
+void qa_pointer_set_strip_center(f32 centerX);
+void qa_pointer_hover_strip_slot(int slot);
+void qa_pointer_pick_strip_slot(int slot);
+void qa_tunic_strip_cycle(int dir);
+f32 qa_tunic_strip_slot_x(int tunic, f32 centerX);
+void quick_access_tunic_strip_draw(f32 screenW, f32 screenH, u8 alpha);
+void qa_draw_page_buttons_strip(f32 centerX, f32 y, u8 alpha);
 
 bool quick_access_strip_cycle(int dir);
 void quick_access_strip_reset_selection();

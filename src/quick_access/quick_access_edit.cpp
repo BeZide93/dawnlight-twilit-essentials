@@ -806,6 +806,9 @@ static const int kQaPointerContext = 0x5141;
 static const u16 kQaPointerSlotTarget = 0x100;
 static const u16 kQaPointerHintTarget = 0x200;
 static const u16 kQaPointerCustomizeTarget = 0x300;
+static const u16 kQaPointerPageTarget = 0x400;
+static const u16 kQaPointerRadialTarget = 0x500;
+static const f32 kQaRadialSlotRadius = 92.0f;
 static const f32 kQaPointerHintPadX = 8.0f;
 static const f32 kQaPointerHintTop = 16.0f;
 static const f32 kQaPointerHintBottom = 10.0f;
@@ -843,8 +846,27 @@ static f32 s_menuHintAnchorX = 0.0f;
 static f32 s_menuHintAnchorY = 0.0f;
 static bool s_menuHintValid = false;
 
+static f32 s_radialCenterX = 0.0f;
+static f32 s_radialCenterY = 0.0f;
+static bool s_radialValid = false;
+static f32 s_stripCenterX = 0.0f;
+static bool s_stripValid = false;
+
 void qa_pointer_clear_menu_hint() {
     s_menuHintValid = false;
+    s_radialValid = false;
+    s_stripValid = false;
+}
+
+void qa_pointer_set_strip_center(f32 centerX) {
+    s_stripCenterX = centerX;
+    s_stripValid = true;
+}
+
+void qa_pointer_set_radial_center(f32 centerX, f32 centerY) {
+    s_radialCenterX = centerX;
+    s_radialCenterY = centerY;
+    s_radialValid = true;
 }
 
 void qa_pointer_set_menu_hint(f32 left, f32 right, f32 y, f32 anchorX, f32 anchorY) {
@@ -895,6 +917,121 @@ static void menu_hint_pointer_update() {
     }
 }
 
+static void radial_pointer_update() {
+    if (!s_menuOpen || !s_radialValid || s_menuAlpha < 0.9f) {
+        return;
+    }
+    s_pointerBeginContext(kQaPointerContext);
+    const f32 scale = qa_user_hud_scale();
+    const f32 cx = s_radialCenterX;
+    const f32 cy = s_radialCenterY;
+
+    f32 left = 0.0f;
+    f32 top = 0.0f;
+    f32 right = 0.0f;
+    f32 bottom = 0.0f;
+    if (qa_page_button_rect(&left, &top, &right, &bottom) &&
+        pointer_hits_cell((left + right) * 0.5f, (top + bottom) * 0.5f, (right - left) * 0.5f,
+                          (bottom - top) * 0.5f, cx, cy, scale)) {
+        s_pointerSetHoverTarget(kQaPointerPageTarget);
+        if (s_pointerConsumeClick()) {
+            qa_page_toggle();
+        }
+        return;
+    }
+
+    if (qa_tunic_page_active()) {
+        for (int t = 0; t < qa_tunic_slot_count(); t++) {
+            f32 x = 0.0f;
+            f32 y = 0.0f;
+            qa_tunic_slot_center(t, cx, cy, &x, &y);
+            if (!pointer_hits_cell(x, y, kQaPointerSlotHalf, kQaPointerSlotHalf, cx, cy, scale)) {
+                continue;
+            }
+            s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + t));
+            qa_tunic_hover(t);
+            if (s_pointerConsumeClick()) {
+                qa_tunic_pick(t);
+            }
+            return;
+        }
+        return;
+    }
+
+    const f32 slotPos[QA_QUICK_SLOTS][2] = {
+        {cx, cy - kQaRadialSlotRadius},
+        {cx, cy + kQaRadialSlotRadius},
+        {cx - kQaRadialSlotRadius, cy},
+        {cx + kQaRadialSlotRadius, cy},
+    };
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
+        if (!pointer_hits_cell(slotPos[i][0], slotPos[i][1], kQaPointerSlotHalf, kQaPointerSlotHalf,
+                               cx, cy, scale)) {
+            continue;
+        }
+        s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + i));
+        qa_pointer_hover_item_slot(i);
+        if (s_pointerConsumeClick()) {
+            qa_pointer_pick_item_slot(i);
+        }
+        return;
+    }
+}
+
+static void strip_pointer_update() {
+    if (!s_menuOpen || !s_stripValid || s_menuAlpha < 0.9f) {
+        return;
+    }
+    s_pointerBeginContext(kQaPointerContext);
+    const f32 scale = qa_user_hud_scale();
+    const f32 cx = s_stripCenterX;
+
+    f32 left = 0.0f;
+    f32 top = 0.0f;
+    f32 right = 0.0f;
+    f32 bottom = 0.0f;
+    if (qa_page_button_rect(&left, &top, &right, &bottom) &&
+        pointer_hits_cell((left + right) * 0.5f, (top + bottom) * 0.5f, (right - left) * 0.5f,
+                          (bottom - top) * 0.5f, cx, 0.0f, scale)) {
+        s_pointerSetHoverTarget(kQaPointerPageTarget);
+        if (s_pointerConsumeClick()) {
+            qa_page_toggle();
+        }
+        return;
+    }
+
+    if (qa_tunic_page_active()) {
+        for (int t = 0; t < qa_tunic_slot_count(); t++) {
+            if (!pointer_hits_cell(qa_tunic_strip_slot_x(t, cx), QA_STRIP_BAR_Y, kQaPointerSlotHalf,
+                                   kQaPointerSlotHalf, cx, 0.0f, scale)) {
+                continue;
+            }
+            s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + t));
+            qa_tunic_hover(t);
+            if (s_pointerConsumeClick()) {
+                qa_tunic_pick(t);
+            }
+            return;
+        }
+        return;
+    }
+
+    const f32 span = (QA_QUICK_SLOTS - 1) * QA_STRIP_BOX_SPACING;
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
+        const f32 x = cx - span * 0.5f + static_cast<f32>(i) * QA_STRIP_BOX_SPACING;
+        if (!pointer_hits_cell(x, QA_STRIP_BAR_Y, kQaPointerSlotHalf, kQaPointerSlotHalf, cx, 0.0f,
+                               scale)) {
+            continue;
+        }
+        s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + i));
+        qa_pointer_hover_strip_slot(i);
+        if (s_pointerConsumeClick()) {
+            qa_pointer_pick_strip_slot(i);
+        }
+        return;
+    }
+}
+
 void quick_access_edit_pointer_update() {
     if (s_pointerBeginContext == nullptr ||
         (s_pointerHitRect == nullptr && s_pointerState == nullptr) ||
@@ -903,6 +1040,8 @@ void quick_access_edit_pointer_update() {
     }
     if (!s_editMode) {
         menu_hint_pointer_update();
+        radial_pointer_update();
+        strip_pointer_update();
         return;
     }
     if (s_menuAlpha < 0.01f || s_pointerLayoutW <= 0.0f) {

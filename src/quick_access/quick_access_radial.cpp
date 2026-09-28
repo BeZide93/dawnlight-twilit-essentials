@@ -201,6 +201,7 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate, boo
 
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     (void)glow;
+    qa_pointer_set_radial_center(centerX, centerY);
     if (qa_tunic_page_active()) {
         quick_access_tunic_draw(centerX, centerY, alpha);
         return;

@@ -43,6 +43,8 @@ J2DPicture* s_shoulderPic = nullptr;
 const ResTIMG* s_shoulderTex = nullptr;
 bool s_lPrev = false;
 bool s_rPrev = false;
+bool s_pageBtnValid = false;
+f32 s_pageBtnRect[4] = {};
 
 f32 tunic_angle(int tunic) {
     return -kPi * 0.5f + static_cast<f32>(tunic) * (2.0f * kPi / COLLECTION_TUNIC_COUNT);
@@ -144,21 +146,41 @@ void draw_button_letter(const char* letter, f32 cx, f32 cy, f32 h, u8 alpha) {
     if (port != nullptr) port->setup2D();
 }
 
-void draw_shoulder_button(bool left, const char* label, f32 anchorX, f32 y, u8 alpha) {
-    const f32 btnH = 26.0f;
-    const f32 fontW = 9.0f;
-    const f32 fontH = 11.5f;
-    const f32 gap = 6.0f;
+constexpr f32 kShoulderBtnH = 26.0f;
+constexpr f32 kShoulderFontW = 9.0f;
+constexpr f32 kShoulderFontH = 11.5f;
+constexpr f32 kShoulderGap = 6.0f;
 
-    f32 btnW = btnH * 2.0f;
+f32 shoulder_button_width() {
     J2DPicture* pic = shoulder_picture();
     if (pic != nullptr && s_shoulderTex->height > 0) {
-        btnW = btnH * static_cast<f32>(s_shoulderTex->width) / static_cast<f32>(s_shoulderTex->height);
+        return kShoulderBtnH * static_cast<f32>(s_shoulderTex->width) /
+               static_cast<f32>(s_shoulderTex->height);
     }
+    return kShoulderBtnH * 2.0f;
+}
+
+f32 shoulder_button_total_width(const char* label) {
+    return shoulder_button_width() + kShoulderGap + qa_get_text_width(label, kShoulderFontW);
+}
+
+void draw_shoulder_button(bool left, const char* label, f32 anchorX, f32 y, u8 alpha) {
+    const f32 btnH = kShoulderBtnH;
+    const f32 fontW = kShoulderFontW;
+    const f32 fontH = kShoulderFontH;
+    const f32 gap = kShoulderGap;
+
+    const f32 btnW = shoulder_button_width();
+    J2DPicture* pic = shoulder_picture();
     const f32 labelW = qa_get_text_width(label, fontW);
 
     const f32 btnX = left ? anchorX : anchorX - btnW;
     const f32 labelX = left ? btnX + btnW + gap : btnX - gap - labelW;
+    s_pageBtnRect[0] = left ? btnX : labelX;
+    s_pageBtnRect[1] = y;
+    s_pageBtnRect[2] = left ? labelX + labelW : btnX + btnW;
+    s_pageBtnRect[3] = y + btnH;
+    s_pageBtnValid = true;
 
     if (pic != nullptr) {
         pic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
@@ -194,6 +216,38 @@ void draw_tunic_icon(J2DPicture* pic, const ResTIMG* tex, J2DPicture* pic2, f32 
     }
 }
 
+int equipped_or_first_tunic() {
+    int first = SLOT_NONE;
+    for (int t = 0; t < COLLECTION_TUNIC_COUNT; t++) {
+        if (!collection_tunic_unlocked(t)) continue;
+        if (collection_tunic_equipped(t)) return t;
+        if (first == SLOT_NONE) first = t;
+    }
+    return first;
+}
+
+void draw_tunic_slot(int t, f32 sx, f32 sy, f32 baseSize, f32 scale, u8 alpha, bool selected) {
+    if (!collection_tunic_unlocked(t)) {
+        qa_draw_collection_slot(sx, sy, baseSize, static_cast<u8>(alpha * 0.35f), false, false);
+        return;
+    }
+    qa_draw_collection_slot(sx, sy, baseSize * scale, alpha, selected, collection_tunic_equipped(t));
+
+    const u8 iconItem = collection_tunic_icon_item(t);
+    J2DPicture* itemPic = nullptr;
+    ResTIMG* itemImg = nullptr;
+    J2DPicture* itemPic2 = nullptr;
+    if (iconItem != dItemNo_NONE_e && qa_get_item_icon(iconItem, &itemPic, &itemImg, &itemPic2)) {
+        draw_tunic_icon(itemPic, itemImg, itemPic2, sx, sy, scale, alpha);
+        return;
+    }
+    const ResTIMG* tex = nullptr;
+    J2DPicture* pic = tunic_picture(t, &tex);
+    if (pic != nullptr) {
+        draw_tunic_icon(pic, tex, nullptr, sx, sy, scale, alpha);
+    }
+}
+
 int nearest_unlocked_tunic(f32 angle) {
     int best = SLOT_NONE;
     f32 bestDiff = 10.0f;
@@ -222,6 +276,49 @@ void qa_page_reset() {
     s_rPrev = true;
 }
 
+void qa_page_toggle() {
+    s_page = s_page == QA_PAGE_ITEMS ? QA_PAGE_TUNICS : QA_PAGE_ITEMS;
+    s_tunicSelected = SLOT_NONE;
+    s_selectedSlot = SLOT_NONE;
+    play_page_se();
+}
+
+bool qa_page_button_rect(f32* left, f32* top, f32* right, f32* bottom) {
+    if (!s_pageBtnValid) return false;
+    *left = s_pageBtnRect[0];
+    *top = s_pageBtnRect[1];
+    *right = s_pageBtnRect[2];
+    *bottom = s_pageBtnRect[3];
+    return true;
+}
+
+void qa_tunic_slot_center(int tunic, f32 centerX, f32 centerY, f32* x, f32* y) {
+    tunic_slot_pos(tunic, centerX, centerY, x, y);
+}
+
+int qa_tunic_slot_count() {
+    return COLLECTION_TUNIC_COUNT;
+}
+
+void qa_tunic_hover(int tunic) {
+    if (tunic < 0 || tunic >= COLLECTION_TUNIC_COUNT || tunic == s_tunicSelected ||
+        !collection_tunic_unlocked(tunic)) {
+        return;
+    }
+    s_tunicSelected = tunic;
+    Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+}
+
+void qa_tunic_pick(int tunic) {
+    if (tunic < 0 || tunic >= COLLECTION_TUNIC_COUNT || !collection_tunic_unlocked(tunic)) {
+        Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        return;
+    }
+    s_tunicSelected = tunic;
+    qa_tunic_confirm();
+    qa_pointer_close_menu();
+}
+
 bool qa_page_input(interface_of_controller_pad& pad) {
     const bool lRaw = controls_l_shoulder_raw_held();
     const bool lTrig = (pad.mPressedButtonFlags & PAD_TRIGGER_L) != 0 || (lRaw && !s_lPrev);
@@ -230,18 +327,8 @@ bool qa_page_input(interface_of_controller_pad& pad) {
     s_rPrev = false;
     const bool rTrig = (pad.mPressedButtonFlags & PAD_TRIGGER_R) != 0 || rRawTrig;
 
-    if (s_page == QA_PAGE_ITEMS && rTrig) {
-        s_page = QA_PAGE_TUNICS;
-        s_tunicSelected = SLOT_NONE;
-        s_selectedSlot = SLOT_NONE;
-        play_page_se();
-        return true;
-    }
-    if (s_page == QA_PAGE_TUNICS && lTrig) {
-        s_page = QA_PAGE_ITEMS;
-        s_tunicSelected = SLOT_NONE;
-        s_selectedSlot = SLOT_NONE;
-        play_page_se();
+    if ((s_page == QA_PAGE_ITEMS && rTrig) || (s_page == QA_PAGE_TUNICS && lTrig)) {
+        qa_page_toggle();
         return true;
     }
     return false;
@@ -267,7 +354,75 @@ void qa_tunic_confirm() {
     }
 }
 
+void qa_tunic_strip_cycle(int dir) {
+    int t = s_tunicSelected == SLOT_NONE ? equipped_or_first_tunic() : s_tunicSelected;
+    if (t == SLOT_NONE) return;
+    for (int i = 0; i < COLLECTION_TUNIC_COUNT; i++) {
+        t = (t + dir + COLLECTION_TUNIC_COUNT) % COLLECTION_TUNIC_COUNT;
+        if (collection_tunic_unlocked(t)) break;
+    }
+    if (t != s_tunicSelected) {
+        s_tunicSelected = t;
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
+}
+
+f32 qa_tunic_strip_slot_x(int tunic, f32 centerX) {
+    const f32 span = (COLLECTION_TUNIC_COUNT - 1) * QA_STRIP_BOX_SPACING;
+    return centerX - span * 0.5f + static_cast<f32>(tunic) * QA_STRIP_BOX_SPACING;
+}
+
+void qa_draw_page_buttons_strip(f32 centerX, f32 y, u8 alpha) {
+    s_pageBtnValid = false;
+    const f32 edge = 148.0f;
+    const f32 btnY = y - kShoulderBtnH * 0.5f;
+    if (s_page == QA_PAGE_TUNICS) {
+        draw_shoulder_button(true, "Items", centerX - edge - shoulder_button_total_width("Items"),
+                             btnY, alpha);
+    } else {
+        draw_shoulder_button(false, "Tunics", centerX + edge + shoulder_button_total_width("Tunics"),
+                             btnY, alpha);
+    }
+}
+
+void quick_access_tunic_strip_draw(f32 screenW, f32 screenH, u8 alpha) {
+    (void)screenH;
+    qa_hud_scale_begin(screenW * 0.5f, 0.0f);
+    const f32 centerX = screenW * 0.5f;
+    const f32 slide = -(1.0f - s_menuAlpha) * 16.0f;
+    const f32 cy = QA_STRIP_BAR_Y + slide;
+
+    qa_draw_msg_window(centerX - 140.0f, 34.0f + slide, 280.0f, 52.0f, s_menuAlpha);
+
+    if (s_tunicSelected == SLOT_NONE) {
+        s_tunicSelected = equipped_or_first_tunic();
+    }
+
+    for (int t = 0; t < COLLECTION_TUNIC_COUNT; t++) {
+        const bool selected = s_tunicSelected == t;
+        s_tunicScale[t] += ((selected ? 1.16f : 1.0f) - s_tunicScale[t]) * 0.28f;
+        draw_tunic_slot(t, qa_tunic_strip_slot_x(t, centerX), cy, QA_STRIP_BOX_HALF * 2.0f,
+                        s_tunicScale[t], alpha, selected);
+    }
+
+    if (s_tunicSelected != SLOT_NONE) {
+        quick_access_strip_cursor_request(qa_tunic_strip_slot_x(s_tunicSelected, centerX), cy);
+        const char* label = collection_tunic_name(s_tunicSelected);
+        const f32 fontW = 9.0f;
+        const f32 fontH = 11.5f;
+        const f32 textW = qa_get_text_width(label, fontW);
+        qa_draw_text(label, centerX - textW * 0.5f, QA_STRIP_BAR_Y - QA_STRIP_BOX_HALF - 12.0f + slide,
+                     fontW, fontH, JUtility::TColor(255, 248, 210, alpha),
+                     JUtility::TColor(235, 185, 65, alpha), alpha);
+    }
+
+    qa_draw_page_buttons_strip(centerX, cy, alpha);
+    quick_access_strip_cursor_present();
+    qa_hud_scale_end();
+}
+
 void qa_draw_page_buttons(f32 centerX, f32 centerY, u8 alpha) {
+    s_pageBtnValid = false;
     const f32 y = centerY - 150.0f;
     if (s_page == QA_PAGE_TUNICS) {
         draw_shoulder_button(true, "Items", centerX - 150.0f, y, alpha);
@@ -289,35 +444,11 @@ void quick_access_tunic_draw(f32 centerX, f32 centerY, u8 alpha) {
     f32 pos[COLLECTION_TUNIC_COUNT][2];
     for (int t = 0; t < COLLECTION_TUNIC_COUNT; t++) {
         tunic_slot_pos(t, centerX, centerY, &pos[t][0], &pos[t][1]);
-        const f32 sx = pos[t][0];
-        const f32 sy = pos[t][1];
-
-        if (!collection_tunic_unlocked(t)) {
-            qa_draw_collection_slot(sx, sy, 40.0f, static_cast<u8>(alpha * 0.35f), false, false);
-            continue;
-        }
-
         const bool selected = s_tunicSelected == t;
-        s_tunicScale[t] += ((selected ? 1.22f : 1.0f) - s_tunicScale[t]) * 0.28f;
-        const f32 scale = s_tunicScale[t];
-        qa_draw_collection_slot(sx, sy, 40.0f * scale, alpha, selected,
-                                collection_tunic_equipped(t));
-
-        const u8 iconItem = collection_tunic_icon_item(t);
-        J2DPicture* itemPic = nullptr;
-        ResTIMG* itemImg = nullptr;
-        J2DPicture* itemPic2 = nullptr;
-        if (iconItem != dItemNo_NONE_e &&
-            qa_get_item_icon(iconItem, &itemPic, &itemImg, &itemPic2)) {
-            draw_tunic_icon(itemPic, itemImg, itemPic2, sx, sy, scale, alpha);
-            continue;
+        if (collection_tunic_unlocked(t)) {
+            s_tunicScale[t] += ((selected ? 1.22f : 1.0f) - s_tunicScale[t]) * 0.28f;
         }
-
-        const ResTIMG* tex = nullptr;
-        J2DPicture* pic = tunic_picture(t, &tex);
-        if (pic != nullptr) {
-            draw_tunic_icon(pic, tex, nullptr, sx, sy, scale, alpha);
-        }
+        draw_tunic_slot(t, pos[t][0], pos[t][1], 40.0f, s_tunicScale[t], alpha, selected);
     }
 
     dSelect_cursor_c* cursor = qa_sel_cursor(0);

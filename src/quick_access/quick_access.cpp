@@ -1902,6 +1902,67 @@ void qa_edit_pointer_close() {
     Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_CANCEL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
 }
 
+void qa_pointer_hover_item_slot(int slot) {
+    u8 active[QA_QUICK_SLOTS];
+    const int count = qa_get_active_items(active);
+    if (!s_menuOpen || slot < 0 || slot >= count || slot == s_selectedSlot) {
+        return;
+    }
+    s_selectedSlot = slot;
+    play_cursor_se();
+}
+
+void qa_pointer_pick_item_slot(int slot) {
+    u8 active[QA_QUICK_SLOTS];
+    const int count = qa_get_active_items(active);
+    if (!s_menuOpen || slot < 0 || slot >= count) {
+        return;
+    }
+    if (s_aimItem != QA_ITEM_NONE) {
+        qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
+    }
+    s_assignedItem = active[slot];
+    qa_custom_store();
+    play_ok_se();
+    s_dpadCancelLatch = true;
+    close_menu();
+}
+
+void qa_pointer_hover_strip_slot(int slot) {
+    if (!s_menuOpen || slot < 0 || slot >= QA_QUICK_SLOTS || slot == s_selectedSlot) {
+        return;
+    }
+    s_selectedSlot = slot;
+    play_cursor_se();
+}
+
+void qa_pointer_pick_strip_slot(int slot) {
+    if (!s_menuOpen || slot < 0 || slot >= QA_QUICK_SLOTS) {
+        return;
+    }
+    const u8 sel = qa_custom_item(slot);
+    if (sel == QA_ITEM_NONE || !qa_is_item_available(sel)) {
+        play_error_se();
+        return;
+    }
+    if (s_aimItem != QA_ITEM_NONE) {
+        qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
+    }
+    s_assignedItem = sel;
+    qa_custom_store();
+    play_ok_se();
+    s_dpadCancelLatch = true;
+    close_menu();
+}
+
+void qa_pointer_close_menu() {
+    if (!s_menuOpen) {
+        return;
+    }
+    s_dpadCancelLatch = true;
+    close_menu();
+}
+
 static const int QA_REPEAT_START_INTERVAL = 8;
 static const int QA_REPEAT_ACCEL_STEP = 1;
 static const int QA_REPEAT_MIN_INTERVAL = 2;
@@ -2339,7 +2400,11 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     }
 
     if (!dpadDownHeld) {
-        if (s_menuOpen) {
+        if (s_menuOpen && qa_tunic_page_active()) {
+            s_menuOpen = false;
+            qa_tunic_confirm();
+            close_menu();
+        } else if (s_menuOpen) {
             s_menuOpen = false;
             if (s_aimItem != QA_ITEM_NONE) {
                 qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
@@ -2375,10 +2440,42 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
                 s_selectedSlot >= QA_QUICK_SLOTS) {
                 quick_access_strip_reset_selection();
             }
+            qa_page_reset();
             qa_invalidate_msg_window();
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
         }
         reset_repeat_state();
+        suppress_menu_buttons(pad);
+        return;
+    }
+
+    qa_page_input(pad);
+
+    if (qa_tunic_page_active()) {
+        if ((pad.mPressedButtonFlags & PAD_BUTTON_B) != 0) {
+            pad.mPressedButtonFlags &= ~PAD_BUTTON_B;
+            pad.mButtonFlags &= ~PAD_BUTTON_B;
+            s_dpadCancelLatch = true;
+            close_menu();
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_CANCEL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            suppress_menu_buttons(pad);
+            return;
+        }
+        if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_tunic_has_selection()) {
+            pad.mPressedButtonFlags &= ~PAD_BUTTON_A;
+            pad.mButtonFlags &= ~PAD_BUTTON_A;
+            qa_tunic_confirm();
+            s_dpadCancelLatch = true;
+            close_menu();
+            suppress_menu_buttons(pad);
+            return;
+        }
+        update_stick_repeat(stickX, qa_tunic_strip_cycle);
+        pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
+        pad.mButtonFlags &= ~PAD_BUTTON_X;
+        pad.mButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
+        pad.mPressedButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
+        swallow_shoulder_triggers(pad);
         suppress_menu_buttons(pad);
         return;
     }
@@ -2434,11 +2531,6 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         pad.mButtonFlags &= ~PAD_BUTTON_RIGHT;
         quick_access_strip_cycle(1);
     }
-
-    const int shoulderDir = (pad.mButtonFlags & PAD_TRIGGER_R) ? 1
-                          : (pad.mButtonFlags & PAD_TRIGGER_L) ? -1 : 0;
-    update_axis_repeat(shoulderDir, s_shoulderRepeat.dir, s_shoulderRepeat.timer,
-                       s_shoulderRepeat.count, strip_cycle_step);
 
     swallow_shoulder_triggers(pad);
 
