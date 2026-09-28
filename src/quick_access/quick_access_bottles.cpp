@@ -871,3 +871,27 @@ void shutdown_quick_access_bottles() {
         s_slotScale[i] = 1.0f;
     }
 }
+
+u8 qa_bottle_item(int idx) {
+    return bottle_item(idx);
+}
+
+bool qa_bottle_owned(int idx) {
+    return bottle_owned(idx);
+}
+
+int qa_bottle_assigned_slot() {
+    return s_assignedSlot < 4 ? static_cast<int>(s_assignedSlot) : -1;
+}
+
+void qa_bottle_use(int idx) {
+    if (!bottle_owned(idx)) {
+        bottles_play_error_se();
+        return;
+    }
+    if (s_assignedSlot != static_cast<u8>(idx)) {
+        s_assignedSlot = static_cast<u8>(idx);
+        bottles_store();
+    }
+    bottles_use_bottle(idx);
+}

@@ -101,8 +101,8 @@ static bool item_state_badge(u8 itemNo) {
 void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     (void)glow;
     qa_pointer_set_strip_center(screenW * 0.5f);
-    if (qa_tunic_page_active()) {
-        quick_access_tunic_strip_draw(screenW, screenH, alpha);
+    if (qa_side_page_active()) {
+        quick_access_side_page_strip_draw(screenW, screenH, alpha);
         return;
     }
     qa_hud_scale_begin(screenW * 0.5f, 0.0f);

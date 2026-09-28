@@ -2278,9 +2278,9 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
     if (g_configQuickAccessAppearance == QA_APPEARANCE_RADIAL) {
         if (!dpadDownHeld) {
-            if (s_menuOpen && qa_tunic_page_active()) {
+            if (s_menuOpen && qa_side_page_active()) {
                 s_menuOpen = false;
-                qa_tunic_confirm();
+                qa_side_confirm();
                 close_menu();
             } else if (s_menuOpen) {
                 s_menuOpen = false;
@@ -2324,7 +2324,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
         qa_page_input(pad);
 
-        if (qa_tunic_page_active()) {
+        if (qa_side_page_active()) {
             if ((pad.mPressedButtonFlags & PAD_BUTTON_B) != 0) {
                 pad.mPressedButtonFlags &= ~PAD_BUTTON_B;
                 pad.mButtonFlags &= ~PAD_BUTTON_B;
@@ -2334,10 +2334,10 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
                 suppress_menu_buttons(pad);
                 return;
             }
-            if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_tunic_has_selection()) {
+            if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_side_has_selection()) {
                 pad.mPressedButtonFlags &= ~PAD_BUTTON_A;
                 pad.mButtonFlags &= ~PAD_BUTTON_A;
-                qa_tunic_confirm();
+                qa_side_confirm();
                 s_dpadCancelLatch = true;
                 close_menu();
                 suppress_menu_buttons(pad);
@@ -2349,7 +2349,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             pad.mPressedButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
             swallow_shoulder_triggers(pad);
             suppress_menu_buttons(pad);
-            qa_tunic_select(stickX, stickY, stickMag);
+            qa_side_select(stickX, stickY, stickMag);
             return;
         }
 
@@ -2400,9 +2400,9 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     }
 
     if (!dpadDownHeld) {
-        if (s_menuOpen && qa_tunic_page_active()) {
+        if (s_menuOpen && qa_side_page_active()) {
             s_menuOpen = false;
-            qa_tunic_confirm();
+            qa_side_confirm();
             close_menu();
         } else if (s_menuOpen) {
             s_menuOpen = false;
@@ -2451,7 +2451,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
     qa_page_input(pad);
 
-    if (qa_tunic_page_active()) {
+    if (qa_side_page_active()) {
         if ((pad.mPressedButtonFlags & PAD_BUTTON_B) != 0) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_B;
             pad.mButtonFlags &= ~PAD_BUTTON_B;
@@ -2461,16 +2461,16 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             suppress_menu_buttons(pad);
             return;
         }
-        if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_tunic_has_selection()) {
+        if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_side_has_selection()) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_A;
             pad.mButtonFlags &= ~PAD_BUTTON_A;
-            qa_tunic_confirm();
+            qa_side_confirm();
             s_dpadCancelLatch = true;
             close_menu();
             suppress_menu_buttons(pad);
             return;
         }
-        update_stick_repeat(stickX, qa_tunic_strip_cycle);
+        update_stick_repeat(stickX, qa_side_strip_cycle);
         pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
         pad.mButtonFlags &= ~PAD_BUTTON_X;
         pad.mButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);

@@ -917,6 +917,26 @@ static void menu_hint_pointer_update() {
     }
 }
 
+static bool page_buttons_pointer_update(f32 anchorX, f32 anchorY, f32 scale) {
+    for (int side = 0; side < 2; side++) {
+        f32 left = 0.0f;
+        f32 top = 0.0f;
+        f32 right = 0.0f;
+        f32 bottom = 0.0f;
+        if (!qa_page_button_rect(side, &left, &top, &right, &bottom) ||
+            !pointer_hits_cell((left + right) * 0.5f, (top + bottom) * 0.5f, (right - left) * 0.5f,
+                               (bottom - top) * 0.5f, anchorX, anchorY, scale)) {
+            continue;
+        }
+        s_pointerSetHoverTarget(static_cast<u16>(kQaPointerPageTarget + side));
+        if (s_pointerConsumeClick()) {
+            qa_page_step(side == 0 ? -1 : 1);
+        }
+        return true;
+    }
+    return false;
+}
+
 static void radial_pointer_update() {
     if (!s_menuOpen || !s_radialValid || s_menuAlpha < 0.9f) {
         return;
@@ -926,32 +946,22 @@ static void radial_pointer_update() {
     const f32 cx = s_radialCenterX;
     const f32 cy = s_radialCenterY;
 
-    f32 left = 0.0f;
-    f32 top = 0.0f;
-    f32 right = 0.0f;
-    f32 bottom = 0.0f;
-    if (qa_page_button_rect(&left, &top, &right, &bottom) &&
-        pointer_hits_cell((left + right) * 0.5f, (top + bottom) * 0.5f, (right - left) * 0.5f,
-                          (bottom - top) * 0.5f, cx, cy, scale)) {
-        s_pointerSetHoverTarget(kQaPointerPageTarget);
-        if (s_pointerConsumeClick()) {
-            qa_page_toggle();
-        }
+    if (page_buttons_pointer_update(cx, cy, scale)) {
         return;
     }
 
-    if (qa_tunic_page_active()) {
-        for (int t = 0; t < qa_tunic_slot_count(); t++) {
+    if (qa_side_page_active()) {
+        for (int t = 0; t < qa_side_slot_count(); t++) {
             f32 x = 0.0f;
             f32 y = 0.0f;
-            qa_tunic_slot_center(t, cx, cy, &x, &y);
+            qa_side_slot_center(t, cx, cy, &x, &y);
             if (!pointer_hits_cell(x, y, kQaPointerSlotHalf, kQaPointerSlotHalf, cx, cy, scale)) {
                 continue;
             }
             s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + t));
-            qa_tunic_hover(t);
+            qa_side_hover(t);
             if (s_pointerConsumeClick()) {
-                qa_tunic_pick(t);
+                qa_side_pick(t);
             }
             return;
         }
@@ -986,30 +996,20 @@ static void strip_pointer_update() {
     const f32 scale = qa_user_hud_scale();
     const f32 cx = s_stripCenterX;
 
-    f32 left = 0.0f;
-    f32 top = 0.0f;
-    f32 right = 0.0f;
-    f32 bottom = 0.0f;
-    if (qa_page_button_rect(&left, &top, &right, &bottom) &&
-        pointer_hits_cell((left + right) * 0.5f, (top + bottom) * 0.5f, (right - left) * 0.5f,
-                          (bottom - top) * 0.5f, cx, 0.0f, scale)) {
-        s_pointerSetHoverTarget(kQaPointerPageTarget);
-        if (s_pointerConsumeClick()) {
-            qa_page_toggle();
-        }
+    if (page_buttons_pointer_update(cx, 0.0f, scale)) {
         return;
     }
 
-    if (qa_tunic_page_active()) {
-        for (int t = 0; t < qa_tunic_slot_count(); t++) {
-            if (!pointer_hits_cell(qa_tunic_strip_slot_x(t, cx), QA_STRIP_BAR_Y, kQaPointerSlotHalf,
+    if (qa_side_page_active()) {
+        for (int t = 0; t < qa_side_slot_count(); t++) {
+            if (!pointer_hits_cell(qa_side_strip_slot_x(t, cx), QA_STRIP_BAR_Y, kQaPointerSlotHalf,
                                    kQaPointerSlotHalf, cx, 0.0f, scale)) {
                 continue;
             }
             s_pointerSetHoverTarget(static_cast<u16>(kQaPointerRadialTarget + t));
-            qa_tunic_hover(t);
+            qa_side_hover(t);
             if (s_pointerConsumeClick()) {
-                qa_tunic_pick(t);
+                qa_side_pick(t);
             }
             return;
         }
