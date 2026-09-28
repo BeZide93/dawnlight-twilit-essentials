@@ -893,6 +893,18 @@ static void apply_heavy_boots_to_feet(daAlink_c* a) {
     }
 }
 
+constexpr u16 kHatCapJointCount = 8;
+
+static void sync_capless_head_flag(daAlink_c* a) {
+    J3DModel* hat = a->mpLinkHatModel;
+    if (hat == nullptr || hat->getModelData() == nullptr) return;
+    if (hat->getModelData()->getJointNum() < kHatCapJointCount) {
+        a->onNoResetFlg2(daPy_py_c::FLG2_UNK_100000);
+    } else {
+        a->offNoResetFlg2(daPy_py_c::FLG2_UNK_100000);
+    }
+}
+
 static void restore_original_link_models(daAlink_c* a) {
     a->mpLinkModel     = s_originalLinkModel;
     a->mpLinkHatModel  = s_originalHatModel;
@@ -912,6 +924,7 @@ static void restore_original_link_models(daAlink_c* a) {
 
     a->mpLinkModel->setUserArea((uintptr_t)a);
     if (a->mpLinkHatModel) a->mpLinkHatModel->setUserArea((uintptr_t)a);
+    sync_capless_head_flag(a);
 
     retarget_face_material_anims(a);
     a->changeModelDataDirect(1);
@@ -1923,6 +1936,7 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     a->mpLinkHandModel = tunicEntry->handModel;
                 }
 
+                sync_capless_head_flag(a);
                 retarget_face_material_anims(a);
 
                 a->changeModelDataDirect(1);
@@ -1976,6 +1990,8 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
                     a->speed.x = a->speed.y = a->speed.z = 0.0f;
                     a->speedF = 0.0f;
                 }
+            } else {
+                sync_capless_head_flag(a);
             }
         } else if (s_originalLinkModel != nullptr) {
             if (a->mpLinkModel != s_originalLinkModel) restore_original_link_models(a);

@@ -33,9 +33,6 @@ constexpr const char* kReinforcedShieldName = "Reinforced Shield";
 
 // Gear equipped before Linkle was turned on comes off, it has no Linkle model.
 static void unequip_ordon_hero_gear() {
-    if (collectionlib_unequipped_tunic_active()) {
-        collectionlib_clear(CE_TUNIC);
-    }
     const CustomEquipKind kinds[] = {CE_TUNIC, CE_SHIELD};
     const char* const names[] = {kOrdonHeroTunicName, kReinforcedShieldName};
     for (int i = 0; i < 2; ++i) {
@@ -137,9 +134,7 @@ void register_custom_shields() {
 }
 
 void register_custom_tunics() {
-    if (!collection_linkle_active()) {
-        collectionlib_set_unequipped_tunic("models/clctres/alSumou.arc", 0x000F);
-    }
+    collectionlib_set_unequipped_tunic("/res/Object/alSumou.arc");
 
     if (!collection_ordon_hero_enabled()) {
         return;
