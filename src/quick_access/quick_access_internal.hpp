@@ -4,6 +4,7 @@
 #include "quick_access_itemwheel.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/JUtility/JUTTexture.h"
 
@@ -92,7 +93,17 @@ void qa_hud_scale_end();
 void quick_access_radial_select(f32 stickX, f32 stickY, f32 stickMag);
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow);
 void quick_access_radial_reset();
-void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate);
+void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate, bool spokes = true);
+
+bool qa_tunic_page_active();
+void qa_page_reset();
+bool qa_page_input(interface_of_controller_pad& pad);
+void qa_tunic_select(f32 stickX, f32 stickY, f32 stickMag);
+bool qa_tunic_has_selection();
+void qa_tunic_confirm();
+void qa_draw_page_buttons(f32 centerX, f32 centerY, u8 alpha);
+void quick_access_tunic_draw(f32 centerX, f32 centerY, u8 alpha);
+void quick_access_tunics_shutdown();
 
 bool quick_access_strip_cycle(int dir);
 void quick_access_strip_reset_selection();

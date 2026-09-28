@@ -3,6 +3,9 @@
 #include "../compat/twilight_hd.hpp"
 
 #include <collection_lib/collection_lib.hpp>
+#include "d/actor/d_a_player.h"
+#include "d/d_meter2_info.h"
+#include "Z2AudioLib/Z2AudioMgr.h"
 
 #include <cstring>
 
@@ -149,6 +152,118 @@ void register_custom_tunics() {
         dItemNo_WEAR_KOKIRI_e,
         0xC8A05Au,
     });
+}
+
+ResTIMG* cl_load_icon(const char* path, IconArcRef iconArc);
+bool custom_equip_toggle(int id);
+void collectionlib_run_slot_registration();
+
+constexpr u16 kHeroClothesIconId = 0x5F;
+constexpr u16 kZoraArmorIconId = 0x4F;
+constexpr u16 kMagicArmorIconId = 0x42;
+
+static int find_ordon_hero_tunic_id() {
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int id = 0; id < custom_equip_count(); ++id) {
+            const CustomEquipDef* def = custom_equip_get(id);
+            if (def != nullptr && def->kind == CE_TUNIC && def->name != nullptr &&
+                std::strcmp(def->name, kOrdonHeroTunicName) == 0) {
+                return id;
+            }
+        }
+        if (pass == 0) collectionlib_run_slot_registration();
+    }
+    return -1;
+}
+
+static u8 native_tunic_item(int tunic) {
+    switch (tunic) {
+    case COLLECTION_TUNIC_ORDON: return dItemNo_WEAR_CASUAL_e;
+    case COLLECTION_TUNIC_HERO: return dItemNo_WEAR_KOKIRI_e;
+    case COLLECTION_TUNIC_ZORA: return dItemNo_WEAR_ZORA_e;
+    case COLLECTION_TUNIC_MAGIC: return dItemNo_ARMOR_e;
+    default: return dItemNo_NONE_e;
+    }
+}
+
+static bool ordon_hero_tunic_active() {
+    if (!custom_equip_active(CE_TUNIC)) return false;
+    const CustomEquipDef* def = custom_equip_get(custom_equip_active_id(CE_TUNIC));
+    return def != nullptr && def->name != nullptr &&
+           std::strcmp(def->name, kOrdonHeroTunicName) == 0;
+}
+
+bool collection_tunic_unlocked(int tunic) {
+    switch (tunic) {
+    case COLLECTION_TUNIC_ORDON:
+        return g_configCollectionStarterEquip ||
+               dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_CASUAL_e;
+    case COLLECTION_TUNIC_HERO:
+        return player_has_hero_clothes();
+    case COLLECTION_TUNIC_ZORA:
+        return dComIfGs_isItemFirstBit(dItemNo_WEAR_ZORA_e);
+    case COLLECTION_TUNIC_MAGIC:
+        return dComIfGs_isItemFirstBit(dItemNo_ARMOR_e);
+    case COLLECTION_TUNIC_ORDON_HERO:
+        return collection_ordon_hero_enabled() &&
+               (g_configCollectionOrdonHeroAlways || player_has_hero_clothes());
+    default:
+        return false;
+    }
+}
+
+bool collection_tunic_equipped(int tunic) {
+    if (tunic == COLLECTION_TUNIC_ORDON_HERO) return ordon_hero_tunic_active();
+    if (custom_equip_active(CE_TUNIC) && ordon_hero_tunic_active()) return false;
+    const u8 item = native_tunic_item(tunic);
+    return item != dItemNo_NONE_e && dComIfGs_getSelectEquipClothes() == item;
+}
+
+bool collection_tunic_equip(int tunic) {
+    if (!collection_tunic_unlocked(tunic)) return false;
+    daPy_py_c* pl = daPy_getPlayerActorClass();
+    if (pl == nullptr || pl->getClothesChangeWaitTimer() != 0) return false;
+    if (collection_tunic_equipped(tunic)) return true;
+
+    if (tunic == COLLECTION_TUNIC_ORDON_HERO) {
+        const int id = find_ordon_hero_tunic_id();
+        return id >= 0 && custom_equip_toggle(id);
+    }
+
+    const u8 item = native_tunic_item(tunic);
+    if (item == dItemNo_NONE_e) return false;
+    if (custom_equip_active(CE_TUNIC)) collectionlib_clear(CE_TUNIC);
+    dMeter2Info_setCloth(item, false);
+    dComIfGs_setSelectEquipClothes(item);
+    pl->setClothesChange(0);
+    Z2GetAudioMgr()->seStart(Z2SE_SY_ITEM_SET_X, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    dMeter2Info_set2DVibration();
+    return true;
+}
+
+const char* collection_tunic_name(int tunic) {
+    switch (tunic) {
+    case COLLECTION_TUNIC_ORDON: return collection_linkle_active() ? "Linkle's Clothes" : "Ordon Clothes";
+    case COLLECTION_TUNIC_HERO: return "Hero's Clothes";
+    case COLLECTION_TUNIC_ZORA: return "Zora Armor";
+    case COLLECTION_TUNIC_MAGIC: return "Magic Armor";
+    case COLLECTION_TUNIC_ORDON_HERO: return kOrdonHeroTunicName;
+    default: return "";
+    }
+}
+
+ResTIMG* collection_tunic_icon(int tunic) {
+    switch (tunic) {
+    case COLLECTION_TUNIC_ORDON:
+        return cl_load_icon(collection_linkle_active() ? "textures/ordon_clothes_linkle.bti"
+                                                       : "textures/ordon_clothes.bti",
+                            nullptr);
+    case COLLECTION_TUNIC_HERO: return cl_load_icon(nullptr, kHeroClothesIconId);
+    case COLLECTION_TUNIC_ZORA: return cl_load_icon(nullptr, kZoraArmorIconId);
+    case COLLECTION_TUNIC_MAGIC: return cl_load_icon(nullptr, kMagicArmorIconId);
+    case COLLECTION_TUNIC_ORDON_HERO: return cl_load_icon("textures/clctres/ordonhero.bti", nullptr);
+    default: return nullptr;
+    }
 }
 
 ModResult init_collection_menu(const HookService* hook_svc, const LogService* log_svc,

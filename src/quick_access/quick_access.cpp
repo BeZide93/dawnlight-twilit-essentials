@@ -2217,7 +2217,11 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
     if (g_configQuickAccessAppearance == QA_APPEARANCE_RADIAL) {
         if (!dpadDownHeld) {
-            if (s_menuOpen) {
+            if (s_menuOpen && qa_tunic_page_active()) {
+                s_menuOpen = false;
+                qa_tunic_confirm();
+                close_menu();
+            } else if (s_menuOpen) {
                 s_menuOpen = false;
                 if (s_aimItem != QA_ITEM_NONE) {
                     qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
@@ -2248,6 +2252,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             }
             s_menuOpen = true;
             s_selectedSlot = SLOT_NONE;
+            qa_page_reset();
             qa_invalidate_msg_window();
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
         }
@@ -2255,6 +2260,37 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         f32 stickX = pad.mCStickPosX;
         f32 stickY = pad.mCStickPosY;
         f32 stickMag = std::sqrt(stickX * stickX + stickY * stickY);
+
+        qa_page_input(pad);
+
+        if (qa_tunic_page_active()) {
+            if ((pad.mPressedButtonFlags & PAD_BUTTON_B) != 0) {
+                pad.mPressedButtonFlags &= ~PAD_BUTTON_B;
+                pad.mButtonFlags &= ~PAD_BUTTON_B;
+                s_dpadCancelLatch = true;
+                close_menu();
+                Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_CANCEL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+                suppress_menu_buttons(pad);
+                return;
+            }
+            if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0 && qa_tunic_has_selection()) {
+                pad.mPressedButtonFlags &= ~PAD_BUTTON_A;
+                pad.mButtonFlags &= ~PAD_BUTTON_A;
+                qa_tunic_confirm();
+                s_dpadCancelLatch = true;
+                close_menu();
+                suppress_menu_buttons(pad);
+                return;
+            }
+            pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
+            pad.mButtonFlags &= ~PAD_BUTTON_X;
+            pad.mButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
+            pad.mPressedButtonFlags &= ~(PAD_BUTTON_LEFT | PAD_BUTTON_RIGHT);
+            swallow_shoulder_triggers(pad);
+            suppress_menu_buttons(pad);
+            qa_tunic_select(stickX, stickY, stickMag);
+            return;
+        }
 
         if ((pad.mPressedButtonFlags & PAD_BUTTON_X) != 0) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
@@ -2589,7 +2625,7 @@ DEFINE_HOOK(&dComIfGp_getSelectItem, QaGetSelectItemHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, QaMidnaTalkTriggerHook);
 
 static HookAction on_qa_midna_talk_trigger_pre(ModContext*, void*, void* retval, void*) {
-    if (retval == nullptr || !qa_twilight_hd_shoulders_blocked()) {
+    if (retval == nullptr || (!qa_twilight_hd_shoulders_blocked() && !s_menuOpen)) {
         return HOOK_CONTINUE;
     }
     *static_cast<BOOL*>(retval) = FALSE;
@@ -2668,6 +2704,7 @@ void shutdown_quick_access() {
     qa_shutdown_item_ammo();
     quick_access_radial_reset();
     quick_access_strip_reset();
+    quick_access_tunics_shutdown();
     quick_access_edit_shutdown();
     quick_access_wolf_shutdown();
     qa_sel_cursor_destroy();

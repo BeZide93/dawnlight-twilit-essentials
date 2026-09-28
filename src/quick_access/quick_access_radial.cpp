@@ -159,7 +159,7 @@ static bool item_state_badge(u8 itemNo) {
     return false;
 }
 
-void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate) {
+void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate, bool spokes) {
     const f32 wheelScale = 0.85f;
     const f32 radius = 92.0f;
 
@@ -186,6 +186,10 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate) {
                            JUtility::TColor(185, 155, 75, static_cast<u8>(alpha * 0.5f)), 64);
     }
 
+    if (!spokes) {
+        return;
+    }
+
     JUtility::TColor spokeColor(120, 100, 50, static_cast<u8>(alpha * 0.45f));
     const f32 spokeW = 2.0f;
 
@@ -197,6 +201,10 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate) {
 
 void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     (void)glow;
+    if (qa_tunic_page_active()) {
+        quick_access_tunic_draw(centerX, centerY, alpha);
+        return;
+    }
     qa_hud_scale_begin(centerX, centerY);
     const f32 radius = 92.0f;
 
@@ -289,6 +297,8 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
             std::snprintf(s_labelCache, sizeof(s_labelCache), "%s", labelBuf);
         }
     }
+
+    qa_draw_page_buttons(centerX, centerY, alpha);
 
     const f32 screenH = centerY * 2.0f;
     qa_hud_scale_end();

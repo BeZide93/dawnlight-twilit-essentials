@@ -80,6 +80,7 @@ add_mod(twilit_essentials
             src/quick_access/quick_access_edit.cpp
             src/quick_access/quick_access_itemwheel.cpp
             src/quick_access/quick_access_wolf.cpp
+            src/quick_access/quick_access_tunics.cpp
             src/sheathed_spin/sheathed_spin.cpp
             src/flurry_rush/flurry_rush.cpp
             src/flurry_rush/flurry_interp.cpp
