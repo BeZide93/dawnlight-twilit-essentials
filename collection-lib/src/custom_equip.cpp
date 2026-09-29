@@ -712,6 +712,29 @@ static bool is_warp_visual(daAlink_c* a) {
            proc == daAlink_c::PROC_TW_GATE;
 }
 
+static bool is_hookshot_material_off(daAlink_c* a) {
+    u16 proc = a->mProcID;
+    return proc == daAlink_c::PROC_HOOKSHOT_WALL_SHOOT ||
+           proc == daAlink_c::PROC_HORSE_HOOKSHOT_SUBJECT ||
+           proc == daAlink_c::PROC_SWIM_HOOKSHOT_SUBJECT ||
+           proc == daAlink_c::PROC_HOOKSHOT_SUBJECT;
+}
+
+static HookAction on_alink_draw_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* a = args ? mods::arg<daAlink_c*>(args, 0) : nullptr;
+    if (!a || a->mFallVoiceInit <= 0 || !is_hookshot_material_off(a)) return HOOK_CONTINUE;
+
+    J3DModelData* body = a->field_0x064C;
+    bool safe = body != nullptr && static_cast<u16>(a->mFallVoiceInit) <= body->getMaterialNum();
+    for (u16 i = 0; safe && i < static_cast<u16>(a->mFallVoiceInit); i++) {
+        if (a->field_0x32cc & (1 << i)) continue;
+        J3DMaterial* mat = body->getMaterialNodePointer(i);
+        if (mat == nullptr || mat->getShape() == nullptr) safe = false;
+    }
+    if (!safe) a->mFallVoiceInit = 0;
+    return HOOK_CONTINUE;
+}
+
 DEFINE_HOOK(&PADSetColor, CePadSetColorHook);
 
 static HookAction on_pad_set_color_pre(ModContext*, void* args, void*, void*) {
@@ -1543,6 +1566,7 @@ void custom_equip_init_hooks(const HookService* hook_svc, const SaveService* sav
     if (!hook_svc) return;
     CL_HOOK_PRE(CeModelDrawHook, on_alink_model_draw_pre);
     CL_HOOK_PRE(CeBasicModelDrawHook, on_alink_model_draw_pre);
+    CL_HOOK_PRE(CeAlinkDrawHook, on_alink_draw_pre);
     CL_HOOK_POST(CeAlinkDrawHook, on_alink_draw_post);
     CL_HOOK_POST(CeAlinkSwDrawHook, on_alink_draw_post);
     CL_HOOK_PRE(CeSetWaterDropColorHook, on_set_water_drop_color_pre);
