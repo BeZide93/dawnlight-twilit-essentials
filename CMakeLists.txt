@@ -48,6 +48,7 @@ add_mod(twilit_essentials
             src/general/faster_midna_cancel.cpp
             src/general/faster_transitions.cpp
             src/general/midna_select_freeze_guard.cpp
+            src/general/shade_shield_fix.cpp
             src/general/hud_auto_fade.cpp
             src/general/damage_vignette.cpp
             src/general/oxygen_vignette.cpp

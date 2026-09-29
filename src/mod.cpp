@@ -12,6 +12,7 @@
 #include "general/faster_midna_cancel.hpp"
 #include "general/faster_transitions.hpp"
 #include "general/midna_select_freeze_guard.hpp"
+#include "general/shade_shield_fix.hpp"
 #include "hp_bars/hp_bars.hpp"
 #include "boss_bar/boss_bar.hpp"
 #include "boss_rush/boss_rush.hpp"
@@ -3067,6 +3068,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         init_flurry_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
+    init_shade_shield_fix(svc_hook, error);
 
     s_hpBarsInitialized = init_hp_bars(svc_hook, error) == MOD_OK;
     log_init_result("hp_bars", s_hpBarsInitialized);
@@ -3168,6 +3170,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("oxygen_vignette", shutdown_oxygen_vignette);
     run_shutdown_step("flurry_vignette", shutdown_flurry_vignette);
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
+    run_shutdown_step("shade_shield_fix", shutdown_shade_shield_fix);
     run_shutdown_step("hp_bars", shutdown_hp_bars);
     run_shutdown_step("boss_bar", shutdown_boss_bar);
     run_shutdown_step("boss_rush_gamemode", shutdown_boss_rush_gamemode);
