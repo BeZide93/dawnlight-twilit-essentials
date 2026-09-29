@@ -228,6 +228,7 @@ struct BossState {
     int deadTimer;
     int missingFrames;
     bool aggHide;
+    bool introGatePassed;
 };
 
 static BossState s_boss = {};
@@ -1357,6 +1358,15 @@ void update_boss_bar(const LogService*, ModContext*) {
         if (best->def->engagedHint && best->actor && !dComIfGp_event_runCheck() &&
             best->def->engagedHint(best->actor)) {
             s_boss.engaged = true;
+        }
+
+        if (best->def == &kDarkLinkBossDef && boss_rush_darklink_mod_state() >= 0) {
+            if (boss_rush_darklink_fight_started()) {
+                s_boss.engaged = true;
+                s_boss.introGatePassed = true;
+            } else if (!s_boss.introGatePassed) {
+                s_boss.engaged = false;
+            }
         }
 
         if (s_boss.engaged && !wasEngaged) {

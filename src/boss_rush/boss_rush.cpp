@@ -5678,6 +5678,11 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_pendingFightIndex = -1;
             ++s_fightWarpGen;
 
+            if (s_retryWarpActive && boss_rush_darklink_enabled() &&
+                std::strcmp(g_bossGalleryTable[s_activeFightIndex].displayName, kDarkLinkGalleryName) == 0) {
+                boss_rush_darklink_begin_retry_skip();
+            }
+
             if (pendingTargetIsChamber) {
                 rush_debug_logf("[rush] landed chamber boss '%s'",
                                 g_bossGalleryTable[s_activeFightIndex].displayName);
@@ -6061,6 +6066,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     }
 
     update_dark_link_victory();
+    update_boss_rush_darklink_retry_skip();
 
     if (s_killWatchdogFrames > 0) {
         --s_killWatchdogFrames;

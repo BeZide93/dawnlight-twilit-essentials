@@ -1,7 +1,10 @@
 #include "boss_rush_darklink.hpp"
 
 #include "../util.hpp"
+#include "boss_rush.hpp"
+#include "../general/fast_forward_cutscenes.hpp"
 
+#include "d/d_attention.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "d/d_resorce.h"
@@ -9,7 +12,9 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_tn.h"
 #include "mods/hook.hpp"
+#include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_dvd_thread.h"
+#include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
 #include "SSystem/SComponent/c_counter.h"
@@ -28,6 +33,16 @@
 #include <vector>
 
 extern const LogService* svc_log;
+
+#if defined(_WIN32)
+extern "C" {
+__declspec(dllimport) void* __stdcall GetCurrentProcess();
+__declspec(dllimport) int __stdcall K32EnumProcessModules(void* process, void** modules, unsigned long size,
+                                                          unsigned long* needed);
+__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void* module, char* path, unsigned long size);
+__declspec(dllimport) int __stdcall GetModuleHandleExA(unsigned long flags, const char* name, void** module);
+}
+#endif
 
 namespace {
 
@@ -870,6 +885,236 @@ s16 boss_rush_darklink_actor_profile() {
     return s_profile;
 }
 
+namespace {
+
+constexpr u32 kModStateRva = 0x3de68;
+constexpr u32 kIntroStepRva = 0x3df54;
+constexpr u32 kModMinImageSize = 0x3e000;
+constexpr int kModStateSpawn = 0;
+constexpr int kModStateLockWait = 3;
+constexpr int kModStateIntro = 4;
+constexpr int kModStateFight = 5;
+constexpr int kIntroMessageStep = 9;
+constexpr f32 kTriggerDistance = 250.0f;
+constexpr f32 kTriggerOvershoot = 70.0f;
+constexpr u32 kRetrySkipTimeoutFrames = 3000;
+constexpr f32 kRetrySkipFadeInSpeed = 0.1f;
+constexpr int kModLookupRetryFrames = 300;
+
+struct CodeSignature {
+    u32 rva;
+    u8 bytes[10];
+};
+
+constexpr CodeSignature kModSignatures[] = {
+    {0x1d280, {0xC7, 0x05, 0xDE, 0x0B, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00}},
+    {0x1d699, {0xC7, 0x05, 0xC5, 0x07, 0x02, 0x00, 0x05, 0x00, 0x00, 0x00}},
+    {0x20782, {0xC7, 0x05, 0xC8, 0xD7, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00}},
+};
+
+uintptr_t s_modBase = 0;
+bool s_modSignatureBad = false;
+int s_modLookupCountdown = 0;
+
+enum class RetrySkip { Off, Running };
+RetrySkip s_retrySkip = RetrySkip::Off;
+u32 s_retrySkipStartFrame = 0;
+bool s_retrySkipSawProgress = false;
+bool s_fakeLockon = false;
+bool s_injectA = false;
+bool s_injectToggle = false;
+
+#if defined(_WIN32)
+bool path_is_darklink_mod(const char* path) {
+    char lower[520];
+    size_t n = 0;
+    for (; path[n] != 0 && n + 1 < sizeof(lower); n++) {
+        const char c = path[n];
+        lower[n] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : (c == '\\' ? '/' : c);
+    }
+    lower[n] = 0;
+    if (std::strstr(lower, kDarkLinkModId) == nullptr) return false;
+    return n >= 8 && std::strcmp(lower + n - 8, "/mod.dll") == 0;
+}
+
+bool module_signature_ok(uintptr_t base) {
+    const u8* image = reinterpret_cast<const u8*>(base);
+    const u32 peOffset = *reinterpret_cast<const u32*>(image + 0x3C);
+    if (peOffset > 0x400 || std::memcmp(image + peOffset, "PE\0\0", 4) != 0) return false;
+    const u32 sizeOfImage = *reinterpret_cast<const u32*>(image + peOffset + 0x18 + 0x38);
+    if (sizeOfImage < kModMinImageSize) return false;
+    for (const CodeSignature& sig : kModSignatures) {
+        if (std::memcmp(image + sig.rva, sig.bytes, sizeof(sig.bytes)) != 0) return false;
+    }
+    return true;
+}
+
+uintptr_t find_darklink_module() {
+    void* modules[1024];
+    unsigned long needed = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &needed)) return 0;
+    const size_t count = std::min<size_t>(needed / sizeof(void*), 1024);
+    char path[520];
+    for (size_t i = 0; i < count; i++) {
+        const unsigned long len = GetModuleFileNameA(modules[i], path, sizeof(path));
+        if (len == 0 || len >= sizeof(path)) continue;
+        if (path_is_darklink_mod(path)) return reinterpret_cast<uintptr_t>(modules[i]);
+    }
+    return 0;
+}
+
+bool module_still_loaded(uintptr_t base) {
+    void* module = nullptr;
+    const unsigned long flags = 0x2 | 0x4;
+    return GetModuleHandleExA(flags, reinterpret_cast<const char*>(base + kModStateRva), &module) != 0 &&
+           reinterpret_cast<uintptr_t>(module) == base;
+}
+#endif
+
+uintptr_t darklink_module_base() {
+#if defined(_WIN32)
+    if (s_modSignatureBad || !boss_rush_darklink_mod_installed()) return 0;
+    if (s_modBase != 0) {
+        if (module_still_loaded(s_modBase)) return s_modBase;
+        s_modBase = 0;
+    }
+    if (--s_modLookupCountdown > 0) return 0;
+    s_modLookupCountdown = kModLookupRetryFrames;
+    const uintptr_t base = find_darklink_module();
+    if (base == 0) return 0;
+    if (!module_signature_ok(base)) {
+        s_modSignatureBad = true;
+        dl_log("[darklink] hopex.dark_link mod.dll has an unknown layout; intro gating and retry skip disabled");
+        return 0;
+    }
+    dl_log("[darklink] hopex.dark_link mod.dll found, state tracking enabled");
+    s_modBase = base;
+    return base;
+#else
+    return 0;
+#endif
+}
+
+int read_mod_int(u32 rva) {
+    const uintptr_t base = darklink_module_base();
+    if (base == 0) return -1;
+    return *reinterpret_cast<const volatile int*>(base + rva);
+}
+
+fopAc_ac_c* find_darklink_actor() {
+    const s16 profile = boss_rush_darklink_actor_profile();
+    return profile >= 0 ? fopAcM_SearchByName(profile) : nullptr;
+}
+
+void hold_screen_black() {
+    mDoGph_gInf_c::fadeOut(0.0f, g_blackColor);
+    mDoGph_gInf_c::setFadeRate(1.0f);
+}
+
+void end_retry_skip(bool fadeIn) {
+    if (s_retrySkip == RetrySkip::Off) return;
+    s_retrySkip = RetrySkip::Off;
+    s_fakeLockon = false;
+    s_injectA = false;
+    fast_forward_set_hidden_run(false);
+    if (fadeIn) mDoGph_gInf_c::fadeIn(kRetrySkipFadeInSpeed, g_blackColor);
+}
+
+void place_link_past_trigger() {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    fopAc_ac_c* tn = fopAcM_SearchByName(fpcNm_B_TN_e);
+    if (link == nullptr || tn == nullptr) return;
+    const f32 targetZ = tn->home.pos.z - kTriggerDistance - kTriggerOvershoot;
+    if (link->current.pos.z < tn->home.pos.z - kTriggerDistance) return;
+    cXyz pos(tn->home.pos.x, link->current.pos.y, targetZ);
+    link->current.pos = pos;
+    link->old.pos = pos;
+    link->shape_angle.y = static_cast<s16>(0x8000);
+    link->current.angle.y = static_cast<s16>(0x8000);
+    link->speed.set(0.0f, 0.0f, 0.0f);
+    link->mNormalSpeed = 0.0f;
+}
+
+}
+
+int boss_rush_darklink_mod_state() {
+    return read_mod_int(kModStateRva);
+}
+
+bool boss_rush_darklink_fight_started() {
+    const int state = boss_rush_darklink_mod_state();
+    return state < 0 || state >= kModStateFight;
+}
+
+void boss_rush_darklink_begin_retry_skip() {
+    if (boss_rush_darklink_mod_state() < 0) return;
+    s_retrySkip = RetrySkip::Running;
+    s_retrySkipStartFrame = g_Counter.mCounter0;
+    s_retrySkipSawProgress = false;
+    s_fakeLockon = false;
+    s_injectA = false;
+    hold_screen_black();
+    fast_forward_set_hidden_run(true);
+    dl_log("[darklink] retry: skipping the intro");
+}
+
+void update_boss_rush_darklink_retry_skip() {
+    if (s_retrySkip == RetrySkip::Off) return;
+
+    const char* stage = dComIfGp_getStartStageName();
+    if (!is_boss_rush_active() || !boss_rush_is_fighting_here() || boss_rush_is_returning_to_chamber() ||
+        dComIfGp_isEnableNextStage() || stage == nullptr || std::strcmp(stage, kDarknutStage) != 0) {
+        end_retry_skip(false);
+        return;
+    }
+
+    const int state = boss_rush_darklink_mod_state();
+    if (state < 0 || g_Counter.mCounter0 - s_retrySkipStartFrame > kRetrySkipTimeoutFrames) {
+        dl_log("[darklink] retry skip stopped (state %d)", state);
+        end_retry_skip(true);
+        return;
+    }
+    if (state >= kModStateFight || (state == kModStateSpawn && s_retrySkipSawProgress)) {
+        dl_log("[darklink] retry skip finished (state %d)", state);
+        end_retry_skip(true);
+        return;
+    }
+
+    hold_screen_black();
+    fast_forward_set_hidden_run(true);
+    if (state > kModStateSpawn) s_retrySkipSawProgress = true;
+    if (state == kModStateSpawn) place_link_past_trigger();
+    s_fakeLockon = state == kModStateLockWait;
+    s_injectA = state == kModStateIntro && read_mod_int(kIntroStepRva) >= kIntroMessageStep;
+}
+
+DEFINE_HOOK(&dAttention_c::LockonTarget, DarkLinkLockonTargetHook);
+DEFINE_HOOK(&dAttention_c::LockonTruth, DarkLinkLockonTruthHook);
+DEFINE_HOOK(&mDoCPd_c::read, DarkLinkSkipPadReadHook);
+
+namespace {
+
+void on_lockon_target_post(ModContext*, void* args, void* retval, void*) {
+    if (!s_fakeLockon || retval == nullptr || mods::arg<s32>(args, 1) != 0) return;
+    fopAc_ac_c* darkLink = find_darklink_actor();
+    if (darkLink != nullptr) *static_cast<fopAc_ac_c**>(retval) = darkLink;
+}
+
+void on_lockon_truth_post(ModContext*, void*, void* retval, void*) {
+    if (s_fakeLockon && retval != nullptr) *static_cast<bool*>(retval) = true;
+}
+
+void on_skip_pad_read_post(ModContext*, void*, void*, void*) {
+    if (!s_injectA) return;
+    s_injectToggle = !s_injectToggle;
+    if (!s_injectToggle) return;
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    pad.mPressedButtonFlags |= PAD_BUTTON_A;
+    pad.mButtonFlags |= PAD_BUTTON_A;
+}
+
+}
+
 ModResult init_boss_rush_darklink(const HookService* hook_svc) {
     void* searchName = nullptr;
     if (hook_svc->resolve(mod_ctx, "dStage_searchName", &searchName, nullptr) == MOD_OK) {
@@ -881,6 +1126,11 @@ ModResult init_boss_rush_darklink(const HookService* hook_svc) {
     ModResult result = mods::hook::add_pre<BossRushVanillaDarknutExecuteHook>(
         hook_svc, on_vanilla_darknut_execute_pre, &options);
     if (result != MOD_OK) return result;
-    return mods::hook::add_pre<BossRushVanillaDarknutDrawHook>(
+    result = mods::hook::add_pre<BossRushVanillaDarknutDrawHook>(
         hook_svc, on_vanilla_darknut_draw_pre, &options);
+    if (result != MOD_OK) return result;
+    mods::hook::add_post<DarkLinkLockonTargetHook>(hook_svc, on_lockon_target_post);
+    mods::hook::add_post<DarkLinkLockonTruthHook>(hook_svc, on_lockon_truth_post);
+    mods::hook::add_post<DarkLinkSkipPadReadHook>(hook_svc, on_skip_pad_read_post);
+    return MOD_OK;
 }

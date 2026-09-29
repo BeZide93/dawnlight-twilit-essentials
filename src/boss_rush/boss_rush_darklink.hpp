@@ -21,3 +21,7 @@ ModResult init_boss_rush_darklink(const HookService* hook_svc);
 bool boss_rush_wants_vanilla_darknut();
 bool boss_rush_darklink_replaces_darknut(const fopAc_ac_c* darknut);
 s16 boss_rush_darklink_actor_profile();
+int boss_rush_darklink_mod_state();
+bool boss_rush_darklink_fight_started();
+void boss_rush_darklink_begin_retry_skip();
+void update_boss_rush_darklink_retry_skip();
