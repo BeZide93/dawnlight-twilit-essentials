@@ -310,6 +310,10 @@ bool collectionlib_unequipped_tunic_active() {
     return s_unequippedTunicId >= 0 && custom_equip_active_id(CE_TUNIC) == s_unequippedTunicId;
 }
 
+bool collectionlib_unequip_tunic() {
+    return cl_unequip_enabled() && custom_equip_unequip_tunic();
+}
+
 int layout_unequipped_tunic() { return s_unequippedTunicId; }
 
 int collectionlib_remove_slot(u8 row, u8 item) {

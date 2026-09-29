@@ -251,7 +251,13 @@ bool collection_tunic_equipped(int tunic) {
 bool collection_tunic_equip(int tunic) {
     if (!collection_tunic_unlocked(tunic)) return false;
     daAlink_c* link = daAlink_getAlinkActorClass();
-    if (collection_tunic_equipped(tunic)) return true;
+    if (collection_tunic_equipped(tunic)) {
+        if (!link_can_change_clothes(link)) return false;
+        const u8 before = dComIfGs_getSelectEquipClothes();
+        if (!collectionlib_unequip_tunic()) return true;
+        if (dComIfGs_getSelectEquipClothes() != before) start_safe_clothes_change(link);
+        return true;
+    }
     if (!link_can_change_clothes(link)) return false;
 
     if (tunic == COLLECTION_TUNIC_ORDON_HERO) {

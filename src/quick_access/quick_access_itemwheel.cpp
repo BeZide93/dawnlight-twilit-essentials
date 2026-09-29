@@ -4,6 +4,7 @@
 #include "../boss_rush/boss_rush.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_menu_ring.h"
 #include "d/d_save.h"
 #include "mods/svc/hook.hpp"
 
@@ -91,10 +92,17 @@ static int itemwheel_lineup_missing_count() {
     return expected - linedUp;
 }
 
+DEFINE_HOOK(&dMenu_Ring_c::_delete, RingDeleteQuickAccessHook);
+
+static void on_ring_delete_quick_access_post(ModContext*, void*, void*, void*) {
+    quick_access_radial_reset();
+}
+
 ModResult init_quick_access_itemwheel(const HookService* hook_svc, ModError*) {
     if (hook_svc) {
         mods::hook::add_post<SvSetLineUpItemQuickAccessHook>(hook_svc,
             on_set_line_up_item_quick_access_post);
+        mods::hook::add_post<RingDeleteQuickAccessHook>(hook_svc, on_ring_delete_quick_access_post);
     }
     return MOD_OK;
 }

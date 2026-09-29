@@ -49,6 +49,7 @@ int collectionlib_set_unequipped_tunic(const char* modelArc, u32 bodyFileId = 0x
                                        u8 baseItem = dItemNo_WEAR_KOKIRI_e,
                                        unsigned int padColor = 0xFFFFFFFFu);
 bool collectionlib_unequipped_tunic_active();
+bool collectionlib_unequip_tunic();
 
 int  collectionlib_remove_slot(u8 row, u8 item);
 int  collectionlib_clear_all_slots();

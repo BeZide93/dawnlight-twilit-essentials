@@ -2635,6 +2635,15 @@ static void draw_strip_hud_icon(J2DScreen* screen) {
     qa_draw_item_ammo(assigned, drawX, drawY, targetW, targetH, alpha);
 }
 
+static void qa_draw_background_dim(f32 alphaRate) {
+    const f32 a = alphaRate * g_ringHIO.mOverlayAlpha;
+    if (a <= 0.0f) return;
+    const f32 minX = mDoGph_gInf_c::getMinXF();
+    const f32 minY = mDoGph_gInf_c::getMinYF();
+    qa_draw_solid_rect(minX, minY, mDoGph_gInf_c::getMaxXF() - minX, mDoGph_gInf_c::getMaxYF() - minY,
+                       JUtility::TColor(0, 0, 0, static_cast<u8>((a > 1.0f ? 1.0f : a) * 255.0f)));
+}
+
 static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, void*) {
     if (!args || !g_configQuickAccessEnabled || isTitleOrMainMenu()) {
         s_menuAlpha = 0.0f;
@@ -2694,6 +2703,8 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
 
     const f32 screenW = screen->getWidth();
     const f32 screenH = screen->getHeight();
+
+    qa_draw_background_dim(s_menuAlpha);
 
     if (s_editMode) {
         quick_access_edit_draw(screenW, screenH, alpha, glow);
