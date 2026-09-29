@@ -10,6 +10,7 @@
 #include "boss_rush_timer.hpp"
 #include "boss_rush_save.hpp"
 #include "boss_rush_gamemode.hpp"
+#include "boss_rush_music.hpp"
 #include "ganondorf_cape.hpp"
 #include "../util.hpp"
 #include "../boss_bar/boss_bar.hpp"
@@ -4416,6 +4417,10 @@ bool is_boss_rush_active() {
     return s_bossRushModeActive;
 }
 
+bool boss_rush_session_active() {
+    return s_bossRushModeActive && !s_exitingBossRush;
+}
+
 static void clear_boss_dungeon_clear_flags(const char* stage) {
     if (stage == nullptr) return;
     struct Entry { const char* stage; int saveTbl; int sw; u16 clearFlag; };
@@ -4585,6 +4590,7 @@ static HookAction on_dungeon_return_warp_pre(ModContext*, void*, void*, void*) {
 
     s_dungeonClearWarpPending = false;
     s_dungeonClearWarpFrames  = 0;
+    boss_rush_music_begin_chamber_transition();
 
     s_equipSuppressWaitBlack = true;
     s_equipSuppressWaitBlackFrames = 0;
@@ -4618,6 +4624,7 @@ static HookAction on_skip_portal_obj_warp_pre(ModContext*, void*, void*, void*) 
 
     s_dungeonClearWarpPending = false;
     s_dungeonClearWarpFrames  = 0;
+    boss_rush_music_begin_chamber_transition();
 
     if (s_portalCineWasHuman) {
         human_warp_cinematic_end();

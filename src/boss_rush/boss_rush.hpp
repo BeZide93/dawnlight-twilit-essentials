@@ -25,6 +25,7 @@ void exit_boss_rush();
 bool is_in_boss_rush_chamber();
 bool boss_rush_settle_window_active();
 bool is_boss_rush_active();
+bool boss_rush_session_active();
 bool boss_rush_is_fighting_here();
 bool boss_rush_is_fight_engaged();
 bool is_boss_rush_transition_in_flight();

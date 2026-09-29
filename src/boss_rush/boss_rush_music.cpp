@@ -36,6 +36,10 @@ Z2AudioMgr* audio_mgr() {
     return (audio != nullptr && mDoAud_zelAudio_c::isInitFlag()) ? audio : nullptr;
 }
 
+bool music_session_active() {
+    return boss_rush_game_mode_is_active() || boss_rush_session_active();
+}
+
 bool scene_bgm_started() {
     return !fopOvlpM_IsPeek() && !mDoAud_zelAudio_c::isBgmSet();
 }
@@ -60,7 +64,7 @@ bool yielded_stream_playing(Z2AudioMgr* audio) {
 
 bool protecting_spirit_stream() {
     Z2AudioMgr* audio = audio_mgr();
-    if (audio == nullptr || !spirit_stream_playing(audio) || !boss_rush_game_mode_is_active()) {
+    if (audio == nullptr || !spirit_stream_playing(audio) || !music_session_active()) {
         return false;
     }
     return s_transitionFrames > 0 || (s_inChamber && is_in_boss_rush_chamber());
@@ -111,7 +115,7 @@ void update_transition(Z2AudioMgr* audio, bool inChamber) {
     if (s_transitionFrames <= 0) {
         return;
     }
-    if (!boss_rush_game_mode_is_active()) {
+    if (!music_session_active()) {
         s_transitionFrames = 0;
     } else if (inChamber && scene_bgm_started()) {
         s_transitionFrames = 0;
@@ -134,7 +138,7 @@ void update_music() {
         return;
     }
 
-    const bool inChamber = boss_rush_game_mode_is_active() && is_in_boss_rush_chamber();
+    const bool inChamber = music_session_active() && is_in_boss_rush_chamber();
     update_transition(audio, inChamber);
     if (!inChamber) {
         if (s_inChamber && --s_leaveTimer <= 0) {
