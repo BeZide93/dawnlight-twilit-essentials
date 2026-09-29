@@ -214,6 +214,12 @@ f32 cost_scaled(f32 base_cost, int pct) {
     if (p < 5.0f) p = 5.0f;
     return base_cost * p / 100.0f;
 }
+f32 main_ring_capacity(f32 maxValue) {
+    if (g_configStaminaScaleWithHearts) return kScaleBaseValue;
+    f32 main = maxValue < kRingCapacity ? maxValue : kRingCapacity;
+    if (maxValue > main * kRingMax) main = maxValue / kRingMax;
+    return main;
+}
 }
 
 static void tired_check_post(ModContext*, void* args, void* retval, void*) {
@@ -503,7 +509,9 @@ void update_stamina(const LogService*, ModContext*) {
     f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
     if (recoverFrac < 0.05f) recoverFrac = 0.05f;
     if (recoverFrac > 1.0f) recoverFrac = 1.0f;
-    if (s_exhausted && s_stamina >= kMax * recoverFrac - 0.01f) {
+    f32 recoverAt = stamina_impl::main_ring_capacity(kMax) * recoverFrac;
+    if (recoverAt > kMax) recoverAt = kMax;
+    if (s_exhausted && s_stamina >= recoverAt - 0.01f) {
         s_exhausted = false;
         stamina_hud_notify_recover();
     }

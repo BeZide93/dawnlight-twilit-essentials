@@ -18,8 +18,7 @@ extern ModContext* mod_ctx;
 static constexpr f32 kWheelAnchorHumanY = 150.0f;
 static constexpr f32 kWheelAnchorWolfY = 90.0f;
 
-static constexpr f32 kWheelCapacity = 100.0f;
-static constexpr int kWheelMaxRings = 3;
+static constexpr int kWheelMaxRings = stamina_impl::kRingMax;
 static constexpr f32 kWheelScale = 0.8f;
 static constexpr f32 kWheelHoleR = 3.75f * kWheelScale;
 static constexpr f32 kWheelMainR = 12.0f * kWheelScale;
@@ -78,16 +77,11 @@ struct WheelRing {
 };
 
 static int wheel_layout(f32 maxValue, WheelRing* rings) {
-    f32 mainFull = 0.0f;
-    f32 outerFull = 0.0f;
+    const f32 mainFull = stamina_impl::main_ring_capacity(maxValue);
+    f32 outerFull = mainFull;
     if (g_configStaminaScaleWithHearts) {
-        mainFull = stamina_impl::kScaleBaseValue;
         outerFull = (stamina_impl::kScaleMaxHearts - stamina_impl::kScaleMinHearts) *
                     static_cast<f32>(g_configStaminaPerHeart) / static_cast<f32>(kWheelMaxRings - 1);
-    } else {
-        mainFull = maxValue < kWheelCapacity ? maxValue : kWheelCapacity;
-        if (maxValue > mainFull * kWheelMaxRings) mainFull = maxValue / kWheelMaxRings;
-        outerFull = mainFull;
     }
     int count = 0;
     f32 base = 0.0f;

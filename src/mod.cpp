@@ -1476,7 +1476,8 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Exhaustion recovery";
         c.help_rml = "<p>When stamina runs out, Link is exhausted: no attacks, rolls or "
-            "sprinting until stamina has refilled to this percentage (default: 35%).</p>";
+            "sprinting until stamina has refilled to this percentage of the main (center) "
+            "stamina wheel (default: 35%).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varStaminaExhaustRecover;
         c.is_disabled = is_stamina_sub_disabled;
