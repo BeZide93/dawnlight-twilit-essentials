@@ -255,6 +255,33 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_game_mode,
 };
 
+static constexpr const char* kTitleLogoLinklePath = "res/title_logo/linkle/tex1_608x100_0c1c70378fb8cb46_6.png";
+static TextureReplacementHandle s_titleLogoLinkleHandle = 0;
+static bool s_titleLogoLinkleFailed = false;
+
+static void update_title_logo_variant() {
+    if (svc_texture == nullptr || s_titleLogoLinkleFailed) return;
+    const bool linkle = collection_linkle_active();
+    if (linkle == (s_titleLogoLinkleHandle != 0)) return;
+    if (linkle) {
+        if (svc_texture->register_file(mod_ctx, kTitleLogoLinklePath, &s_titleLogoLinkleHandle) != MOD_OK) {
+            s_titleLogoLinkleHandle = 0;
+            s_titleLogoLinkleFailed = true;
+        }
+    } else {
+        svc_texture->unregister(mod_ctx, s_titleLogoLinkleHandle);
+        s_titleLogoLinkleHandle = 0;
+    }
+}
+
+static void shutdown_title_logo_variant() {
+    if (svc_texture != nullptr && s_titleLogoLinkleHandle != 0) {
+        svc_texture->unregister(mod_ctx, s_titleLogoLinkleHandle);
+    }
+    s_titleLogoLinkleHandle = 0;
+    s_titleLogoLinkleFailed = false;
+}
+
 static constexpr float kFreeCamSlowFactor = 0.35f;
 
 using FreeCamGetVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
@@ -427,6 +454,7 @@ static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralNoBattleMusic = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
+static ConfigVarHandle s_varSprintFovKick = 0;
 static ConfigVarHandle s_varDamageVignetteIntensity = 0;
 static ConfigVarHandle s_varHpBars = 0;
 static ConfigVarHandle s_varHpBarsShowNumbers = 0;
@@ -950,6 +978,12 @@ static void on_general_no_battle_music_changed(ModContext*, ConfigVarHandle, con
 static void on_hud_auto_fade_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configHudAutoFadeEnabled = value->bool_value;
+    }
+}
+
+static void on_sprint_fov_kick_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configSprintFovKickEnabled = value->bool_value;
     }
 }
 
@@ -1608,6 +1642,9 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         50, 500, 5);
     ui_add_toggle(left, "Allow for Z target", s_varFreeCamDistanceZTarget,
         "<p>Also applies the free camera distance while Z-targeting.</p>");
+    ui_add_toggle(left, "Sprint FOV kick", s_varSprintFovKick,
+        "<p>Slightly widens the field of view while Link sprints. Wolf Link's dash never "
+        "changes the camera.</p>");
     return MOD_OK;
 }
 
@@ -2347,6 +2384,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varFreeCamDistanceZTarget, on_free_cam_distance_z_target_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descSprintFovKick = CONFIG_VAR_DESC_INIT;
+        descSprintFovKick.name = "sprintFovKickEnabled";
+        descSprintFovKick.type = CONFIG_VAR_BOOL;
+        descSprintFovKick.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descSprintFovKick, &s_varSprintFovKick) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varSprintFovKick, &g_configSprintFovKickEnabled);
+            svc_config->subscribe(mod_ctx, s_varSprintFovKick, on_sprint_fov_kick_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descGeneralHumanWarp = CONFIG_VAR_DESC_INIT;
         descGeneralHumanWarp.name = "generalHumanWarpAnimation";
         descGeneralHumanWarp.type = CONFIG_VAR_BOOL;
@@ -2368,7 +2414,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         ConfigVarDesc descGeneralNoBattleMusic = CONFIG_VAR_DESC_INIT;
         descGeneralNoBattleMusic.name = "generalNoBattleMusic";
         descGeneralNoBattleMusic.type = CONFIG_VAR_BOOL;
-        descGeneralNoBattleMusic.default_bool = false;
+        descGeneralNoBattleMusic.default_bool = true;
         if (svc_config->register_var(mod_ctx, &descGeneralNoBattleMusic, &s_varGeneralNoBattleMusic) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralNoBattleMusic, &g_configNoBattleMusic);
             svc_config->subscribe(mod_ctx, s_varGeneralNoBattleMusic, on_general_no_battle_music_changed, nullptr, nullptr);
@@ -3067,6 +3113,8 @@ MOD_EXPORT ModResult mod_update(ModError*) {
         boss_rush_timer_preview_cancel();
     }
 
+    update_title_logo_variant();
+
     if (s_generalInitialized) update_general(svc_log, mod_ctx);
     if (s_damageVignetteInitialized) update_damage_vignette(svc_log, mod_ctx);
     if (s_oxygenVignetteInitialized) update_oxygen_vignette(svc_log, mod_ctx);
@@ -3113,6 +3161,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         svc_ui->unregister_menu_tab(mod_ctx, s_menuTabTwilitEssentials);
         s_menuTabTwilitEssentials = 0;
     }
+    run_shutdown_step("title_logo_variant", shutdown_title_logo_variant);
     run_shutdown_step("free_camera_toggle", shutdown_free_camera_toggle);
     run_shutdown_step("general", shutdown_general);
     run_shutdown_step("damage_vignette", shutdown_damage_vignette);
