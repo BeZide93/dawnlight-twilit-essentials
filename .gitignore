@@ -9,3 +9,4 @@ __pycache__/
 /tools/banner.png
 /tools/banner_gui.py
 /tools/make_banner.py
+/images/new/*.json

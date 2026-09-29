@@ -4226,11 +4226,58 @@ bool boss_rush_settle_window_active() {
     return s_arenaSettle > 0;
 }
 
+static constexpr f32 kDarkLinkRetryFadeSpeed = 0.1f;
+static bool s_darkLinkRetryFading = false;
+static bool s_darkLinkRetryHolding = false;
+
+static bool current_fight_is_dark_link() {
+    const int idx = boss_rush_current_target_index();
+    return idx >= 0 && static_cast<size_t>(idx) < g_bossGalleryCount && boss_rush_darklink_enabled() &&
+           std::strcmp(g_bossGalleryTable[idx].displayName, kDarkLinkGalleryName) == 0;
+}
+
 void boss_rush_request_retry() {
     if (!is_boss_rush_active() || !boss_rush_is_fight_engaged()) return;
     if (!is_boss_rush_transition_in_flight()) {
+        if (current_fight_is_dark_link()) {
+            if (!s_darkLinkRetryFading) {
+                s_darkLinkRetryFading = true;
+                boss_rush_screen_fade_out(kDarkLinkRetryFadeSpeed);
+            }
+            return;
+        }
         boss_rush_retry_current_fight(s_logSvc, s_modCtx);
         return;
+    }
+}
+
+static void update_dark_link_retry_fade(const LogService* log_svc, ModContext* mod_ctx) {
+    if (s_darkLinkRetryFading) {
+        if (!is_boss_rush_active() || !boss_rush_is_fighting_here() || is_boss_rush_transition_in_flight()) {
+            s_darkLinkRetryFading = false;
+            mDoGph_gInf_c::fadeIn(kDarkLinkRetryFadeSpeed, g_blackColor);
+            return;
+        }
+        if (!boss_rush_screen_is_fully_black()) {
+            boss_rush_screen_fade_out(kDarkLinkRetryFadeSpeed);
+            return;
+        }
+        s_darkLinkRetryFading = false;
+        s_darkLinkRetryHolding = true;
+        boss_rush_darklink_set_warp_black(true);
+        boss_rush_retry_current_fight(log_svc, mod_ctx);
+        boss_rush_darklink_set_warp_black(true);
+    }
+    if (s_darkLinkRetryHolding) {
+        if (!is_boss_rush_active() || !s_retryWarpActive) {
+            s_darkLinkRetryHolding = false;
+            boss_rush_darklink_set_warp_black(false);
+            if (!boss_rush_darklink_retry_skip_active()) {
+                mDoGph_gInf_c::fadeIn(kDarkLinkRetryFadeSpeed, g_blackColor);
+            }
+            return;
+        }
+        boss_rush_screen_hold_black();
     }
 }
 
@@ -5408,6 +5455,8 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         return;
     }
 
+    update_dark_link_retry_fade(log_svc, mod_ctx);
+    update_boss_rush_darklink_retry_skip();
     apply_pending_gear_save_if_covered();
 
     if (!g_configBossRushSeparateGanon && boss_rush_is_fighting_here() && !s_returningToChamber) {
@@ -5678,9 +5727,9 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
             s_pendingFightIndex = -1;
             ++s_fightWarpGen;
 
-            if (s_retryWarpActive && boss_rush_darklink_enabled() &&
+            if (boss_rush_darklink_enabled() &&
                 std::strcmp(g_bossGalleryTable[s_activeFightIndex].displayName, kDarkLinkGalleryName) == 0) {
-                boss_rush_darklink_begin_retry_skip();
+                boss_rush_darklink_on_fight_landed(s_retryWarpActive);
             }
 
             if (pendingTargetIsChamber) {
@@ -6066,7 +6115,6 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     }
 
     update_dark_link_victory();
-    update_boss_rush_darklink_retry_skip();
 
     if (s_killWatchdogFrames > 0) {
         --s_killWatchdogFrames;

@@ -5,6 +5,8 @@
 #include "../general/fast_forward_cutscenes.hpp"
 
 #include "d/d_attention.h"
+#include "d/d_meter2.h"
+#include "d/d_msg_object.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "d/d_resorce.h"
@@ -15,6 +17,8 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_dvd_thread.h"
 #include "m_Do/m_Do_graphic.h"
+#include "f_op/f_op_msg_mng.h"
+#include "f_op/f_op_camera_mng.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
 #include "SSystem/SComponent/c_counter.h"
@@ -34,15 +38,6 @@
 
 extern const LogService* svc_log;
 
-#if defined(_WIN32)
-extern "C" {
-__declspec(dllimport) void* __stdcall GetCurrentProcess();
-__declspec(dllimport) int __stdcall K32EnumProcessModules(void* process, void** modules, unsigned long size,
-                                                          unsigned long* needed);
-__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void* module, char* path, unsigned long size);
-__declspec(dllimport) int __stdcall GetModuleHandleExA(unsigned long flags, const char* name, void** module);
-}
-#endif
 
 namespace {
 
@@ -887,118 +882,42 @@ s16 boss_rush_darklink_actor_profile() {
 
 namespace {
 
-constexpr u32 kModStateRva = 0x3de68;
-constexpr u32 kIntroStepRva = 0x3df54;
-constexpr u32 kModMinImageSize = 0x3e000;
-constexpr int kModStateSpawn = 0;
-constexpr int kModStateLockWait = 3;
-constexpr int kModStateIntro = 4;
-constexpr int kModStateFight = 5;
-constexpr int kIntroMessageStep = 9;
+constexpr int kFightZoneSwitch = 0xE;
+constexpr u32 kIntroMessageId = 0x487;
 constexpr f32 kTriggerDistance = 250.0f;
-constexpr f32 kTriggerOvershoot = 70.0f;
-constexpr u32 kRetrySkipTimeoutFrames = 3000;
+constexpr f32 kTriggerOvershoot = 650.0f;
+constexpr u32 kRetrySkipTimeoutFrames = 1800;
+constexpr int kRetrySkipTimeoutTicks = 1800;
 constexpr f32 kRetrySkipFadeInSpeed = 0.1f;
-constexpr int kModLookupRetryFrames = 300;
+constexpr int kRetrySkipSettleTicks = 20;
+constexpr int kRetrySkipLogInterval = 300;
 
-struct CodeSignature {
-    u32 rva;
-    u8 bytes[10];
-};
+enum class SkipPhase { Off, Trigger, Challenge, Intro, Settle };
 
-constexpr CodeSignature kModSignatures[] = {
-    {0x1d280, {0xC7, 0x05, 0xDE, 0x0B, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00}},
-    {0x1d699, {0xC7, 0x05, 0xC5, 0x07, 0x02, 0x00, 0x05, 0x00, 0x00, 0x00}},
-    {0x20782, {0xC7, 0x05, 0xC8, 0xD7, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00}},
-};
-
-uintptr_t s_modBase = 0;
-bool s_modSignatureBad = false;
-int s_modLookupCountdown = 0;
-
-enum class RetrySkip { Off, Running };
-RetrySkip s_retrySkip = RetrySkip::Off;
-u32 s_retrySkipStartFrame = 0;
-bool s_retrySkipSawProgress = false;
+SkipPhase s_skipPhase = SkipPhase::Off;
+u32 s_skipStartFrame = 0;
+int s_skipTicks = 0;
+bool s_skipSawActor = false;
 bool s_fakeLockon = false;
 bool s_injectA = false;
 bool s_injectToggle = false;
+fpc_ProcID s_introMessageId = fpcM_ERROR_PROCESS_ID_e;
+fopAc_ac_c* s_darkLinkActor = nullptr;
+bool s_warpBlack = false;
+bool s_inDarkLinkExecute = false;
+int s_settleTicks = 0;
+bool s_haveReturnPos = false;
+cXyz s_returnPos;
+s16 s_returnAngle = 0;
 
-#if defined(_WIN32)
-bool path_is_darklink_mod(const char* path) {
-    char lower[520];
-    size_t n = 0;
-    for (; path[n] != 0 && n + 1 < sizeof(lower); n++) {
-        const char c = path[n];
-        lower[n] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : (c == '\\' ? '/' : c);
+const char* skip_phase_name(SkipPhase phase) {
+    switch (phase) {
+    case SkipPhase::Trigger: return "trigger";
+    case SkipPhase::Challenge: return "challenge";
+    case SkipPhase::Intro: return "intro";
+    case SkipPhase::Settle: return "settle";
+    default: return "off";
     }
-    lower[n] = 0;
-    if (std::strstr(lower, kDarkLinkModId) == nullptr) return false;
-    return n >= 8 && std::strcmp(lower + n - 8, "/mod.dll") == 0;
-}
-
-bool module_signature_ok(uintptr_t base) {
-    const u8* image = reinterpret_cast<const u8*>(base);
-    const u32 peOffset = *reinterpret_cast<const u32*>(image + 0x3C);
-    if (peOffset > 0x400 || std::memcmp(image + peOffset, "PE\0\0", 4) != 0) return false;
-    const u32 sizeOfImage = *reinterpret_cast<const u32*>(image + peOffset + 0x18 + 0x38);
-    if (sizeOfImage < kModMinImageSize) return false;
-    for (const CodeSignature& sig : kModSignatures) {
-        if (std::memcmp(image + sig.rva, sig.bytes, sizeof(sig.bytes)) != 0) return false;
-    }
-    return true;
-}
-
-uintptr_t find_darklink_module() {
-    void* modules[1024];
-    unsigned long needed = 0;
-    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &needed)) return 0;
-    const size_t count = std::min<size_t>(needed / sizeof(void*), 1024);
-    char path[520];
-    for (size_t i = 0; i < count; i++) {
-        const unsigned long len = GetModuleFileNameA(modules[i], path, sizeof(path));
-        if (len == 0 || len >= sizeof(path)) continue;
-        if (path_is_darklink_mod(path)) return reinterpret_cast<uintptr_t>(modules[i]);
-    }
-    return 0;
-}
-
-bool module_still_loaded(uintptr_t base) {
-    void* module = nullptr;
-    const unsigned long flags = 0x2 | 0x4;
-    return GetModuleHandleExA(flags, reinterpret_cast<const char*>(base + kModStateRva), &module) != 0 &&
-           reinterpret_cast<uintptr_t>(module) == base;
-}
-#endif
-
-uintptr_t darklink_module_base() {
-#if defined(_WIN32)
-    if (s_modSignatureBad || !boss_rush_darklink_mod_installed()) return 0;
-    if (s_modBase != 0) {
-        if (module_still_loaded(s_modBase)) return s_modBase;
-        s_modBase = 0;
-    }
-    if (--s_modLookupCountdown > 0) return 0;
-    s_modLookupCountdown = kModLookupRetryFrames;
-    const uintptr_t base = find_darklink_module();
-    if (base == 0) return 0;
-    if (!module_signature_ok(base)) {
-        s_modSignatureBad = true;
-        dl_log("[darklink] hopex.dark_link mod.dll has an unknown layout; intro gating and retry skip disabled");
-        return 0;
-    }
-    dl_log("[darklink] hopex.dark_link mod.dll found, state tracking enabled");
-    s_modBase = base;
-    return base;
-#else
-    return 0;
-#endif
-}
-
-int read_mod_int(u32 rva) {
-    const uintptr_t base = darklink_module_base();
-    if (base == 0) return -1;
-    return *reinterpret_cast<const volatile int*>(base + rva);
 }
 
 fopAc_ac_c* find_darklink_actor() {
@@ -1006,18 +925,65 @@ fopAc_ac_c* find_darklink_actor() {
     return profile >= 0 ? fopAcM_SearchByName(profile) : nullptr;
 }
 
+bool in_darklink_stage() {
+    const char* stage = dComIfGp_getStartStageName();
+    return stage != nullptr && std::strcmp(stage, kDarknutStage) == 0;
+}
+
 void hold_screen_black() {
     mDoGph_gInf_c::fadeOut(0.0f, g_blackColor);
     mDoGph_gInf_c::setFadeRate(1.0f);
 }
 
-void end_retry_skip(bool fadeIn) {
-    if (s_retrySkip == RetrySkip::Off) return;
-    s_retrySkip = RetrySkip::Off;
+void restore_link_start() {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr || !s_haveReturnPos) return;
+    link->current.pos = s_returnPos;
+    link->old.pos = s_returnPos;
+    link->shape_angle.y = s_returnAngle;
+    link->current.angle.y = s_returnAngle;
+    link->speed.set(0.0f, 0.0f, 0.0f);
+    link->mNormalSpeed = 0.0f;
+
+    camera_process_class* cam = dComIfGp_getCamera(g_dComIfG_gameInfo.play.getPlayerCameraID(0));
+    if (cam == nullptr) return;
+    const f32 fx = cM_ssin(s_returnAngle);
+    const f32 fz = cM_scos(s_returnAngle);
+    cXyz center(s_returnPos.x + fx * 200.0f, s_returnPos.y + 100.0f, s_returnPos.z + fz * 200.0f);
+    cXyz eye(s_returnPos.x - fx * 450.0f, s_returnPos.y + 170.0f, s_returnPos.z - fz * 450.0f);
+    cam->mCamera.Reset(center, eye);
+    cam->mCamera.Start();
+    cam->mCamera.QuickStart();
+    cam->mCamera.SetTrimSize(0);
+    cam->view.lookat.center.set(center.x, center.y, center.z);
+    cam->view.lookat.eye.set(eye.x, eye.y, eye.z);
+    fopCamM_SetAngleY(cam, s_returnAngle);
+}
+
+void stop_skip_helpers() {
     s_fakeLockon = false;
     s_injectA = false;
+    s_inDarkLinkExecute = false;
+    s_introMessageId = fpcM_ERROR_PROCESS_ID_e;
     fast_forward_set_hidden_run(false);
-    if (fadeIn) mDoGph_gInf_c::fadeIn(kRetrySkipFadeInSpeed, g_blackColor);
+}
+
+void end_retry_skip(const char* reason) {
+    if (s_skipPhase == SkipPhase::Off || s_skipPhase == SkipPhase::Settle) return;
+    dl_log("[darklink] retry skip end: %s (phase %s, %d ticks)", reason, skip_phase_name(s_skipPhase), s_skipTicks);
+    stop_skip_helpers();
+    restore_link_start();
+    s_skipPhase = SkipPhase::Settle;
+    s_settleTicks = kRetrySkipSettleTicks;
+    hold_screen_black();
+}
+
+void abort_retry_skip(const char* reason) {
+    if (s_skipPhase == SkipPhase::Off) return;
+    dl_log("[darklink] retry skip aborted: %s (phase %s, %d ticks)", reason, skip_phase_name(s_skipPhase), s_skipTicks);
+    stop_skip_helpers();
+    s_skipPhase = SkipPhase::Off;
+    mDoGph_gInf_c::fadeIn(kRetrySkipFadeInSpeed, g_blackColor);
 }
 
 void place_link_past_trigger() {
@@ -1025,7 +991,7 @@ void place_link_past_trigger() {
     fopAc_ac_c* tn = fopAcM_SearchByName(fpcNm_B_TN_e);
     if (link == nullptr || tn == nullptr) return;
     const f32 targetZ = tn->home.pos.z - kTriggerDistance - kTriggerOvershoot;
-    if (link->current.pos.z < tn->home.pos.z - kTriggerDistance) return;
+    if (link->current.pos.z < targetZ + 50.0f) return;
     cXyz pos(tn->home.pos.x, link->current.pos.y, targetZ);
     link->current.pos = pos;
     link->old.pos = pos;
@@ -1033,75 +999,174 @@ void place_link_past_trigger() {
     link->current.angle.y = static_cast<s16>(0x8000);
     link->speed.set(0.0f, 0.0f, 0.0f);
     link->mNormalSpeed = 0.0f;
+    dl_log("[darklink] retry skip: link moved past the trigger (z %d, darknut home z %d)",
+           static_cast<int>(pos.z), static_cast<int>(tn->home.pos.z));
 }
 
+void set_skip_phase(SkipPhase phase) {
+    if (phase == s_skipPhase) return;
+    s_skipPhase = phase;
+    dl_log("[darklink] retry skip phase: %s", skip_phase_name(phase));
 }
 
-int boss_rush_darklink_mod_state() {
-    return read_mod_int(kModStateRva);
 }
 
 bool boss_rush_darklink_fight_started() {
-    const int state = boss_rush_darklink_mod_state();
-    return state < 0 || state >= kModStateFight;
+    return in_darklink_stage() &&
+           dComIfGs_isOneZoneSwitch(kFightZoneSwitch, dComIfGp_roomControl_getStayNo()) != 0;
 }
 
-void boss_rush_darklink_begin_retry_skip() {
-    if (boss_rush_darklink_mod_state() < 0) return;
-    s_retrySkip = RetrySkip::Running;
-    s_retrySkipStartFrame = g_Counter.mCounter0;
-    s_retrySkipSawProgress = false;
+void boss_rush_darklink_on_fight_landed(bool retry) {
+    if (!in_darklink_stage()) return;
+    dComIfGs_offOneZoneSwitch(kFightZoneSwitch, dComIfGp_roomControl_getStayNo());
+    if (!retry) return;
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    s_haveReturnPos = link != nullptr;
+    if (link != nullptr) {
+        s_returnPos = link->current.pos;
+        s_returnAngle = link->shape_angle.y;
+    }
+    s_skipStartFrame = g_Counter.mCounter0;
+    s_skipTicks = 0;
+    s_skipSawActor = false;
     s_fakeLockon = false;
     s_injectA = false;
+    s_introMessageId = fpcM_ERROR_PROCESS_ID_e;
+    s_skipPhase = SkipPhase::Off;
+    set_skip_phase(SkipPhase::Trigger);
     hold_screen_black();
     fast_forward_set_hidden_run(true);
-    dl_log("[darklink] retry: skipping the intro");
+}
+
+void boss_rush_darklink_set_warp_black(bool on) {
+    s_warpBlack = on;
+    if (on) hold_screen_black();
+}
+
+bool boss_rush_darklink_retry_skip_active() {
+    return s_skipPhase != SkipPhase::Off;
 }
 
 void update_boss_rush_darklink_retry_skip() {
-    if (s_retrySkip == RetrySkip::Off) return;
+    if (s_skipPhase == SkipPhase::Off) return;
+    ++s_skipTicks;
 
-    const char* stage = dComIfGp_getStartStageName();
-    if (!is_boss_rush_active() || !boss_rush_is_fighting_here() || boss_rush_is_returning_to_chamber() ||
-        dComIfGp_isEnableNextStage() || stage == nullptr || std::strcmp(stage, kDarknutStage) != 0) {
-        end_retry_skip(false);
+    if (!is_boss_rush_active() || boss_rush_is_returning_to_chamber() || dComIfGp_isEnableNextStage() ||
+        !in_darklink_stage()) {
+        abort_retry_skip("left the fight");
         return;
     }
-
-    const int state = boss_rush_darklink_mod_state();
-    if (state < 0 || g_Counter.mCounter0 - s_retrySkipStartFrame > kRetrySkipTimeoutFrames) {
-        dl_log("[darklink] retry skip stopped (state %d)", state);
-        end_retry_skip(true);
+    if (s_skipPhase == SkipPhase::Settle) {
+        hold_screen_black();
+        if (--s_settleTicks > 0) return;
+        restore_link_start();
+        s_skipPhase = SkipPhase::Off;
+        mDoGph_gInf_c::fadeIn(kRetrySkipFadeInSpeed, g_blackColor);
         return;
     }
-    if (state >= kModStateFight || (state == kModStateSpawn && s_retrySkipSawProgress)) {
-        dl_log("[darklink] retry skip finished (state %d)", state);
-        end_retry_skip(true);
+    if (boss_rush_darklink_fight_started()) {
+        end_retry_skip("fight started");
+        return;
+    }
+    if (s_skipTicks > kRetrySkipTimeoutTicks || g_Counter.mCounter0 - s_skipStartFrame > kRetrySkipTimeoutFrames) {
+        end_retry_skip("timeout");
         return;
     }
 
     hold_screen_black();
     fast_forward_set_hidden_run(true);
-    if (state > kModStateSpawn) s_retrySkipSawProgress = true;
-    if (state == kModStateSpawn) place_link_past_trigger();
-    s_fakeLockon = state == kModStateLockWait;
-    s_injectA = state == kModStateIntro && read_mod_int(kIntroStepRva) >= kIntroMessageStep;
+
+    fopAc_ac_c* darkLink = find_darklink_actor();
+    s_darkLinkActor = darkLink;
+    const bool event = dComIfGp_event_runCheck() != 0;
+    if (s_skipTicks % kRetrySkipLogInterval == 0) {
+        daAlink_c* link = daAlink_getAlinkActorClass();
+        dl_log("[darklink] retry skip status: phase %s, actor %d, event %d, link z %d room %d, stay room %d",
+               skip_phase_name(s_skipPhase), darkLink != nullptr, static_cast<int>(event),
+               link != nullptr ? static_cast<int>(link->current.pos.z) : 0,
+               link != nullptr ? static_cast<int>(fopAcM_GetRoomNo(link)) : -1,
+               static_cast<int>(dComIfGp_roomControl_getStayNo()));
+    }
+    if (darkLink == nullptr) {
+        if (s_skipSawActor) {
+            end_retry_skip("dark link vanished");
+            return;
+        }
+        set_skip_phase(SkipPhase::Trigger);
+        s_fakeLockon = false;
+        s_injectA = false;
+        if (!event) place_link_past_trigger();
+        return;
+    }
+    s_skipSawActor = true;
+    if (!event && s_introMessageId == fpcM_ERROR_PROCESS_ID_e) {
+        set_skip_phase(SkipPhase::Challenge);
+        place_link_past_trigger();
+        s_fakeLockon = true;
+        s_injectA = false;
+        return;
+    }
+    set_skip_phase(SkipPhase::Intro);
+    s_fakeLockon = false;
+    s_injectA = s_introMessageId != fpcM_ERROR_PROCESS_ID_e && fopMsgM_SearchByID(s_introMessageId) != nullptr;
 }
 
 DEFINE_HOOK(&dAttention_c::LockonTarget, DarkLinkLockonTargetHook);
 DEFINE_HOOK(&dAttention_c::LockonTruth, DarkLinkLockonTruthHook);
 DEFINE_HOOK(&mDoCPd_c::read, DarkLinkSkipPadReadHook);
+DEFINE_HOOK(&fopMsgM_messageSetDemo, DarkLinkIntroMessageHook);
+DEFINE_HOOK_SYMBOL("src/f_op/f_op_actor.cpp#fopAc_Execute", int(void*), DarkLinkActorExecuteHook);
+DEFINE_HOOK(&mDoGph_gInf_c::calcFade, DarkLinkCalcFadeHook);
+DEFINE_HOOK(&dMeter2_c::_draw, DarkLinkMeterDrawHook);
+DEFINE_HOOK(&dAttention_c::Draw, DarkLinkAttentionDrawHook);
+DEFINE_HOOK(&dMsgObject_c::_draw, DarkLinkMessageDrawHook);
 
 namespace {
 
+bool retry_black_active() {
+    return s_warpBlack || s_skipPhase != SkipPhase::Off;
+}
+
+HookAction on_hidden_draw_pre(ModContext*, void*, void* retval, void*) {
+    if (!retry_black_active()) return HOOK_CONTINUE;
+    if (retval != nullptr) *static_cast<int*>(retval) = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction on_attention_draw_pre(ModContext*, void*, void*, void*) {
+    return retry_black_active() ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
+}
+
+HookAction on_calc_fade_pre(ModContext*, void*, void*, void*) {
+    if (retry_black_active()) hold_screen_black();
+    return HOOK_CONTINUE;
+}
+
+HookAction on_actor_execute_pre(ModContext*, void* args, void*, void*) {
+    if (s_fakeLockon && s_darkLinkActor != nullptr) {
+        s_inDarkLinkExecute = mods::arg<void*>(args, 0) == static_cast<void*>(s_darkLinkActor);
+    }
+    return HOOK_CONTINUE;
+}
+
+void on_actor_execute_post(ModContext*, void*, void*, void*) {
+    s_inDarkLinkExecute = false;
+}
+
 void on_lockon_target_post(ModContext*, void* args, void* retval, void*) {
-    if (!s_fakeLockon || retval == nullptr || mods::arg<s32>(args, 1) != 0) return;
-    fopAc_ac_c* darkLink = find_darklink_actor();
-    if (darkLink != nullptr) *static_cast<fopAc_ac_c**>(retval) = darkLink;
+    if (!s_fakeLockon || !s_inDarkLinkExecute || retval == nullptr || mods::arg<s32>(args, 1) != 0) return;
+    *static_cast<fopAc_ac_c**>(retval) = s_darkLinkActor;
 }
 
 void on_lockon_truth_post(ModContext*, void*, void* retval, void*) {
-    if (s_fakeLockon && retval != nullptr) *static_cast<bool*>(retval) = true;
+    if (s_fakeLockon && s_inDarkLinkExecute && retval != nullptr) *static_cast<bool*>(retval) = true;
+}
+
+void on_intro_message_post(ModContext*, void* args, void* retval, void*) {
+    if (s_skipPhase == SkipPhase::Off || retval == nullptr) return;
+    if (mods::arg<u32>(args, 0) != kIntroMessageId) return;
+    s_introMessageId = *static_cast<fpc_ProcID*>(retval);
+    dl_log("[darklink] retry skip: intro message opened");
 }
 
 void on_skip_pad_read_post(ModContext*, void*, void*, void*) {
@@ -1132,5 +1197,14 @@ ModResult init_boss_rush_darklink(const HookService* hook_svc) {
     mods::hook::add_post<DarkLinkLockonTargetHook>(hook_svc, on_lockon_target_post);
     mods::hook::add_post<DarkLinkLockonTruthHook>(hook_svc, on_lockon_truth_post);
     mods::hook::add_post<DarkLinkSkipPadReadHook>(hook_svc, on_skip_pad_read_post);
+    mods::hook::add_post<DarkLinkIntroMessageHook>(hook_svc, on_intro_message_post);
+    mods::hook::add_pre<DarkLinkActorExecuteHook>(hook_svc, on_actor_execute_pre);
+    mods::hook::add_pre<DarkLinkCalcFadeHook>(hook_svc, on_calc_fade_pre);
+    HookOptions hideOptions = HOOK_OPTIONS_INIT;
+    hideOptions.priority = kVanillaDarknutHookPriority;
+    mods::hook::add_pre<DarkLinkMeterDrawHook>(hook_svc, on_hidden_draw_pre, &hideOptions);
+    mods::hook::add_pre<DarkLinkAttentionDrawHook>(hook_svc, on_attention_draw_pre, &hideOptions);
+    mods::hook::add_pre<DarkLinkMessageDrawHook>(hook_svc, on_hidden_draw_pre, &hideOptions);
+    mods::hook::add_post<DarkLinkActorExecuteHook>(hook_svc, on_actor_execute_post);
     return MOD_OK;
 }

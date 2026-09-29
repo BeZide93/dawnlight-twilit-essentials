@@ -24,6 +24,8 @@ enum ControlsButton {
     CTRL_BTN_R3,
     CTRL_BTN_L2,
     CTRL_BTN_R2,
+    CTRL_BTN_LB,
+    CTRL_BTN_RB,
     CTRL_BTN_COUNT,
 };
 

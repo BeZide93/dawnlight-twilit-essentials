@@ -1360,7 +1360,7 @@ void update_boss_bar(const LogService*, ModContext*) {
             s_boss.engaged = true;
         }
 
-        if (best->def == &kDarkLinkBossDef && boss_rush_darklink_mod_state() >= 0) {
+        if (best->def == &kDarkLinkBossDef) {
             if (boss_rush_darklink_fight_started()) {
                 s_boss.engaged = true;
                 s_boss.introGatePassed = true;

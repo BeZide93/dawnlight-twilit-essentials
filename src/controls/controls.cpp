@@ -15,6 +15,7 @@ struct SDL_Gamepad;
 const char* const kControlsButtonLabels[CTRL_BTN_COUNT] = {
     "Z", "L", "R", "A", "B", "X", "Y",
     "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "L3", "R3", "L2", "R2",
+    "L1 / LB", "R1 / RB",
 };
 
 static const int kControlsDefaultBinding[CTRL_BIND_COUNT] = {
@@ -38,6 +39,7 @@ ConfigVarHandle g_controlsMidnaVar = 0;
 static int s_midnaButton = CTRL_MIDNA_DPAD_LEFT;
 
 constexpr s32 kSdlLeftShoulderButton = 9;
+constexpr s32 kSdlRightShoulderButton = 10;
 using GetSdlGamepadButtonFn = bool (*)(SDL_Gamepad*, int);
 static GetSdlGamepadButtonFn s_getSdlGamepadButton = nullptr;
 
@@ -45,13 +47,17 @@ bool controls_midna_on_l() {
     return s_midnaButton == CTRL_MIDNA_L;
 }
 
-static bool l_shoulder_raw_held() {
+static bool sdl_button_raw_held(s32 button) {
     const s32 index = PADGetIndexForPort(PAD_1);
     SDL_Gamepad* gamepad = index < 0 ? nullptr : PADGetSDLGamepadForIndex(static_cast<u32>(index));
     if (gamepad != nullptr && s_getSdlGamepadButton != nullptr) {
-        return s_getSdlGamepadButton(gamepad, kSdlLeftShoulderButton);
+        return s_getSdlGamepadButton(gamepad, button);
     }
-    return PADGetNativeButtonPressed(PAD_1) == kSdlLeftShoulderButton;
+    return PADGetNativeButtonPressed(PAD_1) == button;
+}
+
+static bool l_shoulder_raw_held() {
+    return sdl_button_raw_held(kSdlLeftShoulderButton);
 }
 
 bool controls_l_shoulder_raw_held() {
@@ -144,6 +150,12 @@ u32 controls_binding_bit(int b) {
     }
 }
 
+static s32 controls_sdl_button(int button) {
+    if (button == CTRL_BTN_LB) return kSdlLeftShoulderButton;
+    if (button == CTRL_BTN_RB) return kSdlRightShoulderButton;
+    return -1;
+}
+
 static u32 controls_ext_button_bit(int button) {
     if (button == CTRL_BTN_L3) return PAD_BUTTON_LEFT_STICK;
     if (button == CTRL_BTN_R3) return PAD_BUTTON_RIGHT_STICK;
@@ -167,10 +179,21 @@ DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
 
 static u32 s_extHeldPrev = 0;
 static u32 s_extHeldCur  = 0;
+static bool s_sdlHeldPrev[CTRL_BIND_COUNT] = {};
+static bool s_sdlHeldCur[CTRL_BIND_COUNT] = {};
+
+static bool sdl_binding_raw_held(int b) {
+    const s32 sdlButton = controls_sdl_button(clamp_button_index(g_controlsBinding[b], b));
+    return sdlButton >= 0 && !ui_blocks_game_input() && sdl_button_raw_held(sdlButton);
+}
 
 static void controls_pad_read_post(ModContext*, void*, void*, void*) {
     s_extHeldPrev = s_extHeldCur;
     s_extHeldCur = JUTGamePad::mPadStatus[PAD_1].extButton;
+    for (int b = 0; b < CTRL_BIND_COUNT; b++) {
+        s_sdlHeldPrev[b] = s_sdlHeldCur[b];
+        s_sdlHeldCur[b] = sdl_binding_raw_held(b);
+    }
 }
 
 bool controls_binding_held(int b) {
@@ -181,6 +204,8 @@ bool controls_binding_held(int b) {
     switch (button) {
     case CTRL_BTN_L2: return controls_trigger_held(true);
     case CTRL_BTN_R2: return controls_trigger_held(false);
+    case CTRL_BTN_LB:
+    case CTRL_BTN_RB: return s_sdlHeldCur[b];
     default: break;
     }
     const u32 bit = controls_binding_bit(b);
@@ -193,6 +218,9 @@ bool controls_binding_held(int b) {
 bool controls_binding_pressed(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return false;
+    }
+    if (controls_sdl_button(clamp_button_index(g_controlsBinding[b], b)) >= 0) {
+        return s_sdlHeldCur[b] && !s_sdlHeldPrev[b];
     }
     const u32 bit = controls_binding_bit(b);
     if (bit != 0) {
