@@ -364,8 +364,13 @@ static void restore_z_item_draw_state() {
 
 static bool s_midnaLOverlay = false;
 static bool s_midnaLWasVisible = false;
+static bool s_midnaLDrawWindow = false;
 static bool s_midnaLPikariHeld = false;
 static f32 s_midnaLPikariFrame = 0.0f;
+
+bool midna_l_overlay_hides_pane() {
+    return s_midnaLDrawWindow && g_configCustomZButtonEnabled && controls_midna_on_l();
+}
 
 static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
 #if Z_MOBILE_BUILD
@@ -373,6 +378,7 @@ static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
     return false;
 #else
     return g_configCustomZButtonEnabled && !isNativeZButtonEngine() && controls_midna_on_l() &&
+           !isCanoeRiding() &&
            draw != nullptr && draw->getMainScreenPtr() != nullptr && !isTitleOrMainMenu();
 #endif
 }
@@ -397,6 +403,7 @@ HookAction on_meter2_draw_draw_pre(ModContext*, void* args, void*, void*) {
     s_midnaLWasVisible = midona->isVisible();
     midona->hide();
     s_midnaLOverlay = true;
+    s_midnaLDrawWindow = true;
     s_midnaLPikariFrame = draw->field_0x738;
     s_midnaLPikariHeld = true;
     draw->field_0x738 = 0.0f;
@@ -592,6 +599,7 @@ void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
     if (s_midnaLOverlay && args) {
         s_midnaLOverlay = false;
         draw_midna_l_overlay(mods::arg<dMeter2Draw_c*>(args, 0));
+        s_midnaLDrawWindow = false;
     }
     if (!g_configCustomZButtonEnabled || !args || isTitleOrMainMenu()) {
         return;

@@ -104,7 +104,7 @@ void update_midna_pane(dMeter2Draw_c* draw) {
         return;
     }
 
-    if (is_pause_menu_open(draw) || !isMidnaUnlocked()) {
+    if (is_pause_menu_open(draw) || !isMidnaUnlocked() || isCanoeRiding()) {
         midnaPane->hide();
     } else {
         J2DPane* juji = screen->search(MULTI_CHAR('juji_n'));
@@ -118,7 +118,9 @@ void update_midna_pane(dMeter2Draw_c* draw) {
                 set_pane_influenced_alpha_recursive(midnaPane, true);
             }
             midnaPane->move(-18.0f, 0.0f);
-            midnaPane->show();
+            if (!midna_l_overlay_hides_pane()) {
+                midnaPane->show();
+            }
         }
     }
 
@@ -287,7 +289,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
             }
             if (zbtn_n) {
                 for (J2DPane* child = zbtn_n->getFirstChildPane(); child != nullptr; child = child->getNextChildPane()) {
-                    if (child == zbtnPic || child == midonaPane) {
+                    if (child == zbtnPic || (child == midonaPane && !isCanoeRiding())) {
                         continue;
                     }
                     child->hide();
