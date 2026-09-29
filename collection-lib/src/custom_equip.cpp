@@ -1393,8 +1393,10 @@ bool custom_equip_unequip_tunic() {
         return false;
     }
     s_equipDebounce = 8;
+    const u8 base = custom_equip_resolved_base(s_entries[id].def);
+    const bool reload = current_vanilla(CE_TUNIC) != base;
     custom_equip_activate(id);
-    set_vanilla_equip(CE_TUNIC, custom_equip_resolved_base(s_entries[id].def), false);
+    set_vanilla_equip(CE_TUNIC, base, reload);
     equip_sound(false);
     return true;
 }
@@ -1434,8 +1436,9 @@ bool custom_equip_toggle(int id) {
             set_vanilla_equip(kind, underneath, false);
         }
     }
+    const bool tunicReload = kind == CE_TUNIC && current_vanilla(kind) != base;
     custom_equip_activate(id);
-    if (kind == CE_TUNIC) set_vanilla_equip(kind, base, false);
+    if (kind == CE_TUNIC) set_vanilla_equip(kind, base, tunicReload);
     equip_sound(true);
     return true;
 }
