@@ -33,7 +33,7 @@ static bool is_shield_item(u16 item) {
 static bool s_knPresent = false;
 
 static void on_shade_shield_alink_execute_post(ModContext*, void*, void*, void*) {
-    s_knPresent = fopAcM_SearchByName(fpcNm_NPC_KN_e) != nullptr();
+    s_knPresent = fopAcM_SearchByName(fpcNm_NPC_KN_e) != nullptr;
     if (!s_knPresent) return;
 
     if (dComIfGs_getSelectEquipShield() != dItemNo_NONE_e) return;
@@ -48,7 +48,6 @@ static void on_shade_shield_alink_execute_post(ModContext*, void*, void*, void*)
     }
 }
 
-// "is this item equipped?" returns 1 when equipped
 static void on_shade_shield_query_equip_post(ModContext*, void* args, void* retval, void*) {
     if (retval == nullptr || args == nullptr || !s_knPresent) return;
     const mesg_flow_node_branch* node = mods::arg<mesg_flow_node_branch*>(args, 1);
@@ -61,7 +60,6 @@ static void on_shade_shield_query_equip_post(ModContext*, void* args, void* retv
     }
 }
 
-// "does the player own this item?" returns 0 when owned
 static void on_shade_shield_query_own_post(ModContext*, void* args, void* retval, void*) {
     if (retval == nullptr || args == nullptr || !s_knPresent) return;
     const mesg_flow_node_branch* node = mods::arg<mesg_flow_node_branch*>(args, 1);
