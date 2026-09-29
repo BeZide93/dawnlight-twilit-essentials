@@ -1,6 +1,7 @@
 #include "boss_rush_portal.hpp"
 
 #include "boss_rush.hpp"
+#include "boss_rush_texts.hpp"
 
 #include "mods/hook.hpp"
 #include "mods/service.hpp"
@@ -20,7 +21,6 @@
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/J2DGraph/J2DScreen.h"
-#include "JSystem/J2DGraph/J2DTextBox.h"
 #include "JSystem/JKernel/JKRHeap.h"
 #include "JSystem/JUtility/TColor.h"
 #include "m_Do/m_Do_ext.h"
@@ -32,8 +32,6 @@
 #include <string_view>
 
 bool g_configBossRushPortal = true;
-
-f32 qa_get_text_width(const char* text, f32 charW);
 
 static constexpr f32 kPortalMapX = 427.0f;
 static constexpr f32 kPortalMapY = 344.0f;
@@ -57,37 +55,6 @@ static const dusk::config::ConfigVar<bool>* s_mirrorModeVar = nullptr;
 
 static bool is_mirror_mode() {
     return s_mirrorModeVar != nullptr && s_mirrorModeVar->getValue();
-}
-
-static J2DTextBox* s_hoverLabel = nullptr;
-
-static void ensure_hover_label() {
-    if (s_hoverLabel != nullptr) {
-        return;
-    }
-
-    JUTFont* font = mDoExt_getMesgFont();
-    if (font == nullptr) {
-        font = mDoExt_getSubFont();
-    }
-    if (font == nullptr) {
-        return;
-    }
-
-    JKRHeap* rootHeap = JKRHeap::getRootHeap();
-    JKRHeap* oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
-    J2DTextBox* box = new J2DTextBox();
-    if (oldHeap != nullptr) {
-        mDoExt_setCurrentHeap(oldHeap);
-    }
-
-    JGeometry::TBox2<f32> bounds(0.0f, 0.0f, 280.0f, 40.0f);
-    box->place(bounds);
-    box->setFont(font);
-    box->setString("Boss Rush");
-    box->setFontSize(16.0f, 20.0f);
-    box->setFontColor(JUtility::TColor(255, 235, 140, 255), JUtility::TColor(255, 190, 0, 255));
-    s_hoverLabel = box;
 }
 
 static bool portal_available() {
@@ -324,14 +291,6 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
     }
 
     if (s_portalHovered) {
-        ensure_hover_label();
-        if (s_hoverLabel != nullptr) {
-            const f32 textW = qa_get_text_width("Boss Rush", 16.0f);
-            s_hoverLabel->J2DPane::draw(posX - textW * 0.5f, posY - 56.0f, ctx, false, true);
-        }
-    }
-
-    if (s_portalHovered) {
         if (!s_hoverBracket) {
             s_hoverBracket = new dSelect_cursor_c(4, 1.0f, nullptr);
         }
@@ -342,6 +301,20 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
             s_hoverBracket->setScale(kHoverBracketScale);
             s_hoverBracket->draw();
             s_hoverBracket->resetUpdateFlag();
+        }
+
+        if (ctx) {
+            ctx->setup2D();
+        }
+        J2DFillBox(0.0f, 0.0f, 0.0f, 0.0f, JUtility::TColor(0, 0, 0, 0));
+        const f32 charW = 18.0f;
+        const f32 charH = 22.0f;
+        const f32 textW = boss_rush_texts_measure_width("Boss Rush", charW);
+        boss_rush_texts_draw_label("Boss Rush", posX - textW * 0.5f, posY - kPortalDrawSize * 0.5f - 8.0f,
+                                   charW, charH, JUtility::TColor(255, 235, 140, 255),
+                                   JUtility::TColor(255, 190, 0, 255), 255);
+        if (ctx) {
+            ctx->setup2D();
         }
     }
 }
@@ -423,7 +396,4 @@ void shutdown_boss_rush_portal() {
     s_goldPortalScreen = nullptr;
     s_goldPortalRoot   = nullptr;
     s_goldPortalW      = 0.0f;
-
-    delete s_hoverLabel;
-    s_hoverLabel = nullptr;
 }

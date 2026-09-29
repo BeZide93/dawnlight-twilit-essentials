@@ -2665,7 +2665,7 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
         quick_access_strip_reset();
     }
 
-    if (!isWolfPlayer()) {
+    if (!isWolfPlayer() && !is_boss_rush_active()) {
         J2DGrafContext* hudCtx = dComIfGp_getCurrentGrafPort();
         if (hudCtx) hudCtx->setup2D();
         draw_strip_hud_icon(screen);

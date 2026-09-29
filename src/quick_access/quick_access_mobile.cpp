@@ -4,6 +4,7 @@
 
 #include "quick_access.hpp"
 #include "../controls/controls.hpp"
+#include "../boss_rush/boss_rush.hpp"
 
 #include <string>
 
@@ -181,7 +182,8 @@ void* create_button(void* sibling, void* parent) {
 }
 
 bool quick_access_wanted() {
-    return g_configQuickAccessEnabled && !isTitleOrMainMenu() && !is_pause_menu_open();
+    return g_configQuickAccessEnabled && !isTitleOrMainMenu() && !is_pause_menu_open() &&
+           !is_boss_rush_active();
 }
 
 void sync_button(void* actionBar) {
