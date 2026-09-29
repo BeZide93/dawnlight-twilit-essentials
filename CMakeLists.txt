@@ -89,6 +89,9 @@ add_mod(twilit_essentials
             src/flurry_rush/flurry_vignette.cpp
             src/puppet_zelda_pattern/puppet_zelda_pattern.cpp
             src/stamina/stamina.cpp
+            src/stamina/stamina_hud.cpp
+            src/stamina/stamina_kantera.cpp
+            src/stamina/stamina_radial.cpp
             src/stamina/sprint_human.cpp
             src/stamina/sprint_wolf.cpp
             src/stamina/sprint_swim.cpp

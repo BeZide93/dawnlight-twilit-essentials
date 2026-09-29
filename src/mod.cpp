@@ -1937,10 +1937,19 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
         nullptr);
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina Bar");
+    ui_add_select(left, "Style", g_staminaBarStyleVar,
+        "<p><b>Default</b>: Twilight Princess lantern-style bar in the HUD. "
+        "<b>BotW Wheel</b>: Breath of the Wild stamina wheel floating next to Link. "
+        "Extra stamina is shown as up to two smaller rings around it. With max stamina scaling "
+        "with hearts, 3 hearts show only the big wheel and every extra heart grows the outer "
+        "rings until both are complete at 20 hearts.</p>",
+        kStaminaBarStyleLabels, kStaminaBarStyleCount);
     ui_add_number(left, "X Offset", g_staminaBarVars[0],
-        "<p>Horizontal position of the stamina bar as an offset.</p>");
+        "<p>Horizontal position of the stamina bar as an offset. For the wheel, the offset "
+        "is relative to its spot next to Link.</p>");
     ui_add_number(left, "Y Offset", g_staminaBarVars[1],
-        "<p>Vertical position of the stamina bar as an offset.</p>");
+        "<p>Vertical position of the stamina bar as an offset. For the wheel, the offset "
+        "is relative to its spot next to Link.</p>");
 
     svc_ui->pane_add_section(mod_ctx, left, "Boss Bar");
     ui_add_select(left, "Style", g_bossBarStyleVar,
