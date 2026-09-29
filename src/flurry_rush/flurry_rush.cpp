@@ -36,7 +36,7 @@ constexpr int kCooldownTicks = 45;
 constexpr int kPostRushGraceTicks = 30;
 constexpr s16 kFlourishAfterRushTicks = 300;
 constexpr int kMinRushTicks = 30;
-constexpr f32 kFlurryApproachRange = 150.0f;
+constexpr f32 kFlurryApproachRange = 160.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
 constexpr int kMinWindowTicks = 90;
@@ -52,10 +52,12 @@ constexpr int kMaxAtp = 8;
 constexpr f32 kMaxRushDistance = 300.0f;
 constexpr f32 kRushLeaveMargin = 80.0f;
 constexpr f32 kDodgeSensorRadiusScale = 3.0f;
-constexpr f32 kSwingSnapDistance = 125.0f;
-constexpr f32 kSwingMinDistance = 95.0f;
-constexpr f32 kSwingMaxDistance = 150.0f;
+constexpr f32 kSwingSnapDistance = 140.0f;
+constexpr f32 kSwingMinDistance = 130.0f;
+constexpr f32 kSwingMaxDistance = 160.0f;
 constexpr f32 kSwingSnapMaxDistance = 450.0f;
+constexpr f32 kHoldDistanceRate = 0.35f;
+constexpr s16 kHoldOrbitStep = 0x500;
 constexpr f32 kDodgeSensorExtraHeight = 60.0f;
 constexpr u32 kDefaultHitMapInfo = 30;
 
@@ -359,6 +361,38 @@ void snap_to_target(daAlink_c* link) {
     link->current.pos.z += diff.z * k;
 }
 
+bool is_frontal_hold_proc(u16 proc) {
+    if (proc == daAlink_c::PROC_CUT_DOWN || proc == daAlink_c::PROC_CUT_HEAD) return false;
+    return is_attack_proc(proc);
+}
+
+void hold_frontal(daAlink_c* link) {
+    if (!link->mLinkAcch.ChkGroundHit()) return;
+    if (!is_frontal_hold_proc(static_cast<u16>(link->mProcID))) return;
+    fopAc_ac_c* target = rush_target(link);
+    if (target == nullptr || target->health <= 0) return;
+    const f32 dist = (link->current.pos - target->current.pos).absXZ();
+    if (dist > kSwingSnapMaxDistance) return;
+
+    const s16 front = target->shape_angle.y;
+    s16 side = dist < 1.0f ? front : fopAcM_searchActorAngleY(target, link);
+    const s16 diff = static_cast<s16>(front - side);
+    if (diff > kHoldOrbitStep) {
+        side = static_cast<s16>(side + kHoldOrbitStep);
+    } else if (diff < -kHoldOrbitStep) {
+        side = static_cast<s16>(side - kHoldOrbitStep);
+    } else {
+        side = front;
+    }
+
+    const f32 r = dist + (kSwingSnapDistance - dist) * kHoldDistanceRate;
+    link->current.pos.x = target->current.pos.x + cM_ssin(side) * r;
+    link->current.pos.z = target->current.pos.z + cM_scos(side) * r;
+    const s16 face = static_cast<s16>(side + 0x8000);
+    link->current.angle.y = face;
+    link->shape_angle.y = face;
+}
+
 void on_swing_start(daAlink_c* link, const char* kind) {
     if (s_state != State::RUSH || link == nullptr) return;
     snap_to_target(link);
@@ -644,6 +678,10 @@ static void on_link_execute_post(ModContext*, void* args, void*, void*) {
 
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     run_extra_link_steps(link);
+    if (link != nullptr) {
+        hold_frontal(link);
+        magnet_sword(link);
+    }
 }
 
 void run_extra_link_steps(daAlink_c* link) {
@@ -663,6 +701,7 @@ void run_extra_link_steps(daAlink_c* link) {
     pad.mPressedButtonFlags = 0;
     for (int i = 0; i < extra; i++) {
         FlurryRushExecuteHook::g_orig(link);
+        hold_frontal(link);
     }
     pad.mPressedButtonFlags = pressed;
     s_reentering = false;
