@@ -208,6 +208,11 @@ bool isWolfPlayer() {
     return player != nullptr && player->checkWolf();
 }
 
+bool isCanoeRiding() {
+    daPy_py_c* player = daPy_getLinkPlayerActorClass();
+    return player != nullptr && player->checkCanoeRide();
+}
+
 bool isTitleOrMainMenu() {
     daPy_py_c* player = daPy_getLinkPlayerActorClass();
     if (player == nullptr) {

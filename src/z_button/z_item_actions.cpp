@@ -111,6 +111,9 @@ HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* r
                 if (!link->itemTriggerCheck(1 << i)) {
                     continue;
                 }
+                if (i == 2 && link->checkCanoeRide()) {
+                    continue;
+                }
 
                 const int procType = link->checkNewItemChange(i);
                 if (procType != 0 && link->itemTriggerCheck(1 << i)) {
