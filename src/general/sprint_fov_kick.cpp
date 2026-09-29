@@ -30,7 +30,6 @@ static bool in_gameplay() {
 DEFINE_HOOK(&dCamera_c::Run, SprintFovKickCameraRunHook);
 
 static void on_camera_run_post(ModContext*, void*, void*, void*) {
-    if (!g_configSprintFovKickEnabled) return;
     if (s_kick <= 0.001f && (!s_wroteFovy || s_lastApplied <= 0.0f)) return;
 
     camera_process_class* cam = dComIfGp_getCamera(g_dComIfG_gameInfo.play.getPlayerCameraID(0));
@@ -59,12 +58,9 @@ void update_sprint_fov_kick() {
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     bool sprinting = false;
-    if (link != nullptr && link->mpHIO != nullptr && !link->checkHorseRide()) {
-        const u16 proc = link->mProcID;
-        const bool inSprintProc = proc == daAlink_c::PROC_MOVE ||
-                                  proc == daAlink_c::PROC_WOLF_DASH ||
-                                  proc == daAlink_c::PROC_WOLF_DASH_REVERSE;
-        if (inSprintProc) {
+    if (link != nullptr && link->mpHIO != nullptr && !link->checkHorseRide() &&
+        !link->checkWolf()) {
+        if (link->mProcID == daAlink_c::PROC_MOVE) {
             const f32 hspeed =
                 std::sqrt(link->speed.x * link->speed.x + link->speed.z * link->speed.z);
             const f32 runBase = link->mpHIO->mMove.m.mMaxSpeed;

@@ -4,7 +4,7 @@
 
 #include "Z2AudioLib/Z2SeqMgr.h"
 
-bool g_configNoBattleMusic = false;
+bool g_configNoBattleMusic = true;
 
 DEFINE_HOOK(&Z2SeqMgr::setBattleDistState, NoBattleMusicDistStateHook);
 DEFINE_HOOK(&Z2SeqMgr::startBattleBgm, NoBattleMusicStartHook);
