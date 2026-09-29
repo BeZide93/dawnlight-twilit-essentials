@@ -294,6 +294,12 @@ static void free_cam_inject_pad(interface_of_controller_pad& pad) {
     pad.mPressedButtonFlags = 0;
 }
 
+static bool free_cam_combo_is_gameplay_input() {
+    if (dComIfGp_getDoStatus() == BUTTON_STATUS_UNK_147) return true;
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    return link != nullptr && link->getAtnActor() != nullptr;
+}
+
 static void on_free_cam_pad_read_post(ModContext*, void*, void*, void*) {
     if (s_freeCamVar == nullptr) return;
 
@@ -309,7 +315,8 @@ static void on_free_cam_pad_read_post(ModContext*, void*, void*, void*) {
     const u16 held = static_cast<u16>(pad.mButtonFlags);
     const u16 trig = static_cast<u16>(pad.mPressedButtonFlags);
     const bool combo = (held & PAD_TRIGGER_L) != 0 && (trig & PAD_BUTTON_A) != 0
-                       && !quick_access_bottles_hotkey_active();
+                       && !quick_access_bottles_hotkey_active()
+                       && (s_freeCamToggleActive || !free_cam_combo_is_gameplay_input());
 
     if (combo) {
         auto* flyCam = static_cast<dusk::config::ConfigVar<bool>*>(s_freeCamVar);
@@ -1917,7 +1924,9 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
     ui_add_select(left, "Sprint button", g_controlsVars[CTRL_BIND_SPRINT],
         "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while swimming. "
-        "Note: L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>",
+        "Note: L3/R3 are the stick clicks, L2/R2 the analog triggers. <b>L1 / LB</b> and "
+        "<b>R1 / RB</b> read the shoulder buttons directly, so they also work when that button "
+        "is unbound in Dusklight's controller settings.</p>",
         kControlsButtonLabels, CTRL_BTN_COUNT, is_controls_sprint_disabled);
 
     return MOD_OK;
