@@ -31,6 +31,10 @@ void stamina_bar_preview_request();
 void stamina_bar_preview_cancel();
 
 extern ConfigVarHandle g_staminaBarVars[2];
+extern ConfigVarHandle g_staminaBarStyleVar;
+extern int g_configStaminaBarStyle;
+extern const char* const kStaminaBarStyleLabels[];
+extern const size_t kStaminaBarStyleCount;
 ModResult init_stamina_bar_config(const ConfigService* cfg, ModContext* ctx);
 
 extern bool g_configStaminaSrcAttacks;

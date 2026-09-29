@@ -4,6 +4,10 @@ namespace stamina_impl {
 
 constexpr float kExhaustedSpeedMul = 0.75f;
 
+constexpr float kScaleMinHearts = 3.0f;
+constexpr float kScaleMaxHearts = 20.0f;
+constexpr float kScaleBaseValue = 100.0f;
+
 constexpr float kSprintAnimSpeedFraction = 0.5f;
 
 inline float sprint_anim_speed_mul(float speed_setting) {
