@@ -81,6 +81,9 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_post<RingCreateHook>(hook_svc, after_ring_create);
     mods::hook::add_pre<RingDeleteHook>(hook_svc, before_ring_delete);
     mods::hook::add_post<RingDrawHook>(hook_svc, after_ring_draw);
+    HookOptions afterExtraButtons = HOOK_OPTIONS_INIT;
+    afterExtraButtons.priority = -100;
+    mods::hook::add_post<RingStickWaitHook>(hook_svc, on_ring_stick_wait_extra_set_post, &afterExtraButtons);
     mods::hook::add_pre<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_pre);
     mods::hook::add_post<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_post);
     mods::hook::add_pre<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_pre);

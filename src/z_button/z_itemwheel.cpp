@@ -2,6 +2,7 @@
 
 #include "z_itemwheel.hpp"
 #include "z_item_actions.hpp"
+#include "../compat/extra_buttons.hpp"
 #include <d/d_menu_item_explain.h>
 #include <JSystem/JUtility/JUTFont.h>
 #include <cmath>
@@ -20,6 +21,25 @@ DEFINE_HOOK(&dMenu_Ring_c::checkExplainForce, CheckExplainForceHook);
 DEFINE_HOOK(&dMenu_Ring_c::_create, RingCreateHook);
 DEFINE_HOOK(&dMenu_Ring_c::_delete, RingDeleteHook);
 DEFINE_HOOK(&dMenu_Ring_c::_draw, RingDrawHook);
+DEFINE_HOOK(&dMenu_Ring_c::stick_wait_proc, RingStickWaitHook);
+
+void on_ring_stick_wait_extra_set_post(ModContext*, void* args, void*, void*) {
+    if (!g_configCustomZButtonEnabled || !args || !extra_buttons_swap_combo()) {
+        return;
+    }
+    dMenu_Ring_c* ring = mods::arg<dMenu_Ring_c*>(args, 0);
+    if (!ring) {
+        return;
+    }
+    for (int i = 0; i < 3; i++) {
+        if (ring->field_0x674[i] == 0) {
+            ring->field_0x6b4[i] = dComIfGs_getSelectItemIndex(i);
+            ring->field_0x6b8[i] = dComIfGs_getMixItemIndex(i);
+        }
+    }
+    sync_z_item_state();
+    update_z_item_texture();
+}
 
 u8 get_ring_slot_for_item(dMenu_Ring_c* ring, u8 slotOrItem) {
     if (!ring || slotOrItem == 0xFF || slotOrItem == dItemNo_NONE_e) return 0xFF;
@@ -133,7 +153,7 @@ void on_set_active_cursor_post(ModContext*, void* args, void*, void*) {
 
     JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
     bool physZTrig = rawGamePad != nullptr && (rawGamePad->getTrigger() & PAD_TRIGGER_Z) != 0;
-    if (!physZTrig) {
+    if (!physZTrig || extra_buttons_swap_combo()) {
         return;
     }
 

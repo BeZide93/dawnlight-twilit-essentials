@@ -5,10 +5,13 @@
 #include "z_item_actions.hpp"
 #include "../quick_access/quick_access.hpp"
 #include "../controls/controls.hpp"
+#include "../compat/extra_buttons.hpp"
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadHook);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, MidnaTalkTriggerHook);
+
+static bool s_extraSetZLatch = false;
 
 void on_pad_read_post(ModContext*, void*, void*, void*) {
     if (isTitleOrMainMenu()) {
@@ -73,11 +76,25 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
         physZTrig = false;
     }
 
+    const bool extraSetCombo =
+        physZTrig && (pad.mButtonFlags & PAD_TRIGGER_R) != 0 && extra_buttons_enabled();
+    if (extraSetCombo) {
+        s_extraSetZLatch = true;
+    } else if (!physZHeld) {
+        s_extraSetZLatch = false;
+    }
+    if (s_extraSetZLatch) {
+        physZHeld = false;
+        physZTrig = false;
+    }
+
     g_physZHeld = physZHeld;
     g_physZTrig = physZTrig;
 
-    pad.mButtonFlags &= ~PAD_TRIGGER_Z;
-    pad.mPressedButtonFlags &= ~PAD_TRIGGER_Z;
+    if (!extraSetCombo) {
+        pad.mButtonFlags &= ~PAD_TRIGGER_Z;
+        pad.mPressedButtonFlags &= ~PAD_TRIGGER_Z;
+    }
 
     ensure_z_slot_initialized();
 
@@ -120,9 +137,14 @@ void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
 
     z_mobile_hb_tick(alink);
 
+    if (alink != nullptr && s_extraSetZLatch) {
+        alink->mItemButton &= ~0x04;
+        alink->mItemTrigger &= ~0x04;
+    }
+
     if (alink != nullptr && !alink->checkWolf()) {
         u8 windowStatus = dMeter2Info_getWindowStatus();
-        if (windowStatus == 0 && !quick_access_is_active()) {
+        if (windowStatus == 0 && !quick_access_is_active() && !s_extraSetZLatch) {
             JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
             if (rawGamePad != nullptr) {
                 bool physZHeld = (rawGamePad->getButton() & PAD_TRIGGER_Z) != 0;

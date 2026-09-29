@@ -18,6 +18,7 @@ struct CheckExplainForceHook;
 struct RingCreateHook;
 struct RingDeleteHook;
 struct RingDrawHook;
+struct RingStickWaitHook;
 
 u8 get_ring_slot_for_item(dMenu_Ring_c* ring, u8 slotOrItem);
 void trigger_ring_item_slide_z(dMenu_Ring_c* ring, u8 itemNo);
@@ -40,3 +41,4 @@ HookAction on_check_explain_force_pre(ModContext* mod_ctx, void* args, void* ret
 void after_ring_create(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction before_ring_delete(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 void after_ring_draw(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+void on_ring_stick_wait_extra_set_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
