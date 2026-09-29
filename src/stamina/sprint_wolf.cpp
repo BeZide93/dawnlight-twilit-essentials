@@ -7,9 +7,11 @@
 
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_player.h"
 #include "f_op/f_op_camera_mng.h"
 #include "SSystem/SComponent/c_math.h"
+#include "Z2AudioLib/Z2SeMgr.h"
 
 #include <cmath>
 
@@ -22,17 +24,18 @@ DEFINE_HOOK(&daAlink_c::setFaceBasicTexture, SprintWolfTongueFace);
 DEFINE_HOOK(&daAlink_c::setDoubleAnimeWolf, SprintWolfRunAnm);
 DEFINE_HOOK(&daAlink_c::procWolfAutoJumpInit, SprintWolfAutoJump);
 DEFINE_HOOK(&daAlink_c::setWolfAnmVoice, SprintWolfVoiceAnm);
+DEFINE_HOOK(&daMidna_c::execute, SprintWolfMidnaExecute);
 
 static constexpr int kBurstIntervalFrames = 90;
 static constexpr f32 kWolfSprintDrainRate = 0.90f;
 static constexpr int kMinSprintRunFrames = 6;
+static constexpr u8 kWolfVoiceDash = 4;
 
 static int  s_burstTimer     = 0;
 static bool s_wasSprinting   = false;
 static int  s_sprintRunFrames = 0;
 static bool s_tongueOut      = false;
-static int  s_burstCount     = 0;
-static int  s_dashVoiceSuppress = 0;
+static bool s_muteDashVoice  = false;
 
 static u32 s_sprintWindEmitter = 0;
 
@@ -171,12 +174,25 @@ static void wolf_dash_init_post(ModContext*, void* args, void*, void*) {
     s_burstTimer = 0;
 }
 
-static HookAction wolf_voice_anm_pre(ModContext*, void*, void*, void*) {
-    if (s_dashVoiceSuppress > 0) {
-        s_dashVoiceSuppress--;
+static HookAction wolf_voice_anm_pre(ModContext*, void* args, void*, void*) {
+    if (!args) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link != nullptr && link->field_0x2fd8 == kWolfVoiceDash && s_muteDashVoice &&
+        sprint_wanted(link)) {
         return HOOK_SKIP_ORIGINAL;
     }
     return HOOK_CONTINUE;
+}
+
+static void midna_execute_post(ModContext*, void* args, void*, void*) {
+    if (!args) return;
+    daMidna_c* midna = mods::arg<daMidna_c*>(args, 0);
+    if (midna == nullptr || midna->mSoundID != Z2SE_MDN_V_CLINGST || midna->mVoiceFrame < 0.0f) {
+        return;
+    }
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (!s_muteDashVoice || link == nullptr || !link->checkWolf() || !sprint_wanted(link)) return;
+    midna->mVoiceFrame = -1.0f;
 }
 
 static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
@@ -184,8 +200,7 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
     refresh_wolf_tongue(link);
     if (!sprint_wanted(link)) {
         s_burstTimer = 0;
-        s_burstCount = 0;
-        s_dashVoiceSuppress = 0;
+        s_muteDashVoice = false;
         if (s_wasSprinting && s_sprintRunFrames >= kMinSprintRunFrames && link) {
             link->field_0x30d0 = 0;
             link->offNoResetFlg1(daPy_py_c::FLG1_DASH_MODE);
@@ -216,9 +231,7 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
 
     if (++s_burstTimer < kBurstIntervalFrames) return HOOK_CONTINUE;
     s_burstTimer = 0;
-    if (s_burstCount++ > 0) {
-        s_dashVoiceSuppress = kBurstIntervalFrames + 10;
-    }
+    s_muteDashVoice = true;
 
     link->procWolfDashInit();
     apply_dash_speed(link);
@@ -246,6 +259,7 @@ ModResult init_sprint_wolf(const HookService* hook_svc) {
     mods::hook::add_pre<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_pre);
     mods::hook::add_post<SprintWolfAutoJump>(hook_svc, wolf_auto_jump_post);
     mods::hook::add_pre<SprintWolfVoiceAnm>(hook_svc, wolf_voice_anm_pre);
+    mods::hook::add_post<SprintWolfMidnaExecute>(hook_svc, midna_execute_post);
     return MOD_OK;
 }
 
@@ -255,7 +269,6 @@ void shutdown_sprint_wolf() {
     s_sprintRunFrames = 0;
     s_tongueOut = false;
     s_wolfJumpBoost = false;
-    s_burstCount = 0;
-    s_dashVoiceSuppress = 0;
+    s_muteDashVoice = false;
     stop_sprint_wind_effect();
 }
