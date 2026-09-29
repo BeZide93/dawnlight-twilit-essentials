@@ -25,6 +25,7 @@
 #include "../z_button/z_common.hpp"
 #include "../controls/controls.hpp"
 #include "../compat/twilight_hd.hpp"
+#include "../boss_rush/boss_rush.hpp"
 #include "mods/svc/save.h"
 
 #include <dolphin/gx.h>
@@ -420,9 +421,11 @@ static void on_pad_read_bottles_post(ModContext*, void*, void*, void*) {
         }
     }
 
-    if (!g_configBottlesQuickAccessEnabled || bottles_is_title_or_main_menu()) {
+    if (!g_configBottlesQuickAccessEnabled || bottles_is_title_or_main_menu() ||
+        is_boss_rush_active()) {
         close_bottle_menu();
         s_cancelLatchL = false;
+        s_holdFramesL = 0;
         return;
     }
 
