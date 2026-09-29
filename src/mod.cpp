@@ -1086,10 +1086,6 @@ static bool is_quick_access_sub_disabled(ModContext*, void*) {
     return !g_configQuickAccessEnabled;
 }
 
-static bool is_bottles_sub_disabled(ModContext*, void*) {
-    return !g_configBottlesQuickAccessEnabled;
-}
-
 static bool is_epona_sub_disabled(ModContext*, void*) {
     return !g_configEponaEnabled;
 }
@@ -1914,12 +1910,6 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],
         "<p>Tap to use your quick item, hold to open the Quick Access menu.</p>",
         kControlsButtonLabels, CTRL_BTN_COUNT, is_quick_access_sub_disabled);
-
-    svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
-    ui_add_select(left, "Bottles button", g_controlsVars[CTRL_BIND_BOTTLES],
-        "<p>Tap to use the selected bottle, hold to open the bottle menu. Note: while bound "
-        "to L, L no longer triggers targeting/shield.</p>",
-        kControlsButtonLabels, CTRL_BTN_COUNT, is_bottles_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
     ui_add_select(left, "Sprint button", g_controlsVars[CTRL_BIND_SPRINT],

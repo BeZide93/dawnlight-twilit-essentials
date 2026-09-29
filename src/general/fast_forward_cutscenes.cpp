@@ -26,7 +26,7 @@ int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
 
 float g_configGeneralFastForwardSpeed = 8.0f;
 
-#define ENABLE_FF_LOG 0
+#define ENABLE_FF_LOG 1
 
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
@@ -427,6 +427,8 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     if (dComIfGp_getPlayer(0) == nullptr) return false;
 
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
+
+    if (dMeter2Info_getWindowStatus() != 0) return false;
 
     if (is_dialogue_active(evt)) return false;
 

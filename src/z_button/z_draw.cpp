@@ -6,6 +6,7 @@
 #include "../boss_rush/boss_rush_midna.hpp"
 #include "../controls/controls.hpp"
 #include "../stamina/stamina.hpp"
+#include "../compat/tp_classic_buttons.hpp"
 #include "m_Do/m_Do_graphic.h"
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 
@@ -176,6 +177,10 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
     f32 baseSize = 42.0f;
     f32 w = texScale * ((mainBuf->width  * baseSize) / 48.0f);
     f32 h = texScale * ((mainBuf->height * baseSize) / 48.0f);
+    if (zItemHost == zbtn && tp_classic_buttons_enabled()) {
+        w *= kTpClassicZItemScale;
+        h *= kTpClassicZItemScale;
+    }
 
     if (shinePic) {
         shinePic->resize(w, h);
@@ -306,6 +311,57 @@ void draw_item_count_digits(int num, int maxNum, f32 baseX, f32 baseY, f32 iconW
     }
 }
 
+struct ZItemDrawState {
+    J2DPicture* pic = nullptr;
+    J2DPicture* shine = nullptr;
+    const ResTIMG* tex = nullptr;
+    bool visible = false;
+    bool shineVisible = false;
+    u8 alpha = 0;
+    u8 shineAlpha = 0;
+};
+
+static ZItemDrawState s_zItemDrawState;
+
+static void capture_z_item_draw_state(dMeter2Draw_c* draw) {
+    s_zItemDrawState = ZItemDrawState{};
+    CPaneMgr* itemR = dMeter2Info_getMeterItemPanePtr(2);
+    if (!pane_is_ready(itemR)) return;
+    ZItemDrawState st;
+    st.pic = static_cast<J2DPicture*>(itemR->getPanePtr());
+    st.visible = st.pic->isVisible();
+    st.alpha = st.pic->getAlpha();
+    if (st.pic->getTexture(0) != nullptr) st.tex = st.pic->getTexture(0)->getTexInfo();
+    st.shine = draw != nullptr ? draw->mpItemXYPane[2] : nullptr;
+    if (st.shine != nullptr) {
+        st.shineVisible = st.shine->isVisible();
+        st.shineAlpha = st.shine->getAlpha();
+    }
+    s_zItemDrawState = st;
+}
+
+static void restore_pane_visibility(J2DPane* pane, bool visible, u8 alpha) {
+    if (pane->isVisible() != visible) {
+        if (visible) {
+            pane->show();
+        } else {
+            pane->hide();
+        }
+    }
+    if (pane->getAlpha() != alpha) pane->setAlpha(alpha);
+}
+
+static void restore_z_item_draw_state() {
+    const ZItemDrawState& st = s_zItemDrawState;
+    CPaneMgr* itemR = dMeter2Info_getMeterItemPanePtr(2);
+    if (st.pic == nullptr || !pane_is_ready(itemR) || itemR->getPanePtr() != st.pic) return;
+    restore_pane_visibility(st.pic, st.visible, st.alpha);
+    if (st.tex != nullptr && st.pic->getTexture(0) != nullptr && st.pic->getTexture(0)->getTexInfo() != st.tex) {
+        st.pic->changeTexture(st.tex, 0);
+    }
+    if (st.shine != nullptr) restore_pane_visibility(st.shine, st.shineVisible, st.shineAlpha);
+}
+
 static bool s_midnaLOverlay = false;
 static bool s_midnaLWasVisible = false;
 static bool s_midnaLPikariHeld = false;
@@ -327,6 +383,10 @@ HookAction on_meter2_draw_draw_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
+    if (g_configCustomZButtonEnabled && !isNativeZButtonEngine() && !isTitleOrMainMenu()) {
+        restore_z_item_draw_state();
+        restore_midna_pictures_for_draw(draw);
+    }
     if (!midna_l_overlay_wanted(draw)) {
         return HOOK_CONTINUE;
     }
@@ -510,7 +570,7 @@ static void draw_midna_l_overlay(dMeter2Draw_c* draw) {
     if (port != nullptr) port->setup2D();
     midna_l_draw(base, x, y, w, h, alpha, true);
     //const f32 size = h * 1.05f;
-    const f32 size = h * 0.75f;
+    const f32 size = h * (tp_classic_buttons_enabled() ? kTpClassicMidnaLIconScale : 0.75f);
     const f32 cx = x + w * 0.5f;
     const f32 cy = y + h * 0.5f;
     midna_l_draw(shadow, cx - size * 0.5f, cy - size * 0.5f, size, size, alpha, false);
@@ -988,5 +1048,6 @@ void on_meter2_execute_post(ModContext*, void* args, void*, void*) {
         if (!isWolfPlayer() && !is_pause_menu_open(draw)) {
             update_z_item_texture(draw);
         }
+        capture_z_item_draw_state(draw);
     }
 }

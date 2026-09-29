@@ -3,6 +3,7 @@
 #include "midna_location.hpp"
 #include "z_mobile.hpp"
 #include "../controls/controls.hpp"
+#include "../compat/tp_classic_buttons.hpp"
 #include "m_Do/m_Do_ext.h"
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 #include "JSystem/JUtility/JUTFont.h"
@@ -16,10 +17,62 @@ static JUtility::TColor s_origWhite(40, 90, 160, 255);
 static bool s_hasOrigProps = false;
 static bool s_buttonPromptDirty = false;
 
+static const u64 kMidnaPictureTags[2] = {MULTI_CHAR('midona_s'), MULTI_CHAR('midona')};
+static JGeometry::TBox2<f32> s_midnaLayoutBounds[2];
+static bool s_midnaLayoutValid[2] = {false, false};
+static bool s_midnaLayoutLoaded = false;
+
+static void load_midna_layout_bounds() {
+    if (s_midnaLayoutLoaded) return;
+    JKRArchive* archive = dComIfGp_getMain2DArchive();
+    if (archive == nullptr) return;
+    s_midnaLayoutLoaded = true;
+
+    JKRHeap* rootHeap = JKRHeap::getRootHeap();
+    JKRHeap* oldHeap = rootHeap != nullptr ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
+    J2DScreen* layout = JKR_NEW J2DScreen();
+    if (layout != nullptr) {
+        if (layout->setPriority("zelda_game_image.blo", 0x20000, archive)) {
+            for (int i = 0; i < 2; i++) {
+                if (J2DPane* pic = layout->search(kMidnaPictureTags[i])) {
+                    s_midnaLayoutBounds[i] = pic->getBounds();
+                    s_midnaLayoutValid[i] = true;
+                }
+            }
+        }
+        JKR_DELETE(layout);
+    }
+    if (oldHeap != nullptr) {
+        mDoExt_setCurrentHeap(oldHeap);
+    }
+}
+
+void restore_midna_pictures_for_draw(dMeter2Draw_c* draw) {
+    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || draw == nullptr) return;
+    if (!tp_classic_buttons_enabled()) return;
+    J2DScreen* screen = draw->getMainScreenPtr();
+    if (screen == nullptr) return;
+    for (int i = 0; i < 2; i++) {
+        if (!s_midnaLayoutValid[i]) continue;
+        const JGeometry::TBox2<f32>& base = s_midnaLayoutBounds[i];
+        J2DPane* pic = screen->search(kMidnaPictureTags[i]);
+        if (pic == nullptr) continue;
+        const JGeometry::TBox2<f32>& cur = pic->getBounds();
+        if (cur.i.x != base.i.x || cur.i.y != base.i.y) {
+            pic->move(base.i.x, base.i.y);
+        }
+        if (cur.getWidth() != base.getWidth() || cur.getHeight() != base.getHeight()) {
+            pic->resize(base.getWidth(), base.getHeight());
+        }
+    }
+}
+
 void update_midna_pane(dMeter2Draw_c* draw) {
     if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || draw == nullptr) return;
     J2DScreen* screen = draw->getMainScreenPtr();
     if (screen == nullptr) return;
+
+    if (tp_classic_buttons_enabled()) load_midna_layout_bounds();
 
     if (!s_hasOrigProps) {
         J2DPicture* zbtnPic = static_cast<J2DPicture*>(screen->search(MULTI_CHAR('zbtn')));

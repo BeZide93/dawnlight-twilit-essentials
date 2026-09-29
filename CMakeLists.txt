@@ -36,6 +36,7 @@ add_mod(twilit_essentials
             src/compat/twilight_hd.cpp
             src/compat/dawnlight.cpp
             src/compat/extra_buttons.cpp
+            src/compat/tp_classic_buttons.cpp
             src/sdk_compat.cpp
             src/general/general.cpp
             src/general/skip_cutscenes.cpp
