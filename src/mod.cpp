@@ -43,6 +43,7 @@
 #include "collection_menu/collection_menu.hpp"
 #include "collection_menu/collection_menu_shield.hpp"
 #include "controls/controls.hpp"
+#include "bug-report.hpp"
 #include "util.hpp"
 #include "compat/twilight_hd.hpp"
 
@@ -2292,6 +2293,14 @@ static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, M
         ctrlDiscord.label = "View channel in Discord";
         ctrlDiscord.on_pressed = on_open_discord_channel;
         svc_ui->pane_add_control(mod_ctx, panel, &ctrlDiscord, nullptr);
+    }
+
+    {
+        UiControlDesc ctrlBugReport = UI_CONTROL_DESC_INIT;
+        ctrlBugReport.kind = UI_CONTROL_BUTTON;
+        ctrlBugReport.label = "Create bug report";
+        ctrlBugReport.on_pressed = bug_report::on_create_bug_report_pressed;
+        svc_ui->pane_add_control(mod_ctx, panel, &ctrlBugReport, nullptr);
     }
 
     svc_ui->pane_add_section(mod_ctx, panel, "Known Issues");
