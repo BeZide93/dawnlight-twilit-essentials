@@ -46,6 +46,7 @@ static int s_trailHold = 0;
 
 static constexpr int kTrailHoldFrames = 18;
 static constexpr f32 kTrailCatchUp = 0.14f;
+static constexpr f32 kTrailCaughtUpEpsilon = 0.5f;
 
 static constexpr int kStaminaBarPreviewFrames = 120;
 static int s_staminaBarPreviewFrames = 0;
@@ -131,7 +132,7 @@ f32 stamina_bar_alpha() {
 void stamina_hud_notify_spend() {
     s_showTimer = 50;
     s_pulse = 1.0f;
-    s_trailHold = kTrailHoldFrames;
+    if (s_trail - s_display < kTrailCaughtUpEpsilon) s_trailHold = kTrailHoldFrames;
 }
 
 void stamina_hud_notify_drain() {

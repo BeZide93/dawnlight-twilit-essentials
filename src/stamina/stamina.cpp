@@ -126,11 +126,19 @@ int stamina_effective_max() {
     return static_cast<int>(stamina_max());
 }
 
+static constexpr u8 kPlaceNameFukiKind = 12;
+
+static bool is_place_name_message() {
+    dMsgObject_c* msg = dMsgObject_getMsgObjectClass();
+    return msg != nullptr && msg->getFukiKind() == kPlaceNameFukiKind;
+}
+
 static bool in_gameplay() {
     if (dMeter2Info_getWindowStatus() != 0) return false;
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
     if (dComIfGp_event_runCheck()) return false;
-    if (dMeter2Info_isShopTalkFlag() || dMsgObject_isTalkNowCheck()) return false;
+    if (dMeter2Info_isShopTalkFlag()) return false;
+    if (dMsgObject_isTalkNowCheck() && !is_place_name_message()) return false;
     return true;
 }
 
