@@ -21,8 +21,6 @@
 #include "dusk/settings.h"
 
 #include <cmath>
-#include <cstdarg>
-#include <cstdio>
 #include <string_view>
 
 bool g_configFlurryRushEnabled = false;
@@ -84,7 +82,6 @@ float s_execAccumulator = 0.0f;
 const HookService* s_hookSvc = nullptr;
 bool s_hookSvcSet = false;
 bool s_hooksInstalled = false;
-const LogService* s_log = nullptr;
 
 int s_swingCount = 0;
 int s_contactCount = 0;
@@ -96,6 +93,10 @@ int s_swingAtp = 0;
 int s_swingTicks = 0;
 
 int s_observedPower[kMaxAtp] = {};
+s16 s_atCheckHealthBefore = 0;
+f32 s_dealtDamage = 0.0f;
+f32 s_dealtPower = 0.0f;
+f32 s_bonusCarry = 0.0f;
 
 bool s_targetProven = false;
 Z2Creature* s_hitSound = nullptr;
@@ -104,16 +105,6 @@ u32 s_hitMapInfo = kDefaultHitMapInfo;
 int s_pendingBonus = 0;
 int s_pendingBonusTicks = 0;
 int s_pendingBonusAtp = 0;
-
-void flog(const char* fmt, ...) {
-    if (s_log == nullptr) return;
-    char buf[192];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    s_log->info(mod_ctx, buf);
-}
 
 using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
 void* s_frameInterpVar = nullptr;
@@ -172,6 +163,9 @@ void clear_rush_state() {
     s_swingAtp = 0;
     s_swingTicks = 0;
     for (int& power : s_observedPower) power = 0;
+    s_dealtDamage = 0.0f;
+    s_dealtPower = 0.0f;
+    s_bonusCarry = 0.0f;
     s_targetProven = false;
     s_hitSound = nullptr;
     s_hitSeId = 0;
@@ -196,8 +190,6 @@ void end_rush(const char* reason = "disabled") {
         for (; s_pendingBonus > 0; --s_pendingBonus) {
             apply_bonus_hit(s_pendingBonusAtp);
         }
-        flog("flurry: rush end (%s): swings=%d contacts=%d real hits=%d bonus hits=%d", reason,
-             s_swingCount, s_contactCount, s_realHitCount, s_bonusHitCount);
         restore_time();
         s_cooldown = kCooldownTicks;
         s_postRushGrace = kPostRushGraceTicks;
@@ -221,11 +213,7 @@ void start_rush() {
     s_targetId = (player != nullptr && player->mTargetedActor != nullptr)
                      ? fopAcM_GetID(player->mTargetedActor)
                      : fpcM_ERROR_PROCESS_ID_e;
-    fopAc_ac_c* target = player != nullptr ? player->mTargetedActor : nullptr;
     s_rushStartDist = -1.0f;
-    flog("flurry: rush start, target actor %d (id %u) hp %d",
-         target ? fopAcM_GetName(target) : -1, target ? fopAcM_GetID(target) : 0u,
-         target ? target->health : -1);
     slow_time();
 }
 
@@ -317,22 +305,16 @@ void apply_bonus_hit(int atp) {
     auto* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
     fopAc_ac_c* target = rush_target(link);
     if (link == nullptr || target == nullptr || target->health <= 0) return;
-    if (fopAcM_CheckStatus(target, fopAcStts_BOSS_e)) {
-        flog("flurry: swing without damage, bosses only take real hits");
-        return;
-    }
-    if (!s_targetProven) {
-        flog("flurry: swing without damage, target has not taken a real sword hit yet");
-        return;
-    }
+    if (fopAcM_CheckStatus(target, fopAcStts_BOSS_e) || !s_targetProven) return;
 
     const cXyz diff = target->current.pos - link->current.pos;
-    if (diff.absXZ() > kFlurryReachXZ || std::fabs(diff.y) > kFlurryReachY) {
-        flog("flurry: swing missed, target %.0f away", diff.absXZ());
-        return;
-    }
+    if (diff.absXZ() > kFlurryReachXZ || std::fabs(diff.y) > kFlurryReachY) return;
 
-    int damage = sword_hit_power(link, atp);
+    f32 scaled = static_cast<f32>(sword_hit_power(link, atp));
+    if (s_dealtPower > 0.0f) scaled *= s_dealtDamage / s_dealtPower;
+    s_bonusCarry += scaled;
+    const int damage = static_cast<int>(s_bonusCarry);
+    s_bonusCarry -= static_cast<f32>(damage);
 
     const s16 before = target->health;
     const int after = before - damage < 1 ? 1 : before - damage;
@@ -346,8 +328,6 @@ void apply_bonus_hit(int atp) {
 
     ++s_bonusHitCount;
     ++s_hitCount;
-    flog("flurry: bonus hit #%d on actor %d (id %u): hp %d -> %d (no damage registered)",
-         s_bonusHitCount, fopAcM_GetName(target), fopAcM_GetID(target), before, after);
 }
 
 void close_swing() {
@@ -388,7 +368,6 @@ void on_swing_start(daAlink_c* link, const char* kind) {
     s_swingTicks = 0;
     s_swingAtp = link->mAtCps[0].GetAtAtp();
     ++s_swingCount;
-    flog("flurry: swing #%d (%s, atp %d)", s_swingCount, kind, s_swingAtp);
 }
 
 DEFINE_HOOK(&daAlink_c::procCutNormalInit, FlurrySwingNormalHook);
@@ -485,6 +464,13 @@ static HookAction on_check_damage_action_pre(ModContext*, void* args, void* retv
     return HOOK_SKIP_ORIGINAL;
 }
 
+static HookAction on_at_check_pre(ModContext*, void* args, void*, void*) {
+    if (s_state != State::RUSH) return HOOK_CONTINUE;
+    fopAc_ac_c* enemy = mods::arg<fopAc_ac_c*>(args, 0);
+    if (enemy != nullptr) s_atCheckHealthBefore = enemy->health;
+    return HOOK_CONTINUE;
+}
+
 static void on_at_check_post(ModContext*, void* args, void*, void*) {
     if (s_state != State::RUSH) return;
     clear_hit_stop();
@@ -496,10 +482,14 @@ static void on_at_check_post(ModContext*, void* args, void*, void*) {
     {
         return;
     }
+    const bool isTarget = fopAcM_GetID(enemy) == s_targetId || s_targetId == fpcM_ERROR_PROCESS_ID_e;
+    if (isTarget && enemy->health > 0 && s_atCheckHealthBefore >= enemy->health) {
+        s_dealtDamage += static_cast<f32>(s_atCheckHealthBefore - enemy->health);
+        s_dealtPower += static_cast<f32>(info->mAttackPower);
+    }
     ++s_realHitCount;
     ++s_hitCount;
-    const char* credited = "other enemy";
-    if (fopAcM_GetID(enemy) == s_targetId || s_targetId == fpcM_ERROR_PROCESS_ID_e) {
+    if (isTarget) {
         s_targetProven = true;
         if (info->mpSound != nullptr && info->mpCollider != nullptr) {
             s_hitSound = info->mpSound;
@@ -510,20 +500,13 @@ static void on_at_check_post(ModContext*, void* args, void*, void*) {
 
         if (s_pendingBonus > 0) {
             --s_pendingBonus;
-            credited = "earlier swing";
         } else if (s_swingOpen) {
             s_swingLanded = true;
-            credited = "current swing";
             if (s_swingAtp >= 0 && s_swingAtp < kMaxAtp) {
                 s_observedPower[s_swingAtp] = info->mAttackPower;
             }
-        } else {
-            credited = "no open swing";
         }
     }
-    flog("flurry: real hit #%d on actor %d (id %u), power %d, hp now %d (%s)", s_realHitCount,
-         fopAcM_GetName(enemy), fopAcM_GetID(enemy), info->mAttackPower, enemy->health,
-         credited);
 }
 
 static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
@@ -863,12 +846,12 @@ void flurry_rush_apply_enabled() {
     }
 }
 
-ModResult init_flurry_rush(const HookService* hook_svc, const LogService* log_svc, ModError*) {
+ModResult init_flurry_rush(const HookService* hook_svc, const LogService*, ModError*) {
     if (hook_svc == nullptr) return MOD_ERROR;
-    s_log = log_svc;
     s_hookSvc = hook_svc;
     s_hookSvcSet = true;
 
+    mods::hook::add_pre<FlurryRushAtCheckHook>(hook_svc, on_at_check_pre);
     mods::hook::add_post<FlurryRushAtCheckHook>(hook_svc, on_at_check_post);
 
     GetConfigVarFn getConfigVar = nullptr;
@@ -905,7 +888,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
     if (s_state == State::ARMED) {
         ++s_stateTicks;
         const bool dodging = player != nullptr && is_dodge_proc(static_cast<u16>(player->mProcID));
-        if (s_stateTicks > g_configFlurryRushPerfectFrames && !dodging) {
+        if (s_stateTicks > g_configFlurryRushPerfectFrames || !dodging) {
             s_state = State::IDLE;
         }
         return;
@@ -939,7 +922,6 @@ void update_flurry_rush(const LogService*, ModContext*) {
         const int newContacts = poll_enemy_hits(link);
         if (newContacts > 0) {
             s_contactCount += newContacts;
-            flog("flurry: sword contact (%d so far)", s_contactCount);
         }
 
         if (s_swingOpen && (++s_swingTicks >= kSwingResolveTicks ||

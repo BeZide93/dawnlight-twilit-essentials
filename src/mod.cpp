@@ -1747,9 +1747,8 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Perfect dodge window";
-        c.help_rml = "<p>How long after a dodge an attack still counts as a perfect dodge "
-                     "(default: 30). An attack that would have hit - passing close to Link "
-                     "during the dodge - counts too.</p>";
+        c.help_rml = "<p>Frames after a dodge starts in which an attack counts as a perfect dodge. "
+                     "Lower is harder (default: 30).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varFlurryRushPerfectFrames;
         c.min = 5;
