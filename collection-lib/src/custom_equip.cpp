@@ -928,6 +928,23 @@ static void sync_capless_head_flag(daAlink_c* a) {
     }
 }
 
+static u8 link_audio_state_for_clothes(daAlink_c* a) {
+    if (a->checkNoResetFlg2(daPy_py_c::FLG2_UNK_80000) || daPy_py_c::checkCasualWearFlg()) return 2;
+    if (daPy_py_c::checkZoraWearFlg()) return 3;
+    if (daPy_py_c::checkMagicArmorWearFlg()) {
+        const u8 cur = a->mZ2Link.getLinkState();
+        if (cur == 4 || cur == 5) return cur;
+        return dComIfGs_getRupee() != 0 ? 4 : 5;
+    }
+    return 0;
+}
+
+static void sync_link_audio_state(daAlink_c* a) {
+    if (a == nullptr || is_wolf(a)) return;
+    const u8 want = link_audio_state_for_clothes(a);
+    if (a->mZ2Link.getLinkState() != want) a->mZ2Link.setLinkState(want);
+}
+
 static void restore_original_link_models(daAlink_c* a) {
     a->mpLinkModel     = s_originalLinkModel;
     a->mpLinkHatModel  = s_originalHatModel;
@@ -2017,6 +2034,7 @@ static void custom_equip_apply(daAlink_c* a, bool duringRebuild) {
             } else {
                 sync_capless_head_flag(a);
             }
+            sync_link_audio_state(a);
         } else if (s_originalLinkModel != nullptr) {
             if (a->mpLinkModel != s_originalLinkModel) restore_original_link_models(a);
             s_originalLinkModel = nullptr;
