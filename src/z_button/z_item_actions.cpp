@@ -172,13 +172,14 @@ HookAction on_check_item_button_change_pre(ModContext*, void* args, void*, void*
         link->mEquipItem != dItemNo_NONE_e &&
         !link->checkEquipAnime())
     {
+        const u8 current = link->mSelectItemId;
+        if (current <= SELECT_ITEM_B && link->mEquipItem == resolved_select_item(current)) {
+            return HOOK_SKIP_ORIGINAL;
+        }
         for (u8 i = 0; i < 3; ++i) {
-            const u8 next = (i + 1) % 3;
-            if (link->mEquipItem == resolved_select_item(i) &&
-                (link->mEquipItem != resolved_select_item(next) ||
-                    link->mSelectItemId != next))
-            {
+            if (link->mEquipItem == resolved_select_item(i)) {
                 link->mSelectItemId = i;
+                break;
             }
         }
     }

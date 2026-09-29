@@ -29,7 +29,8 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
 
     static bool s_lShoulderPrev = false;
     const bool midnaOnL = controls_midna_on_l();
-    const bool lShoulderHeld = midnaOnL && controls_l_shoulder_held();
+    const bool lShoulderRaw = midnaOnL && controls_l_shoulder_held();
+    const bool lShoulderHeld = lShoulderRaw && !quick_access_owns_l();
     const bool lShoulderTrig = lShoulderHeld && !s_lShoulderPrev;
     s_lShoulderPrev = lShoulderHeld;
 
@@ -57,7 +58,7 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     if (!quickAccessOpen) {
         if (dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;
         if (dpadLeftTrig) pad.mPressedButtonFlags &= ~midnaBit;
-        if (midnaOnL && lShoulderHeld) {
+        if (lShoulderRaw) {
             const u32 lMask = controls_l_shoulder_pad_mask();
             pad.mButtonFlags &= ~lMask;
             pad.mPressedButtonFlags &= ~lMask;
