@@ -6,14 +6,32 @@
 #include "../quick_access/quick_access.hpp"
 #include "../controls/controls.hpp"
 #include "../compat/extra_buttons.hpp"
+#include "dusk/action_bindings.h"
 
 DEFINE_HOOK(&mDoCPd_c::read, PadReadHook);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickDataHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, MidnaTalkTriggerHook);
+DEFINE_HOOK_SYMBOL("dusk::getActionBindTrig", bool(int, u32), MinimapComboActionTrigHook);
 
 static bool s_extraSetZLatch = false;
+static bool s_minimapComboTrig = false;
+
+void on_minimap_combo_action_trig_post(ModContext*, void* args, void* retval, void*) {
+    if (!s_minimapComboTrig || args == nullptr || retval == nullptr) {
+        return;
+    }
+    if (mods::arg<int>(args, 0) != static_cast<int>(dusk::ActionBinds::TOGGLE_MINIMAP) ||
+        mods::arg<u32>(args, 1) != PAD_1)
+    {
+        return;
+    }
+    s_minimapComboTrig = false;
+    *static_cast<bool*>(retval) = true;
+}
 
 void on_pad_read_post(ModContext*, void*, void*, void*) {
+    s_minimapComboTrig = false;
+
     if (isTitleOrMainMenu()) {
         return;
     }
@@ -55,9 +73,19 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
         g_dpadLeftTrig = !quickAccessOpen && dpadLeftTrig;
     }
 
+    if (!quickAccessOpen && (pad.mButtonFlags & PAD_TRIGGER_R) != 0 &&
+        (pad.mPressedButtonFlags & PAD_BUTTON_RIGHT) != 0)
+    {
+        s_minimapComboTrig = true;
+        pad.mPressedButtonFlags &= ~PAD_BUTTON_RIGHT;
+        pad.mButtonFlags &= ~PAD_BUTTON_RIGHT;
+    }
+
     if (!quickAccessOpen) {
-        if (dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;
-        if (dpadLeftTrig) pad.mPressedButtonFlags &= ~midnaBit;
+        if (!midnaOnL) {
+            if (dpadLeftHeld) pad.mButtonFlags &= ~midnaBit;
+            if (dpadLeftTrig) pad.mPressedButtonFlags &= ~midnaBit;
+        }
         if (lShoulderRaw) {
             const u32 lMask = controls_l_shoulder_pad_mask();
             pad.mButtonFlags &= ~lMask;

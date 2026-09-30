@@ -373,13 +373,16 @@ bool midna_l_overlay_hides_pane() {
 }
 
 static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
+    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !controls_midna_on_l() ||
+        isCanoeRiding() || draw == nullptr || draw->getMainScreenPtr() == nullptr || isTitleOrMainMenu())
+    {
+        return false;
+    }
 #if Z_MOBILE_BUILD
-    (void)draw;
-    return false;
+    J2DPane* cont = draw->getMainScreenPtr()->search(MULTI_CHAR('cont_n'));
+    return cont != nullptr && cont->isVisible();
 #else
-    return g_configCustomZButtonEnabled && !isNativeZButtonEngine() && controls_midna_on_l() &&
-           !isCanoeRiding() &&
-           draw != nullptr && draw->getMainScreenPtr() != nullptr && !isTitleOrMainMenu();
+    return true;
 #endif
 }
 

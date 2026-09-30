@@ -44,6 +44,7 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     z_mobile_init(hook_svc);
 
     mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_post);
+    mods::hook::add_post<MinimapComboActionTrigHook>(hook_svc, on_minimap_combo_action_trig_post);
     const HookOptions afterTwilightHd = twilight_hd_hook_order(kTwilightHdRunAfter);
     mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_twilight_hd_ring_z_post, &afterTwilightHd);
     mods::hook::add_post<CheckStatusHook>(hook_svc, on_check_status_post);
