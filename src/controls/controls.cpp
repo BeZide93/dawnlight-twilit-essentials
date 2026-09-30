@@ -175,6 +175,14 @@ static bool controls_trigger_held(bool left) {
     return raw * 32767 > zone * 255;
 }
 
+bool controls_l_physical_held() {
+    JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
+    if (gamePad != nullptr && (gamePad->getButton() & PAD_TRIGGER_L) != 0) {
+        return true;
+    }
+    return controls_trigger_held(true) || l_shoulder_raw_held();
+}
+
 DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
 
 static u32 s_extHeldPrev = 0;

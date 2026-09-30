@@ -69,6 +69,10 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
     mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_post);
     mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_twilight_hd_z_post, &afterTwilightHd);
+    const HookOptions trackAfterAll = twilight_hd_hook_order(kTwilightHdRunAfter - 100);
+    mods::hook::add_post<SetStickDataHook>(hook_svc, on_set_stick_data_track_item_button_post, &trackAfterAll);
+    mods::hook::add_pre<ZEquipBottleItemInHook>(hook_svc, on_equip_bottle_item_in_pre);
+    mods::hook::add_pre<ZEquipBottleItemEmptyHook>(hook_svc, on_equip_bottle_item_empty_pre);
     mods::hook::add_pre<SetSelectItemIndexHook>(hook_svc, on_set_select_item_index_pre);
     mods::hook::add_post<DrawButtonZHook>(hook_svc, on_draw_button_z_post);
     mods::hook::add_pre<SetMixItemHook>(hook_svc, on_set_mix_item_pre);

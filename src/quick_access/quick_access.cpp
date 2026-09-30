@@ -1852,6 +1852,81 @@ static void on_pad_read_qa_twilight_hd_post(ModContext*, void*, void*, void*) {
     }
 }
 
+static bool s_lOwnedLatch = false;
+
+bool quick_access_owns_l() {
+    return s_lOwnedLatch;
+}
+
+static bool qa_owns_input() {
+    return s_menuOpen || s_editMode || quick_access_bottles_hotkey_active() ||
+           quick_access_bottles_menu_open();
+}
+
+DEFINE_HOOK_SYMBOL("dusk::getActionBindTrig", bool(int, u32), QaActionBindTrigHook);
+DEFINE_HOOK_SYMBOL("dusk::getActionBindHold", bool(int, u32), QaActionBindHoldHook);
+DEFINE_HOOK_SYMBOL("dusk::getActionBindHoldAnyPort", bool(int), QaActionBindHoldAnyPortHook);
+
+static constexpr int kQaActionBindSlots = 16;
+static bool s_actionHoldLatch[kQaActionBindSlots] = {};
+static bool s_actionHoldAnyLatch[kQaActionBindSlots] = {};
+
+static void swallow_action_hold(void* args, void* retval, bool* latches) {
+    if (args == nullptr || retval == nullptr) {
+        return;
+    }
+    const int action = mods::arg<int>(args, 0);
+    if (action < 0 || action >= kQaActionBindSlots) {
+        return;
+    }
+    bool& held = *static_cast<bool*>(retval);
+    if (!held) {
+        latches[action] = false;
+        return;
+    }
+    if (qa_owns_input()) {
+        latches[action] = true;
+    }
+    if (latches[action]) {
+        held = false;
+    }
+}
+
+static void on_action_bind_trig_post(ModContext*, void*, void* retval, void*) {
+    if (retval != nullptr && qa_owns_input()) {
+        *static_cast<bool*>(retval) = false;
+    }
+}
+
+static void on_action_bind_hold_post(ModContext*, void* args, void* retval, void*) {
+    swallow_action_hold(args, retval, s_actionHoldLatch);
+}
+
+static void on_action_bind_hold_any_port_post(ModContext*, void* args, void* retval, void*) {
+    swallow_action_hold(args, retval, s_actionHoldAnyLatch);
+}
+
+static void swallow_l_trigger(interface_of_controller_pad& pad) {
+    pad.mTriggerLeft = 0.0f;
+    pad.mTrigLockL = false;
+    pad.mHoldLockL = false;
+    pad.mPressedButtonFlags &= ~PAD_TRIGGER_L;
+    pad.mButtonFlags &= ~PAD_TRIGGER_L;
+}
+
+static void on_pad_read_qa_l_owner_post(ModContext*, void*, void*, void*) {
+    const bool owning = s_menuOpen || s_editMode || quick_access_bottles_hotkey_active() ||
+                        quick_access_bottles_menu_open();
+    if (owning) {
+        s_lOwnedLatch = true;
+    } else if (!controls_l_physical_held()) {
+        s_lOwnedLatch = false;
+    }
+    if (s_lOwnedLatch) {
+        swallow_l_trigger(mDoCPd_c::getCpadInfo(PAD_1));
+    }
+}
+
 static void close_menu() {
     if (s_editMode) {
         s_editMode = false;
@@ -2728,7 +2803,7 @@ DEFINE_HOOK(&dComIfGp_getSelectItem, QaGetSelectItemHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, QaMidnaTalkTriggerHook);
 
 static HookAction on_qa_midna_talk_trigger_pre(ModContext*, void*, void* retval, void*) {
-    if (retval == nullptr || (!qa_twilight_hd_shoulders_blocked() && !s_menuOpen)) {
+    if (retval == nullptr || (!qa_twilight_hd_shoulders_blocked() && !s_menuOpen && !s_lOwnedLatch)) {
         return HOOK_CONTINUE;
     }
     *static_cast<BOOL*>(retval) = FALSE;
@@ -2757,6 +2832,11 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
         mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_quick_access_post, &beforeTwilightHd);
         mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_qa_twilight_hd_post, &afterTwilightHd);
+        const HookOptions lOwnerOrder = twilight_hd_hook_order(kTwilightHdRunBefore - 1);
+        mods::hook::add_post<PadReadRadialMenuHook>(hook_svc, on_pad_read_qa_l_owner_post, &lOwnerOrder);
+        mods::hook::add_post<QaActionBindTrigHook>(hook_svc, on_action_bind_trig_post);
+        mods::hook::add_post<QaActionBindHoldHook>(hook_svc, on_action_bind_hold_post);
+        mods::hook::add_post<QaActionBindHoldAnyPortHook>(hook_svc, on_action_bind_hold_any_port_post);
         mods::hook::add_pre<QaMidnaTalkTriggerHook>(hook_svc, on_qa_midna_talk_trigger_pre, &beforeTwilightHd);
         mods::hook::add_post<Meter2DrawRadialMenuHook>(hook_svc, on_meter2_draw_quick_access_post);
         mods::hook::add_post<QaSetStickDataHook>(hook_svc, on_set_stick_data_qa_post, &afterTwilightHd);

@@ -13,6 +13,69 @@ DEFINE_HOOK(&daAlink_c::checkSetItemTrigger, CheckSetItemTriggerHook);
 DEFINE_HOOK(&daAlink_c::setHeavyBoots, SetHeavyBootsHook);
 DEFINE_HOOK(&daAlink_c::orderTalk, OrderTalkHook);
 DEFINE_HOOK(&daAlink_c::allUnequip, QaAllUnequipHook);
+DEFINE_HOOK(&dSv_player_item_c::setEquipBottleItemIn, ZEquipBottleItemInHook);
+DEFINE_HOOK(&dSv_player_item_c::setEquipBottleItemEmpty, ZEquipBottleItemEmptyHook);
+
+extern const LogService* svc_log;
+extern ModContext* mod_ctx;
+
+static u8 s_lastItemButton = 0xFF;
+
+void on_set_stick_data_track_item_button_post(ModContext*, void* args, void*, void*) {
+    daAlink_c* link = args != nullptr ? mods::arg<daAlink_c*>(args, 0) : nullptr;
+    if (link == nullptr) {
+        return;
+    }
+    const u8 trig = link->mItemTrigger;
+    if (trig & daAlink_c::BTN_Z) {
+        s_lastItemButton = 2;
+    } else if (trig & daAlink_c::BTN_X) {
+        s_lastItemButton = 0;
+    } else if (trig & daAlink_c::BTN_Y) {
+        s_lastItemButton = 1;
+    }
+}
+
+static bool z_bottle_write_misrouted(u8 button) {
+    if (!g_configCustomZButtonEnabled || s_lastItemButton != 2 || button > 1) {
+        return false;
+    }
+    const u8 zIdx = dComIfGs_getSelectItemIndex(2);
+    return zIdx >= SLOT_11 && zIdx <= SLOT_14;
+}
+
+static void log_z_bottle_redirect(const char* what, u8 button) {
+    if (svc_log == nullptr || mod_ctx == nullptr) {
+        return;
+    }
+    char msg[160];
+    std::snprintf(msg, sizeof(msg), "[ZButton] bottle %s aimed at button %d, redirected to Z (slot %d)",
+                  what, static_cast<int>(button), static_cast<int>(dComIfGs_getSelectItemIndex(2)));
+    svc_log->info(mod_ctx, msg);
+}
+
+HookAction on_equip_bottle_item_in_pre(ModContext*, void* args, void*, void*) {
+    auto* item = mods::arg<dSv_player_item_c*>(args, 0);
+    const u8 button = mods::arg<u8>(args, 1);
+    const u8 newItem = mods::arg<u8>(args, 2);
+    if (item == nullptr || !z_bottle_write_misrouted(button)) {
+        return HOOK_CONTINUE;
+    }
+    log_z_bottle_redirect("fill", button);
+    item->setEquipBottleItemIn(2, newItem);
+    return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction on_equip_bottle_item_empty_pre(ModContext*, void* args, void*, void*) {
+    auto* item = mods::arg<dSv_player_item_c*>(args, 0);
+    const u8 button = mods::arg<u8>(args, 1);
+    if (item == nullptr || !z_bottle_write_misrouted(button)) {
+        return HOOK_CONTINUE;
+    }
+    log_z_bottle_redirect("empty", button);
+    item->setEquipBottleItemEmpty(2);
+    return HOOK_SKIP_ORIGINAL;
+}
 
 HookAction on_qa_all_unequip_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
