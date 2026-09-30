@@ -21,6 +21,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
 #include "d/d_meter2_info.h"
+#include "d/d_menu_window.h"
 #include "d/d_kantera_icon_meter.h"
 #include "d/d_msg_object.h"
 #define private public
@@ -62,6 +63,8 @@ bool s_editMode = false;
 int s_selectedSlot = SLOT_NONE;
 f32 s_menuAlpha = 0.0f;
 f32 s_glowTimer = 0.0f;
+
+extern const LogService* svc_log;
 
 static ModContext* s_modCtx = nullptr;
 static const SaveService* s_saveSvc = nullptr;
@@ -2650,6 +2653,40 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     pad.mPressedButtonFlags &= ~qaBit;
 }
 
+DEFINE_HOOK(&dMw_c::key_wait_proc, QaMwKeyWaitHook);
+
+static u32 s_keyWaitHiddenPressed = 0;
+static u32 s_keyWaitHiddenHeld = 0;
+
+static HookAction on_qa_mw_key_wait_pre(ModContext*, void*, void*, void*) {
+    s_keyWaitHiddenPressed = 0;
+    s_keyWaitHiddenHeld = 0;
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
+        return HOOK_CONTINUE;
+    }
+    const u32 ringBits = controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & (PAD_BUTTON_UP | PAD_BUTTON_DOWN);
+    if (ringBits == 0) {
+        return HOOK_CONTINUE;
+    }
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    s_keyWaitHiddenPressed = pad.mPressedButtonFlags & ringBits;
+    s_keyWaitHiddenHeld = pad.mButtonFlags & ringBits;
+    pad.mPressedButtonFlags &= ~ringBits;
+    pad.mButtonFlags &= ~ringBits;
+    return HOOK_CONTINUE;
+}
+
+static void on_qa_mw_key_wait_post(ModContext*, void*, void*, void*) {
+    if (s_keyWaitHiddenPressed == 0 && s_keyWaitHiddenHeld == 0) {
+        return;
+    }
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    pad.mPressedButtonFlags |= s_keyWaitHiddenPressed;
+    pad.mButtonFlags |= s_keyWaitHiddenHeld;
+    s_keyWaitHiddenPressed = 0;
+    s_keyWaitHiddenHeld = 0;
+}
+
 static dusk::config::ConfigVar<f32>* s_qaHudScaleVar = nullptr;
 
 f32 qa_user_hud_scale() {
@@ -2884,6 +2921,13 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
         mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre, &beforeTwilightHd);
         mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
+        if (mods::hook::add_pre<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_pre) != MOD_OK ||
+            mods::hook::add_post<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_post) != MOD_OK)
+        {
+            if (svc_log != nullptr && svc_log->warn != nullptr && mod_ctx != nullptr) {
+                svc_log->warn(mod_ctx, "[QuickAccess] dMw_c::key_wait_proc hook not installed");
+            }
+        }
         quick_access_mobile_init(hook_svc);
     }
 
