@@ -248,7 +248,7 @@ const BossGalleryEntry g_bossGalleryTable[] = {
     {"Ganondorf",    "Hyrule Castle",       "B_gnd",  "egnd.bmd",   nullptr,  "egnd_wait02.bck",   "D_MN09B", 1, 0,  0, 0.8f,  0.0f,  260.0f, 0.0f,
      nullptr, nullptr, nullptr, nullptr, nullptr, g_ganondorfParts, kGanondorfPartCount, nullptr, "egnd_core_beat.brk",
      nullptr, nullptr, &kGanondorfFightSpawnPos, kGanondorfFightAngle},
-    {kDarkLinkGalleryName, "Temple of Time", "Kmdl",  "al.bmd",     nullptr,  "",                  "D_MN06B", 0, 51, 0, 1.0f,  0.0f,  260.0f, 0.0f,
+    {kDarkLinkGalleryName, "???", "Kmdl",  "al.bmd",     nullptr,  "",                  "D_MN06B", 0, 51, 0, 1.0f,  0.0f,  260.0f, 0.0f,
      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
      nullptr, nullptr, nullptr, nullptr, &kDarkLinkFightSpawnPos, kDarkLinkFightAngle},
 };
