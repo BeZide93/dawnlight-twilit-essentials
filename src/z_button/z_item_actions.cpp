@@ -5,6 +5,7 @@
 #include "../sheathed_spin/sheathed_spin.hpp"
 #include "m_Do/m_Do_audio.h"
 #include "../quick_access/quick_access.hpp"
+#include "../compat/twilight_hd.hpp"
 
 DEFINE_HOOK(&daAlink_c::checkItemChangeFromButton, CheckItemChangeFromButtonHook);
 DEFINE_HOOK(&daAlink_c::checkItemButtonChange, CheckItemButtonChangeHook);
@@ -13,6 +14,8 @@ DEFINE_HOOK(&daAlink_c::checkSetItemTrigger, CheckSetItemTriggerHook);
 DEFINE_HOOK(&daAlink_c::setHeavyBoots, SetHeavyBootsHook);
 DEFINE_HOOK(&daAlink_c::orderTalk, OrderTalkHook);
 DEFINE_HOOK(&daAlink_c::allUnequip, QaAllUnequipHook);
+DEFINE_HOOK(&dEvt_control_c::talkXyCheck, ZTalkItemCheckHook);
+DEFINE_HOOK(&dEvt_control_c::entry, ZTalkQueueEntryHook);
 DEFINE_HOOK(&dSv_player_item_c::setEquipBottleItemIn, ZEquipBottleItemInHook);
 DEFINE_HOOK(&dSv_player_item_c::setEquipBottleItemEmpty, ZEquipBottleItemEmptyHook);
 
@@ -77,11 +80,21 @@ HookAction on_equip_bottle_item_empty_pre(ModContext*, void* args, void*, void*)
     return HOOK_SKIP_ORIGINAL;
 }
 
+static bool s_inItemChangeFromButton = false;
+
 HookAction on_qa_all_unequip_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
     const int param0 = mods::arg<int>(args, 1);
     if (alink == nullptr || !g_configQuickAccessEnabled) {
         return HOOK_CONTINUE;
+    }
+
+    if (s_inItemChangeFromButton && !g_configCustomZButtonEnabled &&
+        twilight_hd_third_item_slot() && alink->mEquipItem != dItemNo_NONE_e &&
+        !(alink->doTrigger() && dComIfGp_getDoStatus() == BUTTON_STATUS_PUT_AWAY) &&
+        alink->checkItemSetButton(alink->mEquipItem) != 2)
+    {
+        return HOOK_SKIP_ORIGINAL;
     }
 
     if (param0 != 0 && quick_access_keep_lantern_equipped(alink) &&
@@ -112,8 +125,13 @@ HookAction on_set_heavy_boots_pre(ModContext*, void* args, void* ret, void*) {
     return z_mobile_guard_heavy_boots(args, ret);
 }
 
+void on_check_item_change_from_button_post(ModContext*, void*, void*, void*) {
+    s_inItemChangeFromButton = false;
+}
+
 HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
+    s_inItemChangeFromButton = true;
     if (quick_access_run_pending_ooccoo(link)) {
         *static_cast<BOOL*>(retval) = TRUE;
         return HOOK_SKIP_ORIGINAL;
@@ -366,6 +384,15 @@ HookAction on_check_set_item_trigger_pre(ModContext*, void* args, void* retval, 
     return HOOK_SKIP_ORIGINAL;
 }
 
+struct ZTalkPresentation {
+    dEvt_order_c* order;
+    fopAc_ac_c* player;
+    fopAc_ac_c* target;
+    u8 item;
+};
+
+static ZTalkPresentation s_zTalk = {};
+
 void on_order_talk_post(ModContext*, void* args, void* ret, void*) {
     if (!g_configCustomZButtonEnabled || !args || !ret) {
         return;
@@ -377,25 +404,64 @@ void on_order_talk_post(ModContext*, void* args, void* ret, void*) {
     }
 
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr || alink->checkWolf()) {
+    if (alink == nullptr || alink->checkWolf() || alink->notTalk()) {
         return;
     }
 
-    u8 zItem = resolved_select_item(2);
+    const u8 zItem = resolved_select_item(2);
     if (zItem == dItemNo_NONE_e || zItem == 0x00 || zItem == 0xFF) {
         return;
     }
 
-    dAttention_c* att = dComIfGp_getAttention();
-    dAttList_c* attList2 = (att != nullptr) ? att->getActionBtnXY() : nullptr;
-    fopAc_ac_c* targetActor = (attList2 != nullptr) ? attList2->getActor() : nullptr;
-
-    if (daPy_py_c::checkTradeItem(zItem) && alink->itemTriggerCheck(0x04) && attList2 != nullptr && targetActor != nullptr) {
-        if (alink->checkRequestTalkActor(attList2, targetActor)) {
-            fopAcM_orderTalkItemBtnEvent(8, alink, targetActor, 0, 0);
-            *result = 1;
-        }
+    if (!daPy_py_c::checkTradeItem(zItem) || !alink->itemTriggerCheck(0x04) ||
+        alink->itemTriggerCheck(0x03) || alink->field_0x27f8 == nullptr ||
+        !alink->checkRequestTalkActor(alink->mAttList2, alink->field_0x27f8))
+    {
+        return;
     }
+
+    dEvt_control_c* events = dComIfGp_getEvent();
+    const int orderIndex = events != nullptr ? events->mNum : -1;
+    if (orderIndex < 0 || orderIndex >= 8 ||
+        !fopAcM_orderTalkItemBtnEvent(dEvt_type_SHOWITEM_X_e, alink, alink->field_0x27f8, 0, 0))
+    {
+        return;
+    }
+    s_zTalk = {&events->mOrder[orderIndex], alink, alink->field_0x27f8, zItem};
+    *result = 1;
+}
+
+HookAction on_z_talk_item_check_pre(ModContext*, void* args, void* retval, void*) {
+    auto* events = mods::arg<dEvt_control_c*>(args, 0);
+    auto* order = mods::arg<dEvt_order_c*>(args, 1);
+    if (events == nullptr || order == nullptr || retval == nullptr || s_zTalk.player == nullptr ||
+        order != s_zTalk.order || order->mEventType != dEvt_type_SHOWITEM_X_e ||
+        order->mpRequestActor != s_zTalk.player || order->mpTargetActor != s_zTalk.target)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    const u8 item = s_zTalk.item;
+    s_zTalk = {};
+    events->mTalkXyType = 1;
+    int result = 0;
+    if (item != dItemNo_NONE_e && order->mpTargetActor != nullptr &&
+        order->mpTargetActor->eventInfo.chkCondition(dEvtCnd_CANTALKITEM_e) &&
+        events->commonCheck(order, dEvtCnd_CANTALK_e, dEvtCmd_INTALK_e))
+    {
+        events->mMode = dEvt_mode_TALK_e;
+        events->mPreItemNo = item;
+        dEvent_manager_c& manager = dComIfGp_getEventManager();
+        events->mEventId = manager.getEventIdx("DEFAULT_TALK_XY", 0xFF, -1);
+        manager.order(events->mEventId);
+        result = 1;
+    }
+    *static_cast<int*>(retval) = result;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void on_z_talk_queue_entry_post(ModContext*, void*, void*, void*) {
+    s_zTalk = {};
 }
 
 void check_iron_boots_unequip_on_overwrite() {

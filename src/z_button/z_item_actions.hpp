@@ -12,6 +12,9 @@ struct ZEquipBottleItemInHook;
 struct ZEquipBottleItemEmptyHook;
 
 HookAction on_check_item_change_from_button_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+void on_check_item_change_from_button_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+HookAction on_z_talk_item_check_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
+void on_z_talk_queue_entry_post(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_check_item_button_change_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_check_item_set_button_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);
 HookAction on_check_set_item_trigger_pre(ModContext* mod_ctx, void* args, void* ret, void* user_data);

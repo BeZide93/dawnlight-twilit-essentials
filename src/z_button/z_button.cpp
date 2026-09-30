@@ -58,6 +58,8 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<ChangeTextureItemXYHook>(hook_svc, on_change_texture_item_xy_pre);
     mods::hook::add_post<MoveButtonXYHook>(hook_svc, on_move_button_xy_post);
     mods::hook::add_post<OrderTalkHook>(hook_svc, on_order_talk_post);
+    mods::hook::add_pre<ZTalkItemCheckHook>(hook_svc, on_z_talk_item_check_pre);
+    mods::hook::add_post<ZTalkQueueEntryHook>(hook_svc, on_z_talk_queue_entry_post);
     const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
     mods::hook::add_pre<CheckItemSetButtonHook>(hook_svc, on_check_item_set_button_pre, &beforeTwilightHd);
     mods::hook::add_pre<CheckSetItemTriggerHook>(hook_svc, on_check_set_item_trigger_pre);
@@ -65,6 +67,8 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
     mods::hook::add_pre<CheckItemButtonChangeHook>(hook_svc, on_check_item_button_change_pre);
     mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre,
                                                        &beforeTwilightHd);
+    mods::hook::add_post<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_post,
+                                                        &beforeTwilightHd);
     const HookOptions midnaBeforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore - 1);
     mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre, &midnaBeforeTwilightHd);
     mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
