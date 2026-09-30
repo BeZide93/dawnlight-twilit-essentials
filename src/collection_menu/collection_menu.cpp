@@ -185,10 +185,18 @@ static void start_safe_clothes_change(daAlink_c* link) {
     link->setClothesChange(0);
 }
 
+static bool link_floating_still(daAlink_c* link) {
+    return link->mProcID == daAlink_c::PROC_SWIM_WAIT &&
+           link->checkNoResetFlg0(daPy_py_c::FLG0_SWIM_UP);
+}
+
 static bool link_can_change_clothes(daAlink_c* link) {
-    return link != nullptr && !link->checkWolf() && link->getClothesChangeWaitTimer() == 0 &&
-           !link->checkEventRun() && !link->checkRide() && !link->checkPlayerFly() &&
-           link->mLinkAcch.ChkGroundHit();
+    if (link == nullptr || link->checkWolf() || link->getClothesChangeWaitTimer() != 0 ||
+        link->checkEventRun() || link->checkRide()) {
+        return false;
+    }
+    if (link_floating_still(link)) return true;
+    return !link->checkPlayerFly() && link->mLinkAcch.ChkGroundHit();
 }
 
 static int find_ordon_hero_tunic_id() {
