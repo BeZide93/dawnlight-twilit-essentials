@@ -439,7 +439,8 @@ HookAction on_get_string_kanji_pre(ModContext*, void* args, void*, void*) {
         if (out) SAFE_STRCPY(out, text);
         return HOOK_SKIP_ORIGINAL;
     }
-    if (msgId == kClUnequipMsg && cl_unequip_enabled() && screen_active(s_currentCollect2D)) {
+    if (msgId == kClUnequipMsg && screen_active(s_currentCollect2D) && s_currentCollect2D->mCursorY < kClRows &&
+        cl_unequip_enabled(row_kind(s_currentCollect2D->mCursorY))) {
         if (out) SAFE_STRCPY(out, "Unequip");
         return HOOK_SKIP_ORIGINAL;
     }

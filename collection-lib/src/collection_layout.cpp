@@ -311,7 +311,7 @@ bool collectionlib_unequipped_tunic_active() {
 }
 
 bool collectionlib_unequip_tunic() {
-    return cl_unequip_enabled() && custom_equip_unequip_tunic();
+    return cl_unequip_enabled(CE_TUNIC) && custom_equip_unequip_tunic();
 }
 
 int layout_unequipped_tunic() { return s_unequippedTunicId; }

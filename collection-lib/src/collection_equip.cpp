@@ -69,7 +69,7 @@ void set_vanilla(int r, u8 item) {
 }
 
 bool row_can_unequip(int r) {
-    return cl_unequip_enabled() && (r != 2 || layout_unequipped_tunic() >= 0);
+    return cl_unequip_enabled(row_kind(r)) && (r != 2 || layout_unequipped_tunic() >= 0);
 }
 
 int custom_under_cursor(dMenu_Collect2D_c* c) {

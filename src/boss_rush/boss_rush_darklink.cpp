@@ -7,9 +7,13 @@
 
 #include "d/d_attention.h"
 #include "d/d_meter2.h"
+#include "d/d_meter2_info.h"
 #include "d/d_msg_object.h"
+#include "d/d_particle.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_item_data.h"
 #include "d/d_kankyo.h"
+#include "d/d_kankyo_wether.h"
 #include "d/d_resorce.h"
 #include "d/d_stage.h"
 #include "d/actor/d_a_alink.h"
@@ -23,19 +27,32 @@
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
 #include "SSystem/SComponent/c_counter.h"
+#include "SSystem/SComponent/c_lib.h"
+#include "SSystem/SComponent/c_math.h"
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
 #include "JSystem/JKernel/JKRMemArchive.h"
+#include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
+#include "JSystem/J3DGraphBase/J3DMatBlock.h"
+#include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "JSystem/J3DGraphBase/J3DPacket.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
+#include "JSystem/J3DGraphBase/J3DSys.h"
 #include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
+#include "JSystem/JParticle/JPAEmitter.h"
+#include "JSystem/JParticle/JPAEmitterManager.h"
+#include "JSystem/JParticle/JPAResourceManager.h"
+#include "JSystem/JUtility/JUTNameTab.h"
 #include "mods/svc/log.h"
+
+#include <dolphin/gx.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <vector>
 
 extern const LogService* svc_log;
 
@@ -45,9 +62,13 @@ namespace {
 constexpr const char* kDarkLinkModId = "hopex.dark_link";
 constexpr const char* kKmdlPath = "/res/Object/Kmdl.arc";
 constexpr const char* kAlinkPath = "/res/Object/Alink.arc";
-constexpr const char* kShieldPath = "/res/Object/HyShd.arc";
+constexpr const char* kWoodShieldPath = "/res/Object/CWShd.arc";
+constexpr const char* kOrdonShieldPath = "/res/Object/SWShd.arc";
+constexpr const char* kHylianShieldPath = "/res/Object/HyShd.arc";
 constexpr u32 kTagBmwr = 'BMWR';
 constexpr u32 kTagBmwe = 'BMWE';
+constexpr u32 kOrdonSwordIndex = 0x3C;
+constexpr u32 kOrdonSheathIndex = 0x3B;
 constexpr u32 kMasterSwordIndex = 0x38;
 constexpr u32 kMasterSheathIndex = 0x37;
 constexpr u32 kShieldIndex = 0x3;
@@ -57,59 +78,85 @@ constexpr u32 kGameHeapReserve = 0x400000;
 constexpr u32 kModelHeadroom = 0x40000;
 constexpr u32 kMaxPartFileSize = 0x4000000;
 constexpr int kMaxPartHeaps = 3;
-constexpr u32 kBattleWaitAnmIndex = 0x256;
 constexpr u32 kIdleWaitAnmIndex = 0x26A;
 constexpr u32 kLinkAnmBufferSize = 0x10800;
+constexpr u32 kBodyDiffFlags = 0x11000084;
+constexpr u32 kEquipDiffFlags = 0x11000087;
 constexpr u16 kHeadJoint = 4;
 constexpr u16 kSheathJoint = 5;
 constexpr u16 kLeftHandJoint = 9;
 constexpr u16 kSwordJoint = 10;
 constexpr u16 kRightHandJoint = 0xE;
 constexpr u16 kShieldJoint = 15;
-constexpr u16 kLeftHandMaterial = 1;
-constexpr u16 kRightHandMaterial = 6;
+constexpr u16 kSwordGripMaterial = 0;
+constexpr u16 kOpenHandMaterial = 4;
+constexpr u16 kShieldGripMaterial = 6;
+constexpr u16 kEmptyHandMaterial = 10;
+constexpr u16 kHandsMinMaterials = 11;
+constexpr u16 kHatFirstJoint = 6;
+constexpr u16 kHatTipJoint = 7;
+constexpr u16 kHatLastJoint = 9;
+constexpr u16 kHatBaseJoint = 2;
 
-constexpr u8 kGhostAlpha = 130;
-constexpr f32 kSpecularIntensity = 0.35f;
-constexpr f32 kShininess = 4.0f;
-constexpr u8 kBaseTint = 0;
+constexpr u16 kSpecularChanId = 0x4202;
+constexpr u16 kUnlitChanId = 0x0400;
+constexpr u8 kSpecularAmbient = 7;
+constexpr u8 kEyeRed = 0xE6;
+constexpr u8 kEyeGreen = 0x08;
+constexpr u8 kEyeBlue = 0x05;
+constexpr u8 kSolidAlpha = 170;
+constexpr u16 kSolidZModeId = 0x16;
+constexpr u16 kSolidAlphaCmpId = 0x87;
+constexpr int kMaxSolidEntries = 0x80;
+constexpr u8 kMaxTevStages = 15;
+constexpr u8 kMaxEyeBaseStages = 11;
 
-constexpr f32 kKeyLightDir[3] = {0.4f, -0.6f, -0.7f};
-constexpr f32 kRimLightDir[3] = {-0.5f, -0.3f, 0.8f};
-constexpr GXColor kKeyLightColor = {255, 255, 255, 255};
-constexpr GXColor kRimLightColor = {190, 195, 205, 255};
+constexpr const char* kParticlePath = "/res/Particle/Pscene171.jpc";
+constexpr u16 kWarpResourceA = 0x88FE;
+constexpr u16 kWarpResourceB = 0x88FF;
+constexpr u16 kAuraResource = 0x8900;
+constexpr u32 kParticleMax = 0x400;
+constexpr u32 kEmitterMax = 0x20;
+constexpr u8 kAuraDrawGroup = 9;
+constexpr int kAuraCount = 7;
+constexpr u16 kAuraJoints[kAuraCount] = {4, 2, 16, 8, 13, 19, 24};
+constexpr f32 kAuraHeadRate = 0.08f;
+constexpr f32 kAuraRate = 0.15f;
+constexpr s16 kAuraLifeTime = 24;
+constexpr f32 kAuraScale = 0.22f;
+constexpr u8 kAuraAlpha = 120;
 
+constexpr const char* kEyeMaterialLeft = "al_eyeballL_m";
+constexpr const char* kEyeMaterialRight = "al_eyeballR_m";
 constexpr const char* kEyeTexture = "al_eyeball";
-constexpr GXColor kEyeColor = {255, 40, 30, 255};
-constexpr f32 kEyeGlowGain = 2.2f;
-
-constexpr u16 kCapFirstJoint = 6;
-constexpr u16 kCapLastJoint = 9;
-constexpr f32 kCapDroop[kCapLastJoint - kCapFirstJoint + 1] = {0.45f, 0.3f, 0.25f, 0.2f};
-constexpr f32 kCapSwayDegrees[kCapLastJoint - kCapFirstJoint + 1] = {2.0f, 4.0f, 6.0f, 8.0f};
-constexpr f32 kCapSwaySpeed = 0.06f;
-constexpr f32 kCapSwayLag = 0.6f;
-constexpr u8 kSpecularLightMask = 0x0C;
-constexpr f32 kLightDistance = 1.0e18f;
-constexpr u8 kTevScale = kSpecularIntensity > 2.0f   ? GX_CS_SCALE_4
-                         : kSpecularIntensity > 1.0f ? GX_CS_SCALE_2
-                                                     : GX_CS_SCALE_1;
-constexpr f32 kTevScaleFactor = kSpecularIntensity > 2.0f ? 4.0f : kSpecularIntensity > 1.0f ? 2.0f : 1.0f;
-
-constexpr int kMat3InitData = 0;
-constexpr int kMat3Remap = 1;
-constexpr int kMat3MatColor = 5;
-constexpr int kMat3ColorChanNum = 6;
-constexpr int kMat3ColorChan = 7;
-constexpr int kMat3TexNo = 15;
-constexpr int kMat3TevOrder = 16;
-constexpr int kMat3TevStageNum = 19;
-constexpr int kMat3TevStage = 20;
-constexpr int kMat3AlphaComp = 24;
-constexpr int kMat3Blend = 25;
-constexpr u32 kMaterialInitSize = 0x14C;
 
 enum class State { Idle, Mounting, Ready, Failed };
+
+struct SolidEntry {
+    J3DModelData* data;
+    J3DMaterial* material;
+    int reg;
+};
+
+struct HatState {
+    s16 pitch[3];
+    s16 yaw[3];
+    s16 pitchSpeed[3];
+    s16 yawSpeed[3];
+    s16 sway[3];
+    cXyz prevPos;
+    s16 prevPitch;
+    s16 prevYaw;
+    s16 phase;
+    bool ready;
+};
+
+class DepthPacket : public J3DPacket {
+public:
+    void draw() override;
+
+    J3DModel* mModels[7] = {};
+};
 
 State s_state = State::Idle;
 JKRExpHeap* s_heap = nullptr;
@@ -127,7 +174,18 @@ J3DModel* s_sword = nullptr;
 J3DModel* s_sheath = nullptr;
 J3DModel* s_shield = nullptr;
 mDoExt_bckAnm* s_bck = nullptr;
-dKy_tevstr_c s_darkTev;
+SolidEntry s_solid[kMaxSolidEntries] = {};
+int s_solidCount = 0;
+HatState s_hat = {};
+dKy_tevstr_c s_tevstr;
+bool s_tevstrReady = false;
+J3DLightObj s_frameLight;
+DepthPacket s_depthPacket;
+mDoDvdThd_toMainRam_c* s_particleCmd = nullptr;
+JPAEmitterManager* s_particles = nullptr;
+JPABaseEmitter* s_aura[kAuraCount] = {};
+u32 s_particleTick = 0;
+u32 s_statueDrawTick = 0;
 
 void dl_log(const char* fmt, ...) {
     if (svc_log == nullptr || svc_log->info == nullptr) return;
@@ -155,324 +213,584 @@ u32 model_budget(u32 size) {
     return size * 2 + kModelHeadroom;
 }
 
-u8 clamp_u8(f32 v) {
-    return static_cast<u8>(v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v));
-}
-
-u16 read_be16(const u8* p) { return static_cast<u16>((p[0] << 8) | p[1]); }
-
 u32 read_be32(const u8* p) {
     return (static_cast<u32>(p[0]) << 24) | (static_cast<u32>(p[1]) << 16) |
            (static_cast<u32>(p[2]) << 8) | static_cast<u32>(p[3]);
 }
 
-bool is_eye_texture(const char* name) {
-    return name != nullptr &&
-           (std::strcmp(name, "al_eyeball") == 0 || std::strcmp(name, "highlight02") == 0 ||
-            std::strcmp(name, "eye_kage01") == 0);
+bool is_eye_material(J3DModelData* data, u16 index) {
+    JUTNameTab* names = data->getMaterialName();
+    const char* name = names != nullptr ? names->getName(index) : nullptr;
+    return name != nullptr && (std::strcmp(name, kEyeMaterialLeft) == 0 || std::strcmp(name, kEyeMaterialRight) == 0);
 }
 
-void write_be16(u8* p, u16 v) {
-    p[0] = static_cast<u8>(v >> 8);
-    p[1] = static_cast<u8>(v & 0xFF);
-}
-
-const char* tex1_name(const u8* names, const u8* end, u16 index) {
-    if (names == nullptr || names + 4 > end) return nullptr;
-    if (index >= read_be16(names)) return nullptr;
-    const u8* entry = names + 4 + 4 * index;
-    if (entry + 4 > end) return nullptr;
-    const u8* name = names + read_be16(entry + 2);
-    if (name >= end) return nullptr;
-    for (const u8* c = name; c < end; c++) {
-        if (*c == 0) return reinterpret_cast<const char*>(name);
-    }
-    return nullptr;
-}
-
-struct Tex1Info {
-    u8* section = nullptr;
-    u16 count = 0;
-    u32 headerOffset = 0;
-    const u8* names = nullptr;
-};
-
-Tex1Info read_tex1(u8* file, const u8* end, u32 tex1) {
-    Tex1Info info;
-    u8* section = file + tex1;
-    if (tex1 == 0 || section + 20 > end) return info;
-    info.section = section;
-    info.count = read_be16(section + 8);
-    info.headerOffset = read_be32(section + 12);
-    const u32 nameOffset = read_be32(section + 16);
-    info.names = nameOffset != 0 ? section + nameOffset : nullptr;
-    return info;
-}
-
-u16 recolor_eye_565(u16 c) {
-    const f32 r = ((c >> 11) & 0x1F) * 255.0f / 31.0f;
-    const f32 b = (c & 0x1F) * 255.0f / 31.0f;
-    f32 glow = (b - r) * kEyeGlowGain / 255.0f;
-    glow = glow < 0.0f ? 0.0f : (glow > 1.0f ? 1.0f : glow);
-    const u32 nr = static_cast<u32>(kEyeColor.r * glow * 31.0f / 255.0f + 0.5f);
-    const u32 ng = static_cast<u32>(kEyeColor.g * glow * 63.0f / 255.0f + 0.5f);
-    const u32 nb = static_cast<u32>(kEyeColor.b * glow * 31.0f / 255.0f + 0.5f);
-    return static_cast<u16>((nr << 11) | (ng << 5) | nb);
-}
-
-void recolor_eye_cmpr_block(u8* block) {
-    const u16 c0 = read_be16(block);
-    const u16 c1 = read_be16(block + 2);
-    u16 n0 = recolor_eye_565(c0);
-    u16 n1 = recolor_eye_565(c1);
-    if (c0 > c1) {
-        if (n0 < n1) {
-            std::swap(n0, n1);
-            for (int i = 4; i < 8; i++) block[i] ^= 0x55;
-        } else if (n0 == n1) {
-            if (n0 < 0xFFFF) {
-                n0++;
-            } else {
-                n1--;
-            }
-        }
-    } else if (n0 > n1) {
-        std::swap(n0, n1);
-        for (int i = 4; i < 8; i++) {
-            const u8 v = block[i];
-            u8 out = 0;
-            for (int s = 0; s < 8; s += 2) {
-                u8 idx = (v >> s) & 3;
-                if (idx < 2) idx ^= 1;
-                out |= static_cast<u8>(idx << s);
-            }
-            block[i] = out;
-        }
-    }
-    write_be16(block, n0);
-    write_be16(block + 2, n1);
-}
-
-int s_specularPatched = 0;
-int s_eyeMaterials = 0;
-int s_eyeTextures = 0;
-
-void patch_tex1(const Tex1Info& tex, u8* file, const u8* end) {
-    if (tex.section == nullptr) return;
-    std::vector<const u8*> recolored;
-    for (u16 i = 0; i < tex.count; i++) {
-        u8* header = tex.section + tex.headerOffset + 32u * i;
-        if (header + 32 > end) break;
-        const char* name = tex1_name(tex.names, end, i);
-        if (is_eye_texture(name)) header[0x17] = 0;
-        if (name == nullptr || std::strcmp(name, kEyeTexture) != 0 || header[0] != GX_TF_CMPR) continue;
-
-        u8* pixels = header + static_cast<s32>(read_be32(header + 0x1C));
-        if (pixels < file || pixels >= end) continue;
-        if (std::find(recolored.begin(), recolored.end(), pixels) != recolored.end()) continue;
-        recolored.push_back(pixels);
-
-        u32 w = read_be16(header + 2);
-        u32 h = read_be16(header + 4);
-        u32 size = 0;
-        const u32 levels = header[0x18] > 0 ? header[0x18] : 1;
-        for (u32 level = 0; level < levels; level++) {
-            size += ((w + 7) / 8) * ((h + 7) / 8) * 32;
-            w = w > 1 ? w / 2 : 1;
-            h = h > 1 ? h / 2 : 1;
-        }
-        if (pixels + size > end) size = static_cast<u32>(end - pixels);
-        for (u32 b = 0; b + 8 <= size; b += 8) recolor_eye_cmpr_block(pixels + b);
-        s_eyeTextures++;
+int tev_texture_slots(J3DTevBlock* tev) {
+    switch (tev->getType()) {
+    case 'TVB1': return 1;
+    case 'TVB2': return 2;
+    case 'TVB4': return 4;
+    case 'TV16':
+    case 'TVPT': return 8;
+    default: return 0;
     }
 }
 
-u8 scale_alpha_ref(u8 ref) {
-    return static_cast<u8>((ref * kGhostAlpha + 127) / 255);
+J3DTevOrder tev_order(u8 texCoord, u8 texMap, u8 channel) {
+    J3DTevOrderInfo info;
+    info.mTexCoord = texCoord;
+    info.mTexMap = texMap;
+    info.mColorChan = channel;
+    info.field_0x3 = 0;
+    return J3DTevOrder(info);
 }
 
-void write_specular_stage(u8* stage, bool textured) {
-    stage[1] = GX_CC_ZERO;
-    stage[2] = textured ? GX_CC_TEXC : GX_CC_ZERO;
-    stage[3] = textured ? GX_CC_KONST : GX_CC_ZERO;
-    stage[4] = GX_CC_RASC;
-    stage[5] = GX_TEV_ADD;
-    stage[6] = GX_TB_ZERO;
-    stage[7] = kTevScale;
-    stage[8] = 1;
-    stage[9] = GX_TEVPREV;
-    stage[10] = GX_CA_ZERO;
-    stage[11] = textured ? GX_CA_KONST : GX_CA_ZERO;
-    stage[12] = textured ? GX_CA_TEXA : GX_CA_ZERO;
-    stage[13] = textured ? GX_CA_ZERO : GX_CA_KONST;
-    stage[14] = GX_TEV_ADD;
-    stage[15] = GX_TB_ZERO;
-    stage[16] = GX_CS_SCALE_1;
-    stage[17] = 1;
-    stage[18] = GX_TEVPREV;
+J3DTevSwapModeTable swap_table(u8 r, u8 g, u8 b, u8 a) {
+    J3DTevSwapModeTableInfo info;
+    info.field_0x0 = r;
+    info.field_0x1 = g;
+    info.field_0x2 = b;
+    info.field_0x3 = a;
+    return J3DTevSwapModeTable(info);
 }
 
-void write_eye_stage(u8* stage) {
-    stage[1] = GX_CC_TEXC;
-    stage[2] = GX_CC_ZERO;
-    stage[3] = GX_CC_ZERO;
-    stage[4] = GX_CC_RASC;
-    stage[5] = GX_TEV_ADD;
-    stage[6] = GX_TB_ZERO;
-    stage[7] = GX_CS_SCALE_1;
-    stage[8] = 1;
-    stage[9] = GX_TEVPREV;
-    stage[10] = GX_CA_ZERO;
-    stage[11] = GX_CA_ZERO;
-    stage[12] = GX_CA_ZERO;
-    stage[13] = GX_CA_KONST;
-    stage[14] = GX_TEV_ADD;
-    stage[15] = GX_TB_ZERO;
-    stage[16] = GX_CS_SCALE_1;
-    stage[17] = 1;
-    stage[18] = GX_TEVPREV;
+J3DColorChan color_chan(u16 id) {
+    J3DColorChan chan;
+    chan.mColorChanID = id;
+    return chan;
 }
 
-void patch_mat3_specular(u8* file, const u8* end, u32 mat3, const Tex1Info& tex) {
-    u8* section = file + mat3;
-    if (section + 12 + 30 * 4 > end) return;
-    const u16 count = read_be16(section + 8);
-    u32 table[30];
-    for (int i = 0; i < 30; i++) table[i] = read_be32(section + 12 + 4 * i);
-    if (table[kMat3InitData] == 0 || table[kMat3Remap] == 0) return;
+void write_passthrough_alpha(J3DTevStage* stage, int rasSwap) {
+    stage->mTevSwapModeInfo = static_cast<u8>(((stage->mTevSwapModeInfo & 0x0C) + rasSwap) | 0x80);
+    stage->mTevAlphaOp = 0x08;
+    stage->mTevAlphaAB = 0xFF;
+}
 
-    auto entry = [&](int t, u32 index, u32 stride) -> u8* {
-        if (table[t] == 0 || index == 0xFFFF) return nullptr;
-        u8* p = section + table[t] + stride * index;
-        return p + stride <= end ? p : nullptr;
-    };
+void apply_dark_light(J3DModelData* data, J3DLightObj* light) {
+    J3DLightInfo* info = light->getLightInfo();
+    info->mLightPosition.x = -400000.0f;
+    info->mLightPosition.y = 500000.0f;
+    info->mLightPosition.z = 768114.5625f;
+    info->mLightDirection.x = -0.2127109318971634f;
+    info->mLightDirection.y = 0.26588866114616394f;
+    info->mLightDirection.z = 0.9402432441711426f;
+    info->mColor.r = 0x60;
+    info->mColor.g = 0x68;
+    info->mColor.b = 0x74;
+    info->mColor.a = 0xFF;
+    info->mCosAtten.x = 0.0f;
+    info->mCosAtten.y = 0.0f;
+    info->mCosAtten.z = 1.0f;
+    info->mDistAtten.x = 16.0f;
+    info->mDistAtten.y = 0.0f;
+    info->mDistAtten.z = -15.0f;
 
-    auto eye_slot = [&](const u8* material) -> int {
-        for (int s = 0; s < 16; s++) {
-            const u8* order = entry(kMat3TevOrder, read_be16(material + 0xBC + 2 * s), 4);
-            if (order == nullptr || order[1] >= 8) continue;
-            const u8* texNo = entry(kMat3TexNo, read_be16(material + 0x84 + 2 * order[1]), 2);
-            if (texNo == nullptr) continue;
-            const char* name = tex1_name(tex.names, end, read_be16(texNo));
-            if (name != nullptr && std::strcmp(name, kEyeTexture) == 0) return s;
-        }
-        return -1;
-    };
-
-    std::vector<u16> scaledAlphaComps;
-    const u8* remap = section + table[kMat3Remap];
-    for (int pass = 0; pass < 2; pass++) {
-        for (u16 m = 0; m < count; m++) {
-            if (remap + 2 * m + 2 > end) break;
-            u8* material = entry(kMat3InitData, read_be16(remap + 2 * m), kMaterialInitSize);
-            if (material == nullptr) continue;
-            const int eyeSlot = eye_slot(material);
-            if ((eyeSlot >= 0) != (pass == 1)) continue;
-            if (eyeSlot > 0) {
-                std::memcpy(material + 0xBC, material + 0xBC + 2 * eyeSlot, 2);
-                std::memcpy(material + 0xE4, material + 0xE4 + 2 * eyeSlot, 2);
-                std::memcpy(material + 0x104, material + 0x104 + 2 * eyeSlot, 2);
-            }
-            u8* stage = entry(kMat3TevStage, read_be16(material + 0xE4), 20);
-            if (stage == nullptr) continue;
-
-            bool textured = false;
-            if (u8* order = entry(kMat3TevOrder, read_be16(material + 0xBC), 4)) {
-                order[2] = GX_COLOR0A0;
-                textured = order[1] != 0xFF;
-            }
-            if (eyeSlot >= 0) {
-                write_eye_stage(stage);
-                s_eyeMaterials++;
-            } else {
-                write_specular_stage(stage, textured);
-            }
-
-            material[0x00] = 4;
-            if (material[0x04] != 0xFF) {
-                if (u8* stageNum = entry(kMat3TevStageNum, material[0x04], 1)) *stageNum = 1;
-            }
-            if (material[0x02] != 0xFF) {
-                u8* chanNum = entry(kMat3ColorChanNum, material[0x02], 1);
-                if (chanNum != nullptr && *chanNum == 0) *chanNum = 1;
-            }
-            material[0x9C] = GX_TEV_KCSEL_K0;
-            material[0xAC] = GX_TEV_KASEL_K0_A;
-
-            if (u8* color = entry(kMat3MatColor, read_be16(material + 0x08), 4)) {
-                std::memset(color, 0xFF, 4);
-            }
-            if (u8* chan = entry(kMat3ColorChan, read_be16(material + 0x0C), 8)) {
-                chan[0] = 1;
-                chan[1] = GX_SRC_REG;
-                chan[2] = kSpecularLightMask;
-                chan[3] = GX_DF_NONE;
-                chan[4] = GX_AF_SPEC;
-                chan[5] = GX_SRC_REG;
-            }
-
-            const u16 alphaCompIdx = read_be16(material + 0x146);
-            u8* alphaComp = entry(kMat3AlphaComp, alphaCompIdx, 8);
-            if (alphaComp != nullptr &&
-                std::find(scaledAlphaComps.begin(), scaledAlphaComps.end(), alphaCompIdx) == scaledAlphaComps.end()) {
-                scaledAlphaComps.push_back(alphaCompIdx);
-                alphaComp[1] = scale_alpha_ref(alphaComp[1]);
-                alphaComp[4] = scale_alpha_ref(alphaComp[4]);
-            }
-            if (u8* blend = entry(kMat3Blend, read_be16(material + 0x148), 4)) {
-                blend[0] = GX_BM_BLEND;
-                blend[1] = GX_BL_SRCALPHA;
-                blend[2] = GX_BL_INVSRCALPHA;
-            }
-            s_specularPatched++;
-        }
+    for (u16 i = 0; i < data->getMaterialNum(); i++) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        J3DColorBlock* color = material->getColorBlock();
+        color->setLight(7, light);
+        if (!is_eye_material(data, i)) continue;
+        color->setColorChan(2, color_chan(kUnlitChanId));
+        J3DGXColor eye = *color->getMatColor(1);
+        eye.r = kEyeRed;
+        eye.g = kEyeGreen;
+        eye.b = kEyeBlue;
+        color->setMatColor(1, eye);
+        if (J3DFog* fog = material->getPEBlock()->getFog()) fog->mType = 0;
     }
 }
 
-void patch_bmd_file(u8* file, u32 size) {
-    s_specularPatched = 0;
-    s_eyeMaterials = 0;
-    s_eyeTextures = 0;
-    if (size < 0x20 || std::memcmp(file, "J3D2", 4) != 0) return;
-    const u8* end = file + size;
-    u32 mat3 = 0;
-    u32 tex1 = 0;
-    u32 offset = 0x20;
-    while (offset + 8 <= size) {
-        const u32 sectionSize = read_be32(file + offset + 4);
-        if (std::memcmp(file + offset, "MAT3", 4) == 0) {
-            mat3 = offset;
-        } else if (std::memcmp(file + offset, "TEX1", 4) == 0) {
-            tex1 = offset;
-        }
-        if (sectionSize == 0) break;
-        offset += sectionSize;
+bool setup_eye_stages(J3DModelData* data, J3DTevBlock* old, J3DTevBlock16* tev, u8 stageNum, int rasSwap) {
+    if (stageNum > kMaxEyeBaseStages) return false;
+    JUTNameTab* texNames = data->getTextureName();
+    if (texNames == nullptr || stageNum == 0) return false;
+    const int texSlots = tev_texture_slots(old);
+
+    J3DTevOrder* eyeOrder = nullptr;
+    for (u8 s = 0; s < stageNum && eyeOrder == nullptr; s++) {
+        J3DTevOrder* order = old->getTevOrder(s);
+        const u8 texMap = order->getTexMap();
+        if (texMap >= texSlots) continue;
+        const u16 texNo = old->getTexNo(texMap);
+        if (texNo == 0xFFFF) continue;
+        const char* name = texNames->getName(texNo);
+        if (name != nullptr && std::strcmp(name, kEyeTexture) == 0) eyeOrder = order;
     }
-    const Tex1Info tex = read_tex1(file, end, tex1);
-    if (mat3 != 0) patch_mat3_specular(file, end, mat3, tex);
-    patch_tex1(tex, file, end);
+    if (eyeOrder == nullptr) return false;
+
+    bool used[4] = {};
+    used[rasSwap] = true;
+    for (u8 s = 0; s < stageNum; s++) {
+        const u8 swap = tev->getTevStage(s)->mTevSwapModeInfo;
+        used[swap & 3] = true;
+        used[(swap >> 2) & 3] = true;
+    }
+    u32 freeTables[2] = {};
+    int freeCount = 0;
+    for (u32 r = 0; r < 4 && freeCount < 2; r++) {
+        if (!used[r]) freeTables[freeCount++] = r;
+    }
+    if (freeCount != 2) return false;
+
+    tev->setTevSwapModeTable(freeTables[0], swap_table(0, 0, 0, 3));
+    tev->setTevSwapModeTable(freeTables[1], swap_table(2, 2, 2, 3));
+
+    J3DTevStage* red = tev->getTevStage(stageNum);
+    red->setStageNo(stageNum);
+    write_passthrough_alpha(red, rasSwap);
+    tev->setTevOrder(stageNum, eyeOrder);
+    red->mTevSwapModeInfo = static_cast<u8>((red->mTevSwapModeInfo & 0xF3) | (freeTables[0] << 2));
+    red->mTevColorCD = 0xF8;
+    red->mTevColorOp = 0x08;
+    red->mTevColorAB = 0xFF;
+
+    J3DTevStage* blue = tev->getTevStage(stageNum + 1);
+    blue->setStageNo(stageNum + 1);
+    write_passthrough_alpha(blue, rasSwap);
+    tev->setTevOrder(stageNum + 1, eyeOrder);
+    blue->mTevSwapModeInfo = static_cast<u8>((blue->mTevSwapModeInfo & 0xF3) | (freeTables[1] << 2));
+    blue->mTevColorCD = 0xF8;
+    blue->mTevColorOp = 0x2C;
+    blue->mTevColorAB = 0x0F;
+
+    J3DTevStage* cut = tev->getTevStage(stageNum + 2);
+    cut->setStageNo(stageNum + 2);
+    write_passthrough_alpha(cut, rasSwap);
+    tev->setTevOrder(stageNum + 2, tev_order(0xFF, 0xFF, GX_COLOR1A1));
+    tev->setTevKColorSel(stageNum + 2, static_cast<u8>(GX_TEV_KCSEL_2_8));
+    cut->mTevColorCD = 0xF0;
+    cut->mTevColorOp = 0x2C;
+    cut->mTevColorAB = 0xEF;
+
+    J3DTevStage* tint = tev->getTevStage(stageNum + 3);
+    tint->setStageNo(stageNum + 3);
+    write_passthrough_alpha(tint, rasSwap);
+    tev->setTevOrder(stageNum + 3, tev_order(0xFF, 0xFF, GX_COLOR1A1));
+    tint->mTevColorCD = 0xAF;
+    tint->mTevColorOp = 0x08;
+    tint->mTevColorAB = 0xF0;
+    return true;
 }
 
-J3DModel* build_model(u8* copy, u32 size, u32 tag, const char* label) {
-    patch_bmd_file(copy, size);
+bool prepare_dark_materials(J3DModelData* data) {
+    J3DLightObj* lights[8] = {};
+    for (J3DLightObj*& light : lights) {
+        light = JKR_NEW J3DLightObj();
+        if (light == nullptr) return false;
+    }
+    const J3DTevSwapModeTableInfo& swapInfo = j3dDefaultTevSwapModeTable;
+    const u8 defaultSwap = calcTevSwapTableID(swapInfo.field_0x0, swapInfo.field_0x1, swapInfo.field_0x2,
+                                              swapInfo.field_0x3);
+
+    for (u16 i = 0; i < data->getMaterialNum(); i++) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        J3DTevBlock* old = material->getTevBlock();
+        const u8 stageNum = old->getTevStageNum();
+        const int texSlots = tev_texture_slots(old);
+        if (texSlots == 0 || stageNum < 1 || stageNum > kMaxTevStages) return false;
+
+        J3DTevBlock16* tev = JKR_NEW J3DTevBlock16();
+        J3DColorBlockLightOn* color = JKR_NEW J3DColorBlockLightOn();
+        if (tev == nullptr || color == nullptr) return false;
+
+        for (int t = 0; t < texSlots; t++) {
+            tev->setTexNo(t, old->getTexNo(t));
+        }
+        for (u8 s = 0; s < stageNum; s++) {
+            tev->setTevOrder(s, old->getTevOrder(s));
+            tev->setTevStage(s, old->getTevStage(s));
+            tev->getTevStage(s)->setStageNo(s);
+            if (J3DIndTevStage* ind = old->getIndTevStage(s)) tev->setIndTevStage(s, ind);
+            tev->setTevKColorSel(s, old->getTevKColorSel(s));
+            tev->setTevKAlphaSel(s, old->getTevKAlphaSel(s));
+        }
+        for (u32 r = 0; r < 4; r++) {
+            if (J3DGXColorS10* c = old->getTevColor(r)) tev->setTevColor(r, c);
+            if (J3DGXColor* k = old->getTevKColor(r)) tev->setTevKColor(r, k);
+            if (J3DTevSwapModeTable* sw = old->getTevSwapModeTable(r)) tev->setTevSwapModeTable(r, sw);
+        }
+
+        J3DColorBlock* oldColor = material->getColorBlock();
+        color->reset(oldColor);
+        color->setCullMode(oldColor->getCullMode());
+        color->setColorChanNum(static_cast<u8>(2));
+        color->setLight(0, lights[0]);
+        for (u32 l = 2; l < 8; l++) {
+            color->setLight(l, lights[l]);
+        }
+        color->setColorChan(2, color_chan(kSpecularChanId));
+        J3DGXColor ambient = *color->getAmbColor(1);
+        ambient.r = kSpecularAmbient;
+        ambient.g = kSpecularAmbient;
+        ambient.b = kSpecularAmbient;
+        color->setAmbColor(1, ambient);
+        J3DGXColor matColor = *color->getMatColor(1);
+        matColor.r = 0xFF;
+        matColor.g = 0xFF;
+        matColor.b = 0xFF;
+        color->setMatColor(1, matColor);
+
+        tev->setTevOrder(stageNum, tev_order(0xFF, 0xFF, GX_COLOR1A1));
+        J3DTevStage* stage = tev->getTevStage(stageNum);
+        stage->setStageNo(stageNum);
+        stage->mTevColorCD = 0xFA;
+        stage->mTevColorOp = 0x08;
+        stage->mTevColorAB = 0xFF;
+        stage->mTevSwapModeInfo = static_cast<u8>((stage->mTevSwapModeInfo & 0x0F) | 0x80);
+        stage->mTevAlphaOp = 0x08;
+        stage->mTevAlphaAB = 0xFF;
+
+        int rasSwap = -1;
+        for (u32 r = 0; r < 4 && rasSwap < 0; r++) {
+            if (tev->getTevSwapModeTable(r)->mIdx == defaultSwap) rasSwap = static_cast<int>(r);
+        }
+        if (rasSwap < 0) return false;
+        stage->mTevSwapModeInfo = static_cast<u8>((stage->mTevSwapModeInfo & 0xFC) | rasSwap);
+
+        u8 extraStages = 1;
+        if (is_eye_material(data, i)) {
+            if (!setup_eye_stages(data, old, tev, stageNum, rasSwap)) return false;
+            extraStages = 4;
+        }
+        tev->setTevStageNum(static_cast<u8>(stageNum + extraStages));
+        material->mTevBlock = tev;
+        material->mColorBlock = color;
+        material->mSharedDLObj = nullptr;
+        if (material->newSingleSharedDisplayList(material->countDLSize()) != kJ3DError_Success) return false;
+    }
+    apply_dark_light(data, lights[7]);
+    return true;
+}
+
+int free_alpha_register(J3DTevBlock* tev) {
+    for (u8 reg = 0; reg < 4; reg++) {
+        const u8 sel = static_cast<u8>(GX_TEV_KASEL_K0_A + reg);
+        bool used = false;
+        for (u8 s = 0; s < tev->getTevStageNum() && !used; s++) {
+            used = tev->getTevKAlphaSel(s) == sel || tev->getTevKColorSel(s) == sel;
+        }
+        if (!used) return reg;
+    }
+    return -1;
+}
+
+bool prepare_solid_fade(J3DModelData* data) {
+    J3DBlendInfo blendInfo;
+    blendInfo.mType = GX_BM_BLEND;
+    blendInfo.mSrcFactor = GX_BL_SRCALPHA;
+    blendInfo.mDstFactor = GX_BL_INVSRCALPHA;
+    blendInfo.mOp = GX_LO_COPY;
+    J3DZMode zMode;
+    zMode = kSolidZModeId;
+
+    for (u16 i = 0; i < data->getMaterialNum(); i++) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        J3DPEBlockFogOff* pe = JKR_NEW J3DPEBlockFogOff();
+        if (pe == nullptr) return false;
+        pe->setBlend(J3DBlend(blendInfo));
+        pe->setZMode(zMode);
+        pe->setAlphaComp(J3DAlphaComp(kSolidAlphaCmpId));
+        pe->setZCompLoc(static_cast<u8>(0));
+        material->mPEBlock = pe;
+        material->mMaterialMode = 4;
+
+        J3DTevBlock* tev = material->getTevBlock();
+        const int reg = free_alpha_register(tev);
+        if (reg < 0) return false;
+        const u8 stageNum = tev->getTevStageNum();
+        if (stageNum > kMaxTevStages) return false;
+        tev->setTevOrder(stageNum, tev_order(0xFF, 0xFF, 0xFF));
+        J3DTevStage* stage = tev->getTevStage(stageNum);
+        stage->setStageNo(stageNum);
+        stage->mTevColorCD = 0xF0;
+        stage->mTevColorOp = 0x08;
+        stage->mTevColorAB = 0xFF;
+        stage->mTevAlphaOp = 0x08;
+        tev->setTevStageNum(static_cast<u8>(stageNum + 1));
+        J3DGXColor konst = *tev->getTevKColor(reg);
+        konst.a = 0xFF;
+        tev->setTevKColor(reg, konst);
+        tev->setTevKAlphaSel(stageNum, static_cast<u8>(GX_TEV_KASEL_K0_A + reg));
+        stage->mTevAlphaAB = 0xF8;
+        stage->mTevSwapModeInfo = static_cast<u8>((stage->mTevSwapModeInfo & 0x0F) | 0x70);
+
+        material->mSharedDLObj = nullptr;
+        if (material->newSingleSharedDisplayList(material->countDLSize()) != kJ3DError_Success) return false;
+    }
+    for (u16 i = 0; i < data->getMaterialNum(); i++) {
+        J3DColorBlock* color = data->getMaterialNodePointer(i)->getColorBlock();
+        J3DGXColor matColor = *color->getMatColor(1);
+        matColor.a = 0xFF;
+        color->setMatColor(1, matColor);
+    }
+    data->makeSharedDL();
+    return true;
+}
+
+bool prepare_solid(J3DModelData* data) {
+    if (s_solidCount + data->getMaterialNum() > kMaxSolidEntries) return false;
+    const int start = s_solidCount;
+    for (u16 i = 0; i < data->getMaterialNum(); i++) {
+        J3DMaterial* material = data->getMaterialNodePointer(i);
+        const int reg = free_alpha_register(material->getTevBlock());
+        if (reg < 0) {
+            s_solidCount = start;
+            return false;
+        }
+        s_solid[s_solidCount++] = {data, material, reg};
+    }
+    if (!prepare_solid_fade(data)) {
+        s_solidCount = start;
+        return false;
+    }
+    return true;
+}
+
+void refresh_solid(J3DModelData* data) {
+    for (int i = 0; i < s_solidCount; i++) {
+        if (s_solid[i].data != data) continue;
+        J3DTevBlock* tev = s_solid[i].material->getTevBlock();
+        J3DGXColor konst = *tev->getTevKColor(s_solid[i].reg);
+        konst.a = kSolidAlpha;
+        tev->setTevKColor(s_solid[i].reg, konst);
+    }
+}
+
+bool shape_packet_hidden(J3DShapePacket* packet) {
+    return packet->checkFlag(0x10) || packet->getShape()->checkFlag(1);
+}
+
+void DepthPacket::draw() {
+    j3dSys.reinitGX();
+    J3DTexture* savedTexture = j3dSys.getTexture();
+    GXSetColorUpdate(GX_FALSE);
+    GXSetAlphaUpdate(GX_FALSE);
+    for (J3DModel* model : mModels) {
+        if (model == nullptr) continue;
+        J3DModelData* data = model->getModelData();
+        j3dSys.setTexture(data->getTexture());
+        for (u16 i = 0; i < data->getMaterialNum(); i++) {
+            J3DMatPacket* matPacket = model->getMatPacket(i);
+            J3DShapePacket* first = matPacket->getShapePacket();
+            if (first == nullptr || shape_packet_hidden(first)) continue;
+            matPacket->getMaterial()->load();
+            matPacket->callDL();
+            first->getShape()->loadPreDrawSetting();
+            for (J3DShapePacket* packet = first; packet != nullptr;
+                 packet = static_cast<J3DShapePacket*>(packet->getNextPacket())) {
+                if (shape_packet_hidden(packet)) continue;
+                if (packet->getDisplayListObj() != nullptr) packet->callDL();
+                GXSetColorUpdate(GX_FALSE);
+                GXSetAlphaUpdate(GX_FALSE);
+                GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_COPY);
+                GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+                GXSetZCompLoc(GX_FALSE);
+                packet->drawFast();
+            }
+            J3DShape::resetVcdVatCache();
+        }
+    }
+    GXSetColorUpdate(GX_TRUE);
+    GXSetAlphaUpdate(GX_TRUE);
+    j3dSys.setTexture(savedTexture);
+    j3dSys.reinitGX();
+}
+
+void submit_depth_packet(J3DModel* const (&models)[7]) {
+    J3DDrawBuffer* buffer = j3dSys.getDrawBuffer(1);
+    if (buffer == nullptr) return;
+    for (u32 b = 0; b < buffer->mEntryTableSize; b++) {
+        int guard = 0x2000;
+        for (J3DPacket* packet = buffer->mpBuffer[b]; packet != nullptr; packet = packet->getNextPacket()) {
+            if (packet == &s_depthPacket || --guard <= 0) return;
+        }
+    }
+    for (int i = 0; i < 7; i++) {
+        s_depthPacket.mModels[i] = models[i];
+    }
+    s_depthPacket.drawClear();
+    const u16 index = buffer->mDrawMode == 1 ? static_cast<u16>(buffer->mEntryTableSize - 1) : 0;
+    buffer->entryImm(&s_depthPacket, index);
+}
+
+s16 half_angle(s16 value) {
+    return static_cast<s16>(value >> 1);
+}
+
+void hat_update(J3DModel* body, J3DModel* head, const cXyz& moved, s16 angle) {
+    MtxP tip = head->getAnmMtx(kHatTipJoint);
+    const cXyz headPos(tip[0][3], tip[1][3], tip[2][3]);
+    cXyz facing;
+    mDoMtx_multVecSR(body->getAnmMtx(kHeadJoint), &cXyz::BaseX, &facing);
+    const s16 yaw = facing.atan2sX_Z();
+    s16 pitch;
+    if (cLib_distanceAngleS(yaw, angle) > 0x7000) {
+        pitch = cM_atan2s(-facing.y, -facing.absXZ());
+    } else {
+        pitch = facing.atan2sY_XZ();
+    }
+
+    if (!s_hat.ready) {
+        s_hat.prevPos = headPos;
+        s_hat.prevPitch = pitch;
+        s_hat.prevYaw = yaw;
+        s_hat.ready = true;
+        return;
+    }
+
+    cXyz drift = s_hat.prevPos - headPos;
+    if (moved.x * moved.x + moved.z * moved.z < 1.0f) {
+        drift.x = 0.0f;
+        drift.z = 0.0f;
+    }
+    f32 sideX;
+    f32 sideZ;
+    const f32 facingXZ = facing.absXZ();
+    if (facingXZ < 0.01f) {
+        sideX = cM_ssin(angle);
+        sideZ = cM_scos(angle);
+    } else {
+        sideX = facing.x / facingXZ;
+        sideZ = facing.z / facingXZ;
+    }
+
+    s_hat.pitch[0] -= half_angle(static_cast<s16>(pitch - s_hat.prevPitch));
+    const int absPitch = std::abs(static_cast<int>(pitch));
+    if (!(absPitch > 0x3000 && absPitch < 0x5000)) {
+        s_hat.yaw[0] -= half_angle(static_cast<s16>(yaw - s_hat.prevYaw));
+    }
+    drift.y += -2.0f;
+    s_hat.prevPitch = pitch;
+    s_hat.prevYaw = yaw;
+
+    cXyz up;
+    MtxP base = body->getAnmMtx(kHatBaseJoint);
+    mDoMtx_multVecSR(base, &cXyz::BaseY, &up);
+    const s16 limitAngle = base[1][0] < 0.0f ? cM_atan2s(-up.y, -up.absXZ()) : up.atan2sY_XZ();
+    const int limit = limitAngle - 0x3800;
+
+    const f32 along = drift.x * sideX + drift.z * sideZ;
+    const s16 fall = cM_atan2s(drift.y, -along);
+    int target = cLib_minMaxLimit<int>(fall - pitch, -0x3800, 0x3800) + pitch;
+    if (target <= limit) target = limit;
+
+    const s16 pitch0 = s_hat.pitch[0];
+    const s16 yaw0 = s_hat.yaw[0];
+    cLib_addCalcAngleS2(&s_hat.pitch[0], static_cast<s16>(target - pitch), 5, 0x400);
+    s_hat.pitch[0] = static_cast<s16>(cLib_minMaxLimit<int>(s_hat.pitch[0] + s_hat.pitchSpeed[0], -0x3800, 0x3800));
+    const s16 lean = static_cast<s16>(cLib_minMaxLimit<int>(
+        cM_atan2s(-(drift.x * sideZ - drift.z * sideX), std::sqrt(drift.y * drift.y + along * along)), -0x2800,
+        0x2800));
+    cLib_addCalcAngleS2(&s_hat.yaw[0], lean, 5, 0x400);
+    s_hat.yaw[0] = static_cast<s16>(cLib_minMaxLimit<int>(s_hat.yaw[0] + s_hat.yawSpeed[0], -0x2800, 0x2800));
+    s_hat.pitchSpeed[0] = static_cast<s16>(0.2f * (s_hat.pitch[0] - pitch0));
+    s_hat.yawSpeed[0] = static_cast<s16>(0.2f * (s_hat.yaw[0] - yaw0));
+
+    int chain = s_hat.pitch[0] + pitch;
+    s16 prevPitchDelta = static_cast<s16>(s_hat.pitch[0] - pitch0);
+    s16 prevYawDelta = static_cast<s16>(s_hat.yaw[0] - yaw0);
+    for (int i = 1; i < 3; i++) {
+        s_hat.pitch[i] -= half_angle(prevPitchDelta);
+        s_hat.yaw[i] -= half_angle(prevYawDelta);
+        const s16 pitchBefore = s_hat.pitch[i];
+        const s16 yawBefore = s_hat.yaw[i];
+        cLib_addCalcAngleS2(&s_hat.pitch[i], 0, 5, 0x400);
+        cLib_addCalcAngleS2(&s_hat.yaw[i], 0, 5, 0x400);
+        int link = cLib_minMaxLimit<int>(s_hat.pitch[i] + s_hat.pitchSpeed[i], -0x1000, 0x1000);
+        const int sum = static_cast<s16>(chain + link);
+        if (limit > sum) {
+            link = limit - chain;
+            chain = limit;
+        } else {
+            chain = sum;
+        }
+        s_hat.pitch[i] = static_cast<s16>(link);
+        const int yawLink = cLib_minMaxLimit<int>(s_hat.yaw[i] + s_hat.yawSpeed[i], -0x2000, 0x2000);
+        s_hat.yaw[i] = static_cast<s16>(yawLink);
+        s_hat.pitchSpeed[i] = static_cast<s16>(0.2f * (s_hat.pitch[i] - pitchBefore));
+        s_hat.yawSpeed[i] = static_cast<s16>(0.2f * (s_hat.yaw[i] - yawBefore));
+        prevPitchDelta = static_cast<s16>(s_hat.pitch[i] - pitchBefore);
+        prevYawDelta = static_cast<s16>(s_hat.yaw[i] - yawBefore);
+    }
+
+    cXyz windPos = headPos;
+    cXyz windDir(0.0f, 0.0f, 0.0f);
+    f32 windPower = 0.0f;
+    dKyw_get_AllWind_vec(&windPos, &windDir, &windPower);
+    f32 strength = (25.0f * windPower * windPower + s_hat.prevPos.abs(headPos) * 0.65f) / 30.0f;
+    if (strength > 1.0f) strength = 1.0f;
+    const s16 step = static_cast<s16>(4060.0f * strength + 1500.0f);
+    s_hat.phase = static_cast<s16>(s_hat.phase + step);
+    s_hat.sway[0] = static_cast<s16>(strength * 728.0f * cM_scos(static_cast<s16>(s_hat.phase - 3 * step)));
+    s_hat.sway[1] = static_cast<s16>(strength * 1456.0f * cM_scos(static_cast<s16>(s_hat.phase - 4 * step)));
+    s_hat.sway[2] = static_cast<s16>(strength * 2184.0f * cM_scos(static_cast<s16>(s_hat.phase - 5 * step)));
+    s_hat.prevPos = headPos;
+}
+
+int hat_joint_callback(J3DJoint* joint, int op) {
+    if (op != 0) return 1;
+    J3DModel* model = j3dSys.getModel();
+    const u16 jnt = joint->getJntNo();
+    if (model == nullptr || model != s_head || jnt < kHatFirstJoint || jnt > kHatLastJoint) return 1;
+    s16 rotY;
+    s16 rotZ;
+    if (jnt <= kHatTipJoint) {
+        rotY = half_angle(s_hat.yaw[0]);
+        rotZ = half_angle(s_hat.pitch[0]);
+        if (jnt == kHatTipJoint) rotZ = static_cast<s16>(rotZ + s_hat.sway[0]);
+    } else {
+        const int k = jnt - kHatTipJoint;
+        rotY = s_hat.yaw[k];
+        rotZ = static_cast<s16>(s_hat.pitch[k] + s_hat.sway[k]);
+    }
+    mDoMtx_stack_c::copy(J3DSys::mCurrentMtx);
+    mDoMtx_stack_c::XYZrotM(0, rotY, rotZ);
+    model->setAnmMtx(jnt, mDoMtx_stack_c::get());
+    mDoMtx_copy(mDoMtx_stack_c::get(), J3DSys::mCurrentMtx);
+    return 1;
+}
+
+int hands_joint_callback(J3DJoint* joint, int op) {
+    if (op != 0) return 1;
+    const u16 jnt = joint->getJntNo();
+    if (jnt != 1 && jnt != 2) return 1;
+    J3DModel* model = j3dSys.getModel();
+    if (model == nullptr || model != s_hands || s_body == nullptr) return 1;
+    MtxP hand = s_body->getAnmMtx(jnt == 1 ? kLeftHandJoint : kRightHandJoint);
+    model->setAnmMtx(jnt, hand);
+    mDoMtx_copy(hand, J3DSys::mCurrentMtx);
+    return 1;
+}
+
+J3DModel* build_model(u8* copy, u32 size, u32 tag, u32 diffFlags, const char* label) {
     J3DModelData* data = dRes_info_c::loaderBasicBmd(tag, copy);
     if (data == nullptr || data->getMaterialNum() == 0 || data->getJointNum() == 0) {
         dl_log("[darklink] %s: model data invalid", label);
         return nullptr;
     }
-    J3DModel* model = tag == kTagBmwe ? mDoExt_J3DModel__create(data, 0, 0x11000084)
-                                      : mDoExt_J3DModel__create(data, 0x80000, 0x11000284);
+    if (tag == kTagBmwr || tag == kTagBmwe) {
+        dRes_info_c::offWarpMaterial(data);
+    }
+    if (!prepare_dark_materials(data)) {
+        dl_log("[darklink] %s: material setup failed", label);
+        return nullptr;
+    }
+    data->simpleCalcMaterial(0, const_cast<MtxP>(j3dDefaultMtx));
+    data->makeSharedDL();
+    if (!prepare_solid(data)) {
+        dl_log("[darklink] %s: solid setup failed", label);
+        return nullptr;
+    }
+    J3DModel* model = mDoExt_J3DModel__create(data, 0x80000, diffFlags);
     if (model == nullptr) {
         dl_log("[darklink] %s: model create failed", label);
         return nullptr;
     }
-    dl_log("[darklink] %s: %u bytes, %d joints, %d materials, %d specular, %d eye materials, %d eye textures",
-           label, size, static_cast<int>(data->getJointNum()),
-           static_cast<int>(data->getMaterialNum()), s_specularPatched, s_eyeMaterials, s_eyeTextures);
+    dl_log("[darklink] %s: %u bytes, %d joints, %d materials", label, size,
+           static_cast<int>(data->getJointNum()), static_cast<int>(data->getMaterialNum()));
     return model;
 }
 
-J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, const char* label) {
+J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, u32 diffFlags, const char* label) {
     if (archive == nullptr || raw == nullptr) return nullptr;
     u32 size = archive->getExpandedResSize(raw);
     const u8* rawBytes = static_cast<const u8*>(raw);
@@ -496,7 +814,7 @@ J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, const c
         return nullptr;
     }
     std::memcpy(copy, raw, size);
-    return build_model(copy, size, tag, label);
+    return build_model(copy, size, tag, diffFlags, label);
 }
 
 u32 probe_model_size(JKRArchive* archive, u32 index) {
@@ -526,7 +844,7 @@ J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char*
     J3DModel* model = nullptr;
     u8* copy = JKR_NEW_ARRAY_ARGS(u8, bufferSize, 0x20);
     if (copy != nullptr && archive->readIdxResource(copy, bufferSize, index) >= size) {
-        model = build_model(copy, size, tag, label);
+        model = build_model(copy, size, tag, kEquipDiffFlags, label);
     } else {
         dl_log("[darklink] %s: read of %u bytes failed", label, size);
     }
@@ -539,77 +857,86 @@ J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char*
     return model;
 }
 
-J3DModel* create_kmdl_model(const char* bmdName) {
-    return create_model_from_raw(s_archive, s_archive->getResource(kTagBmwr, bmdName), kTagBmwr, bmdName);
+J3DModel* create_kmdl_model(const char* bmdName, u32 diffFlags) {
+    return create_model_from_raw(s_archive, s_archive->getResource(kTagBmwr, bmdName), kTagBmwr, diffFlags,
+                                 bmdName);
 }
 
 JKRArchive* mount_dvd_archive(const char* path) {
     return JKRArchive::mount(path, JKRArchive::MOUNT_DVD, s_heap, JKRArchive::MOUNT_DIRECTION_HEAD);
 }
 
-void setup_hand_shapes(J3DModel* hands) {
-    if (hands == nullptr) return;
-    J3DModelData* data = hands->getModelData();
-    for (u16 i = 0; i < data->getMaterialNum(); i++) {
-        J3DShape* shape = data->getMaterialNodePointer(i)->getShape();
-        if (shape == nullptr) continue;
-        if (i == kLeftHandMaterial || i == kRightHandMaterial) {
-            shape->show();
+void load_equipment() {
+    const u8 sword = dComIfGs_getSelectEquipSword();
+    const u8 shield = dComIfGs_getSelectEquipShield();
+
+    if (sword == dItemNo_SWORD_e || sword == dItemNo_MASTER_SWORD_e || sword == dItemNo_LIGHT_SWORD_e) {
+        s_alinkArchive = mount_dvd_archive(kAlinkPath);
+        if (sword == dItemNo_SWORD_e) {
+            s_sword = create_part_model(s_alinkArchive, kOrdonSwordIndex, kTagBmwr, "ordon sword");
+            s_sheath = create_part_model(s_alinkArchive, kOrdonSheathIndex, kTagBmwr, "ordon sheath");
         } else {
-            shape->hide();
+            s_sword = create_part_model(s_alinkArchive, kMasterSwordIndex, kTagBmwe, "master sword");
+            s_sheath = create_part_model(s_alinkArchive, kMasterSheathIndex, kTagBmwe, "master sheath");
+        }
+    } else if (sword == dItemNo_WOOD_STICK_e) {
+        s_sword = create_kmdl_model("al_swb.bmd", kEquipDiffFlags);
+    }
+
+    const char* shieldPath = nullptr;
+    if (shield == dItemNo_WOOD_SHIELD_e) {
+        shieldPath = kWoodShieldPath;
+    } else if (shield == dItemNo_SHIELD_e) {
+        shieldPath = kOrdonShieldPath;
+    } else if (shield == dItemNo_HYLIA_SHIELD_e) {
+        shieldPath = kHylianShieldPath;
+    }
+    if (shieldPath != nullptr) {
+        s_shieldArchive = mount_dvd_archive(shieldPath);
+        s_shield = create_part_model(s_shieldArchive, kShieldIndex, kTagBmwr, "shield");
+    }
+
+    if (s_sword != nullptr) {
+        J3DModelData* data = s_sword->getModelData();
+        const bool wood = sword == dItemNo_WOOD_STICK_e;
+        const u16 index = wood ? 1 : 0;
+        if (index < data->getMaterialNum()) {
+            J3DShape* shape = data->getMaterialNodePointer(index)->getShape();
+            if (shape != nullptr) {
+                if (wood) {
+                    shape->hide();
+                } else {
+                    shape->show();
+                }
+            }
         }
     }
 }
 
-void rotate_about_axis(MtxP m, f32 ax, f32 ay, f32 az, f32 angle) {
-    const f32 c = std::cos(angle);
-    const f32 s = std::sin(angle);
-    const f32 t = 1.0f - c;
-    const f32 r[3][3] = {
-        {t * ax * ax + c, t * ax * ay - s * az, t * ax * az + s * ay},
-        {t * ax * ay + s * az, t * ay * ay + c, t * ay * az - s * ax},
-        {t * ax * az - s * ay, t * ay * az + s * ax, t * az * az + c},
-    };
-    f32 out[3][3];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            out[i][j] = r[i][0] * m[0][j] + r[i][1] * m[1][j] + r[i][2] * m[2][j];
-        }
+bool setup_hands(J3DModel* hands) {
+    J3DModelData* data = hands->getModelData();
+    if (data->getMaterialNum() < kHandsMinMaterials) return false;
+    for (u16 j = 0; j < data->getJointNum(); j++) {
+        data->getJointNodePointer(j)->setCallBack(hands_joint_callback);
     }
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) m[i][j] = out[i][j];
+    for (u16 i = 0; i < data->getShapeNum(); i++) {
+        data->getShapeNodePointer(i)->hide();
     }
+    const u16 grip = s_sword != nullptr ? kSwordGripMaterial : kOpenHandMaterial;
+    const u16 guard = s_shield != nullptr ? kShieldGripMaterial : kEmptyHandMaterial;
+    for (u16 index : {grip, guard}) {
+        if (J3DShape* shape = data->getMaterialNodePointer(index)->getShape()) shape->show();
+    }
+    return true;
 }
 
-int cap_joint_callback(J3DJoint* joint, int op) {
-    if (op != 0) return 1;
-    J3DModel* model = j3dSys.getModel();
-    const int j = joint->getJntNo();
-    if (model == nullptr || model != s_head || j < kCapFirstJoint || j > kCapLastJoint) return 1;
-    MtxP cur = J3DSys::mCurrentMtx;
-    const f32 len = std::sqrt(cur[0][0] * cur[0][0] + cur[1][0] * cur[1][0] + cur[2][0] * cur[2][0]);
-    if (len < 1.0e-4f) return 1;
-    const f32 dx = cur[0][0] / len;
-    const f32 dy = cur[1][0] / len;
-    const f32 dz = cur[2][0] / len;
-    const f32 horizontal = std::sqrt(dx * dx + dz * dz);
-    if (horizontal < 1.0e-4f) return 1;
-    const int k = j - kCapFirstJoint;
-    const f32 phase = static_cast<f32>(g_Counter.mCounter0) * kCapSwaySpeed - k * kCapSwayLag;
-    const f32 sway = kCapSwayDegrees[k] * (3.14159265f / 180.0f) * std::sin(phase);
-    const f32 angle = std::atan2(horizontal, -dy) * kCapDroop[k] + sway;
-    rotate_about_axis(cur, dz / horizontal, 0.0f, -dx / horizontal, angle);
-    model->setAnmMtx(j, cur);
-    return 1;
-}
-
-void setup_cap(J3DModel* head) {
-    if (head == nullptr) return;
+bool setup_hat(J3DModel* head) {
     J3DModelData* data = head->getModelData();
-    if (data->getJointNum() <= kCapLastJoint) return;
-    for (u16 j = kCapFirstJoint; j <= kCapLastJoint; j++) {
-        data->getJointNodePointer(j)->setCallBack(cap_joint_callback);
+    if (data->getJointNum() <= kHatLastJoint) return false;
+    for (u16 j = kHatFirstJoint; j <= kHatLastJoint; j++) {
+        data->getJointNodePointer(j)->setCallBack(hat_joint_callback);
     }
+    return true;
 }
 
 mDoExt_bckAnm* create_link_bck(u32 index) {
@@ -634,8 +961,55 @@ mDoExt_bckAnm* create_link_bck(u32 index) {
     return bck;
 }
 
+bool init_particles(const void* jpc) {
+    if (jpc == nullptr) return false;
+    JKRHeap* heap = JKRHeap::getCurrentHeap();
+    JPAResourceManager* resources = JKR_NEW JPAResourceManager(jpc, heap);
+    if (resources == nullptr || resources->getResource(kWarpResourceA) == nullptr ||
+        resources->getResource(kWarpResourceB) == nullptr || resources->getResource(kAuraResource) == nullptr) {
+        return false;
+    }
+    resources->swapTexture(mDoGph_gInf_c::getFrameBufferTimg(), "dummy");
+    JPAEmitterManager* particles = JKR_NEW JPAEmitterManager(kParticleMax, kEmitterMax, heap, 1, 1);
+    if (particles == nullptr) return false;
+    particles->entryResourceManager(resources, 0);
+    s_particles = particles;
+    return true;
+}
+
+void update_aura() {
+    for (int i = 0; i < kAuraCount; i++) {
+        MtxP joint = s_body->getAnmMtx(kAuraJoints[i]);
+        const JGeometry::TVec3<f32> pos(joint[0][3], joint[1][3], joint[2][3]);
+        JPABaseEmitter*& emitter = s_aura[i];
+        if (emitter == nullptr) {
+            emitter = s_particles->createSimpleEmitterID(pos, kAuraResource, 0, 0, nullptr, nullptr);
+            if (emitter == nullptr) continue;
+            emitter->mStatus |= JPAEmtrStts_Immortal;
+            emitter->mMaxFrame = 0;
+            emitter->mRate = i == 0 ? kAuraHeadRate : kAuraRate;
+            emitter->mLifeTime = kAuraLifeTime;
+            emitter->mGlobalScl.set(kAuraScale, kAuraScale, kAuraScale);
+            emitter->mGlobalPScl.set(kAuraScale, kAuraScale);
+            emitter->mGlobalPrmClr.a = kAuraAlpha;
+        }
+        emitter->mGlobalTrs.set(pos.x, pos.y, pos.z);
+    }
+}
+
+void release_particles() {
+    if (s_particles != nullptr) {
+        s_particles->forceDeleteAllEmitter();
+        s_particles = nullptr;
+    }
+    for (JPABaseEmitter*& emitter : s_aura) {
+        emitter = nullptr;
+    }
+}
+
 void release_all() {
-    if (s_mountCmd != nullptr) return;
+    if (s_mountCmd != nullptr || s_particleCmd != nullptr) return;
+    release_particles();
     if (s_bck != nullptr) {
         JKR_DELETE(s_bck);
         s_bck = nullptr;
@@ -645,6 +1019,12 @@ void release_all() {
             JKR_DELETE(*model);
             *model = nullptr;
         }
+    }
+    s_solidCount = 0;
+    s_hat = {};
+    s_tevstrReady = false;
+    for (J3DModel*& model : s_depthPacket.mModels) {
+        model = nullptr;
     }
     for (int i = 0; i < s_partHeapCount; i++) {
         mDoExt_destroyExpHeap(s_partHeaps[i]);
@@ -666,30 +1046,27 @@ void release_all() {
 bool build_models() {
     dl_log("[darklink] Kmdl mounted, heap free %u", static_cast<u32>(s_heap->getFreeSize()));
     JKRHeap* oldHeap = mDoExt_setCurrentHeap(s_heap);
-    s_body = create_kmdl_model("al.bmd");
-    s_head = create_kmdl_model("al_head.bmd");
-    s_face = create_kmdl_model("al_face.bmd");
-    s_hands = create_kmdl_model("al_hands.bmd");
-    s_alinkArchive = mount_dvd_archive(kAlinkPath);
-    s_sword = create_part_model(s_alinkArchive, kMasterSwordIndex, kTagBmwe, "sword");
-    s_sheath = create_part_model(s_alinkArchive, kMasterSheathIndex, kTagBmwe, "sheath");
-    s_shieldArchive = mount_dvd_archive(kShieldPath);
-    s_shield = create_part_model(s_shieldArchive, kShieldIndex, kTagBmwr, "shield");
-    s_bck = create_link_bck(kBattleWaitAnmIndex);
-    if (s_bck == nullptr) s_bck = create_link_bck(kIdleWaitAnmIndex);
+    s_solidCount = 0;
+    s_hat = {};
+    s_body = create_kmdl_model("al.bmd", kBodyDiffFlags);
+    s_head = create_kmdl_model("al_head.bmd", kBodyDiffFlags);
+    s_face = create_kmdl_model("al_face.bmd", kBodyDiffFlags);
+    s_hands = create_kmdl_model("al_hands.bmd", kBodyDiffFlags);
+    load_equipment();
+    s_bck = create_link_bck(kIdleWaitAnmIndex);
     mDoExt_setCurrentHeap(oldHeap);
-    dl_log("[darklink] body=%d head=%d face=%d hands=%d alink=%d sword=%d sheath=%d shieldArc=%d shield=%d bck=%d heap free %u",
-           s_body != nullptr, s_head != nullptr, s_face != nullptr, s_hands != nullptr,
-           s_alinkArchive != nullptr, s_sword != nullptr, s_sheath != nullptr,
-           s_shieldArchive != nullptr, s_shield != nullptr, s_bck != nullptr,
-           static_cast<u32>(s_heap->getFreeSize()));
+    dl_log("[darklink] body=%d head=%d face=%d hands=%d sword=%d sheath=%d shield=%d bck=%d heap free %u",
+           s_body != nullptr, s_head != nullptr, s_face != nullptr, s_hands != nullptr, s_sword != nullptr,
+           s_sheath != nullptr, s_shield != nullptr, s_bck != nullptr, static_cast<u32>(s_heap->getFreeSize()));
 
-    if (s_body == nullptr || s_body->getModelData()->getJointNum() <= kShieldJoint) {
+    if (s_body == nullptr || s_head == nullptr || s_face == nullptr || s_hands == nullptr ||
+        s_body->getModelData()->getJointNum() <= kShieldJoint) {
         return false;
     }
-    setup_hand_shapes(s_hands);
-    setup_cap(s_head);
-    dl_log("[darklink] hand shapes set");
+    if (!setup_hands(s_hands) || !setup_hat(s_head)) {
+        dl_log("[darklink] hands or hat setup failed");
+        return false;
+    }
     return true;
 }
 
@@ -707,20 +1084,26 @@ bool update_loading() {
             return false;
         }
         s_mountCmd = mDoDvdThd_mountArchive_c::create(kKmdlPath, 0, s_heap);
-        dl_log("[darklink] heap created, mounting Kmdl (cmd=%d)", s_mountCmd != nullptr);
-        if (s_mountCmd == nullptr) {
-            release_all();
-            s_state = State::Failed;
-            return false;
-        }
+        s_particleCmd = mDoDvdThd_toMainRam_c::create(kParticlePath, 0, s_heap);
+        dl_log("[darklink] heap created, mounting Kmdl (cmd=%d, particles=%d)", s_mountCmd != nullptr,
+               s_particleCmd != nullptr);
         s_state = State::Mounting;
         return false;
     }
-    case State::Mounting:
-        if (!s_mountCmd->sync()) return false;
-        s_archive = s_mountCmd->getArchive();
-        s_mountCmd->destroy();
-        s_mountCmd = nullptr;
+    case State::Mounting: {
+        if (s_mountCmd != nullptr && !s_mountCmd->sync()) return false;
+        if (s_particleCmd != nullptr && !s_particleCmd->sync()) return false;
+        void* jpc = nullptr;
+        if (s_particleCmd != nullptr) {
+            jpc = s_particleCmd->getMemAddress();
+            s_particleCmd->destroy();
+            s_particleCmd = nullptr;
+        }
+        if (s_mountCmd != nullptr) {
+            s_archive = s_mountCmd->getArchive();
+            s_mountCmd->destroy();
+            s_mountCmd = nullptr;
+        }
         s_state = State::Failed;
         if (s_archive == nullptr || !build_models()) {
             dl_log("[darklink] build failed (archive=%d)", s_archive != nullptr);
@@ -728,70 +1111,47 @@ bool update_loading() {
             s_state = State::Failed;
             return false;
         }
+        JKRHeap* oldHeap = mDoExt_setCurrentHeap(s_heap);
+        const bool particles = init_particles(jpc);
+        mDoExt_setCurrentHeap(oldHeap);
+        dl_log("[darklink] aura particles=%d heap free %u", particles, static_cast<u32>(s_heap->getFreeSize()));
         s_state = State::Ready;
         return true;
+    }
     }
     return false;
 }
 
-void setup_specular_light(J3DLightObj& light, const f32* dir, const GXColor& color) {
-    const f32 len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-    const f32 dx = dir[0] / len;
-    const f32 dy = dir[1] / len;
-    const f32 dz = dir[2] / len;
-    f32 hx = -dx;
-    f32 hy = -dy;
-    f32 hz = 1.0f - dz;
-    const f32 halfLen = std::sqrt(hx * hx + hy * hy + hz * hz);
-    if (halfLen > 0.0f) {
-        hx /= halfLen;
-        hy /= halfLen;
-        hz /= halfLen;
-    }
-    const f32 colorScale = kSpecularIntensity / kTevScaleFactor;
-    J3DLightInfo* info = light.getLightInfo();
-    info->mLightPosition.x = -dx * kLightDistance;
-    info->mLightPosition.y = -dy * kLightDistance;
-    info->mLightPosition.z = -dz * kLightDistance;
-    info->mLightDirection.x = hx;
-    info->mLightDirection.y = hy;
-    info->mLightDirection.z = hz;
-    info->mColor.r = clamp_u8(color.r * colorScale);
-    info->mColor.g = clamp_u8(color.g * colorScale);
-    info->mColor.b = clamp_u8(color.b * colorScale);
-    info->mColor.a = 255;
-    info->mCosAtten.x = 0.0f;
-    info->mCosAtten.y = 0.0f;
-    info->mCosAtten.z = 1.0f;
-    info->mDistAtten.x = kShininess * 0.5f;
-    info->mDistAtten.y = 0.0f;
-    info->mDistAtten.z = 1.0f - kShininess * 0.5f;
-}
-
-void apply_dark_light(J3DModel* model) {
-    daAlink_c* alink = daAlink_getAlinkActorClass();
-    if (alink == nullptr) return;
-    g_env_light.settingTevStruct_colget_player(&alink->tevStr);
-    std::memcpy(static_cast<void*>(&s_darkTev), static_cast<const void*>(&alink->tevStr),
-                sizeof(dKy_tevstr_c));
-    s_darkTev.AmbCol.r = 0;
-    s_darkTev.AmbCol.g = 0;
-    s_darkTev.AmbCol.b = 0;
-    const u8 tint = clamp_u8(kBaseTint / kTevScaleFactor);
-    s_darkTev.TevKColor.r = tint;
-    s_darkTev.TevKColor.g = tint;
-    s_darkTev.TevKColor.b = tint;
-    s_darkTev.TevKColor.a = kGhostAlpha;
-    g_env_light.setLightTevColorType_MAJI(model, &s_darkTev);
-    setup_specular_light(s_darkTev.mLights[0], kKeyLightDir, kKeyLightColor);
-    setup_specular_light(s_darkTev.mLights[1], kRimLightDir, kRimLightColor);
-}
-
-void draw_at(J3DModel* model, MtxP mtx) {
+void calc_equipment(J3DModel* model, u16 joint) {
     if (model == nullptr) return;
-    model->setBaseTRMtx(mtx);
-    apply_dark_light(model);
-    mDoExt_modelUpdateDL(model);
+    model->setBaseTRMtx(s_body->getAnmMtx(joint));
+    model->calc();
+}
+
+void calc_models(const cXyz& pos, s16 angleY) {
+    mDoMtx_stack_c::transS(pos);
+    mDoMtx_stack_c::YrotM(angleY);
+    s_body->setBaseTRMtx(mDoMtx_stack_c::get());
+    if (s_bck != nullptr) {
+        s_bck->play();
+        s_bck->entry(s_body->getModelData());
+    }
+    s_body->calc();
+    if (s_hat.ready) {
+        hat_update(s_body, s_head, cXyz::Zero, angleY);
+    }
+    s_head->setBaseTRMtx(s_body->getAnmMtx(kHeadJoint));
+    s_head->calc();
+    s_face->setBaseTRMtx(s_body->getAnmMtx(kHeadJoint));
+    s_face->calc();
+    if (!s_hat.ready) {
+        hat_update(s_body, s_head, cXyz::Zero, angleY);
+    }
+    s_hands->setBaseTRMtx(s_body->getBaseTRMtx());
+    s_hands->calc();
+    calc_equipment(s_sword, kSwordJoint);
+    calc_equipment(s_sheath, kSheathJoint);
+    calc_equipment(s_shield, kShieldJoint);
 }
 
 }
@@ -817,58 +1177,35 @@ bool boss_rush_darklink_enabled() {
 }
 
 void boss_rush_darklink_draw(const cXyz& pos, const csXyz& angle) {
-    static int s_loggedStep = 0;
-    auto step = [](int id, const char* name) {
-        if (id > s_loggedStep) {
-            s_loggedStep = id;
-            dl_log("[darklink] draw step %d: %s", id, name);
-        }
-    };
-
-    step(1, "enter");
     if (!update_loading()) return;
-    step(2, "loaded");
 
-    mDoMtx_stack_c::transS(pos.x, pos.y, pos.z);
-    mDoMtx_stack_c::ZXYrotM(angle.x, angle.y, angle.z);
-    s_body->setBaseScale(cXyz(1.0f, 1.0f, 1.0f));
-    s_body->setBaseTRMtx(mDoMtx_stack_c::get());
-    step(3, "base matrix set");
-
-    if (s_bck != nullptr) {
-        s_bck->play();
-        s_bck->entry(s_body->getModelData());
+    dComIfGd_setList();
+    if (!s_tevstrReady) {
+        dKy_tevstr_init(&s_tevstr, dComIfGp_roomControl_getStayNo(), 0xFF);
+        s_tevstrReady = true;
     }
-    step(4, "anim entered");
+    cXyz lightPos = pos;
+    g_env_light.settingTevStruct(0, &lightPos, &s_tevstr);
 
-    s_body->calc();
-    step(5, "body calc");
-    apply_dark_light(s_body);
-    step(6, "body light");
-    mDoExt_modelUpdateDL(s_body);
-    step(7, "body drawn");
+    calc_models(pos, angle.y);
 
-    draw_at(s_face, s_body->getAnmMtx(kHeadJoint));
-    step(8, "face drawn");
-    draw_at(s_head, s_body->getAnmMtx(kHeadJoint));
-    step(9, "head drawn");
-
-    if (s_hands != nullptr && s_hands->getModelData()->getJointNum() > 2) {
-        s_hands->setBaseTRMtx(s_body->getBaseTRMtx());
-        s_hands->calc();
-        s_hands->setAnmMtx(1, s_body->getAnmMtx(kLeftHandJoint));
-        s_hands->setAnmMtx(2, s_body->getAnmMtx(kRightHandJoint));
-        apply_dark_light(s_hands);
-        mDoExt_modelEntryDL(s_hands);
+    s_statueDrawTick = g_Counter.mCounter0;
+    if (s_particles != nullptr && g_Counter.mCounter0 != s_particleTick) {
+        s_particleTick = g_Counter.mCounter0;
+        s_particles->calc(0);
+        update_aura();
     }
-    step(10, "hands drawn");
 
-    draw_at(s_shield, s_body->getAnmMtx(kShieldJoint));
-    step(11, "shield drawn");
-    draw_at(s_sheath, s_body->getAnmMtx(kSheathJoint));
-    step(12, "sheath drawn");
-    draw_at(s_sword, s_body->getAnmMtx(kSwordJoint));
-    step(13, "sword drawn");
+    J3DModel* const models[7] = {s_body, s_head, s_face, s_hands, s_sword, s_sheath, s_shield};
+    for (J3DModel* model : models) {
+        if (model == nullptr) continue;
+        J3DModelData* data = model->getModelData();
+        g_env_light.setLightTevColorType_MAJI(data, &s_tevstr);
+        apply_dark_light(data, &s_frameLight);
+        refresh_solid(data);
+        mDoExt_modelEntryDL(model);
+    }
+    submit_depth_packet(models);
 
     static bool s_drawLogged = false;
     if (!s_drawLogged) {
@@ -886,6 +1223,22 @@ void boss_rush_darklink_unload() {
 
 DEFINE_HOOK(&daB_TN_c::execute, BossRushVanillaDarknutExecuteHook);
 DEFINE_HOOK(&daB_TN_c::draw, BossRushVanillaDarknutDrawHook);
+DEFINE_HOOK(&dPa_control_c::draw, DarkLinkParticleDrawHook);
+
+namespace {
+
+HookAction on_particle_draw_pre(ModContext*, void* args, void*, void*) {
+    if (s_particles == nullptr || s_particles->getEmitterNumber() <= 0) return HOOK_CONTINUE;
+    if (mods::arg<u8>(args, 2) != kAuraDrawGroup) return HOOK_CONTINUE;
+    if (g_Counter.mCounter0 - s_statueDrawTick > 2) return HOOK_CONTINUE;
+    j3dSys.reinitGX();
+    dKy_setLight_again();
+    dKy_GxFog_set();
+    s_particles->draw(mods::arg<JPADrawInfo*>(args, 1), 0);
+    return HOOK_CONTINUE;
+}
+
+}
 
 namespace {
 
@@ -1071,6 +1424,47 @@ void set_skip_phase(SkipPhase phase) {
 bool boss_rush_darklink_fight_started() {
     return in_darklink_stage() &&
            dComIfGs_isOneZoneSwitch(kFightZoneSwitch, dComIfGp_roomControl_getStayNo()) != 0;
+}
+
+bool boss_rush_darklink_gear_locked() {
+    return in_darklink_stage() && boss_rush_darklink_mod_installed() && find_darklink_actor() != nullptr;
+}
+
+namespace {
+
+constexpr u8 kSwordPriority[] = {dItemNo_LIGHT_SWORD_e, dItemNo_MASTER_SWORD_e, dItemNo_SWORD_e,
+                                 dItemNo_WOOD_STICK_e};
+constexpr u8 kShieldPriority[] = {dItemNo_HYLIA_SHIELD_e, dItemNo_SHIELD_e, dItemNo_WOOD_SHIELD_e};
+
+template <size_t N>
+u8 best_owned(const u8 (&items)[N]) {
+    for (u8 item : items) {
+        if (dComIfGs_isItemFirstBit(item)) return item;
+    }
+    return dItemNo_NONE_e;
+}
+
+}
+
+void update_boss_rush_darklink_gear_lock() {
+    if (!boss_rush_darklink_gear_locked()) return;
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr) return;
+    if (dComIfGs_getSelectEquipSword() == dItemNo_NONE_e) {
+        const u8 sword = best_owned(kSwordPriority);
+        if (sword != dItemNo_NONE_e) {
+            dMeter2Info_setSword(sword, false);
+            dl_log("[darklink] sword re-equipped for the fight (%d)", sword);
+        }
+    }
+    if (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e) {
+        const u8 shield = best_owned(kShieldPriority);
+        if (shield != dItemNo_NONE_e) {
+            dMeter2Info_setShield(shield, false);
+            link->setShieldChange();
+            dl_log("[darklink] shield re-equipped for the fight (%d)", shield);
+        }
+    }
 }
 
 void boss_rush_darklink_on_fight_landed(bool retry) {
@@ -1263,5 +1657,6 @@ ModResult init_boss_rush_darklink(const HookService* hook_svc) {
     mods::hook::add_pre<DarkLinkAttentionDrawHook>(hook_svc, on_attention_draw_pre, &hideOptions);
     mods::hook::add_pre<DarkLinkMessageDrawHook>(hook_svc, on_hidden_draw_pre, &hideOptions);
     mods::hook::add_post<DarkLinkActorExecuteHook>(hook_svc, on_actor_execute_post);
+    mods::hook::add_pre<DarkLinkParticleDrawHook>(hook_svc, on_particle_draw_pre);
     return MOD_OK;
 }

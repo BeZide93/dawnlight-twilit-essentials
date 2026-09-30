@@ -65,7 +65,7 @@ inline void collectionlib_clear(CustomEquipKind kind) { custom_equip_clear(kind)
 inline bool collectionlib_active(CustomEquipKind kind) { return custom_equip_active(kind); }
 inline int  collectionlib_active_id(CustomEquipKind kind) { return custom_equip_active_id(kind); }
 
-void collectionlib_set_unequip_policy(bool (*fn)());
+void collectionlib_set_unequip_policy(bool (*fn)(CustomEquipKind kind));
 
 void collectionlib_set_keep_ordon_shield_policy(bool (*fn)());
 

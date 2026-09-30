@@ -81,6 +81,7 @@ extern const SaveService* svc_save;
 #include "dusk/config_var.hpp"
 #include "../general/faster_transitions.hpp"
 #include "../general/fast_forward_cutscenes.hpp"
+#include "../quick_access/quick_access.hpp"
 
 #include <algorithm>
 #include <array>
@@ -5508,6 +5509,27 @@ int boss_rush_gauntlet_phase() {
     return s_gauntletPhase;
 }
 
+constexpr int kStatueInputCooldown = 10;
+static int s_statueInputCooldown = 0;
+
+static bool boss_rush_ui_owns_input() {
+    return dMeter2Info_getWindowStatus() != 0 || dComIfGp_isPauseFlag() || dScnPly_c::isPause() ||
+           dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag() || dMsgObject_isTalkNowCheck() ||
+           quick_access_is_active();
+}
+
+static bool boss_rush_free_a_trigger() {
+    if (boss_rush_ui_owns_input()) {
+        s_statueInputCooldown = kStatueInputCooldown;
+        return false;
+    }
+    if (s_statueInputCooldown > 0) {
+        if (!mDoCPd_c::getHoldA(PAD_1)) --s_statueInputCooldown;
+        return false;
+    }
+    return mDoCPd_c::getTrigA(PAD_1);
+}
+
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     if (is_game_resetting_or_title() && !boss_rush_game_mode_entering()) {
         if (s_bossRushModeActive || s_exitingBossRush || boss_rush_session_marker_present()) {
@@ -5519,6 +5541,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_boss_rush_exit_memory_guard();
     update_dark_link_retry_fade(log_svc, mod_ctx);
     update_boss_rush_darklink_retry_skip();
+    update_boss_rush_darklink_gear_lock();
     apply_pending_gear_save_if_covered();
 
     if (!g_configBossRushSeparateGanon && boss_rush_is_fighting_here() && !s_returningToChamber) {
@@ -6433,6 +6456,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         return;
     }
 
+    const bool statueA = boss_rush_free_a_trigger();
     const size_t activeCount = boss_rush_get_active_gallery_count();
     for (size_t circleSlot = 0; circleSlot < activeCount; ++circleSlot) {
         const size_t i = boss_rush_get_active_gallery_table_index(circleSlot);
@@ -6447,14 +6471,14 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         const f32 distSq = dx * dx + dz * dz;
 
         if (distSq < kBossInteractRadius * kBossInteractRadius) {
-            if (mDoCPd_c::getTrigA(PAD_1)) {
+            if (statueA) {
                 commit_boss_rush_fight_warp(i, link, log_svc, mod_ctx);
                 break;
             }
         }
     }
 
-    if (boss_rush_master_sword_near() && mDoCPd_c::getTrigA(PAD_1)) {
+    if (boss_rush_master_sword_near() && statueA) {
         start_boss_rush_full_run(log_svc, mod_ctx);
     }
 }

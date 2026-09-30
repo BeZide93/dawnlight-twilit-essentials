@@ -77,7 +77,7 @@ constexpr int32_t kClAfterOtherMods = -100;
 extern dMenu_Collect2D_c* s_currentCollect2D;
 extern bool s_needReloadCollect;
 
-bool cl_unequip_enabled();
+bool cl_unequip_enabled(CustomEquipKind kind);
 bool cl_keep_ordon_shield_enabled();
 bool cl_hd_layout_requested();
 

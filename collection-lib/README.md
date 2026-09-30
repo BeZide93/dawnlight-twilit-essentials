@@ -257,7 +257,7 @@ Hysteria.
 | `collectionlib_active(kind)` / `collectionlib_active_id(kind)` | Is / which custom slot is worn |
 | `collectionlib_request_reload()` | Rebuild the Collection screen if it is open |
 | `custom_equip_set_suppressed(bool)` / `custom_equip_restore_from_save()` | Take custom items off (e.g. for a challenge mode) / put the saved ones back on |
-| `collectionlib_set_unequip_policy(fn)` | A on the worn sword/shield unequips it (not native) |
+| `collectionlib_set_unequip_policy(fn)` | A on the worn sword/shield/tunic unequips it while `fn(kind)` allows it (not native) |
 | `collectionlib_set_keep_ordon_shield_policy(fn)` | Item checks keep counting the Ordon Shield (not native) |
 | `collectionlib_set_hd_layout_policy(fn)` | Rows on Twilight HD's layout while `fn` says it is on |
 | `collectionlib_init / update / shutdown` | Lifecycle |

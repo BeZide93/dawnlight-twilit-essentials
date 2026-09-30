@@ -1409,7 +1409,7 @@ bool custom_equip_toggle(int id) {
 
     if (custom_equip_equipped(id)) {
 
-        if (!cl_unequip_enabled()) return false;
+        if (!cl_unequip_enabled(kind)) return false;
         if (kind == CE_TUNIC) return custom_equip_unequip_tunic();
         s_equipDebounce = 8;
         if (s_activeId[kind] == id) custom_equip_clear(kind);

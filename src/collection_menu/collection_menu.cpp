@@ -1,6 +1,7 @@
 #include "collection_menu.hpp"
 #include "../util.hpp"
 #include "../compat/twilight_hd.hpp"
+#include "../boss_rush/boss_rush_darklink.hpp"
 
 #include <collection_lib/collection_lib.hpp>
 #include "d/actor/d_a_alink.h"
@@ -318,7 +319,9 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
     s_linkleActive = collection_linkle_active();
     sync_collection_ordon_hero_page();
 
-    collectionlib_set_unequip_policy([]() { return true; });
+    collectionlib_set_unequip_policy([](CustomEquipKind kind) {
+        return kind == CE_TUNIC || !boss_rush_darklink_gear_locked();
+    });
     collectionlib_set_keep_ordon_shield_policy([]() { return g_configCollectionKeepOrdonShield; });
     collectionlib_set_hd_layout_policy(&twilight_hd_collection);
 

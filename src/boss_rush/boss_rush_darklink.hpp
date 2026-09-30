@@ -22,6 +22,8 @@ bool boss_rush_wants_vanilla_darknut();
 bool boss_rush_darklink_replaces_darknut(const fopAc_ac_c* darknut);
 s16 boss_rush_darklink_actor_profile();
 bool boss_rush_darklink_fight_started();
+bool boss_rush_darklink_gear_locked();
+void update_boss_rush_darklink_gear_lock();
 void boss_rush_darklink_on_fight_landed(bool retry);
 void update_boss_rush_darklink_retry_skip();
 bool boss_rush_darklink_retry_skip_active();

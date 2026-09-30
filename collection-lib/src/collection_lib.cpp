@@ -19,15 +19,15 @@ extern const HostService* svc_host;
 const ResourceService* cl_resource_service() { return svc_resource; }
 const HostService* cl_host_service() { return svc_host; }
 
-static bool (*s_unequipPolicy)() = nullptr;
+static bool (*s_unequipPolicy)(CustomEquipKind) = nullptr;
 static bool (*s_keepOrdonShieldPolicy)() = nullptr;
 static bool (*s_hdLayoutPolicy)() = nullptr;
 
-void collectionlib_set_unequip_policy(bool (*fn)()) { s_unequipPolicy = fn; }
+void collectionlib_set_unequip_policy(bool (*fn)(CustomEquipKind)) { s_unequipPolicy = fn; }
 void collectionlib_set_keep_ordon_shield_policy(bool (*fn)()) { s_keepOrdonShieldPolicy = fn; }
 void collectionlib_set_hd_layout_policy(bool (*fn)()) { s_hdLayoutPolicy = fn; }
 
-bool cl_unequip_enabled() { return s_unequipPolicy != nullptr && s_unequipPolicy(); }
+bool cl_unequip_enabled(CustomEquipKind kind) { return s_unequipPolicy != nullptr && s_unequipPolicy(kind); }
 bool cl_keep_ordon_shield_enabled() { return s_keepOrdonShieldPolicy != nullptr && s_keepOrdonShieldPolicy(); }
 bool cl_hd_layout_requested() { return s_hdLayoutPolicy != nullptr && s_hdLayoutPolicy(); }
 
