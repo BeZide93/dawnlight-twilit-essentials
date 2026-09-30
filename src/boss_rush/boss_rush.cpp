@@ -4760,9 +4760,59 @@ void start_boss_rush_map_portal_warp() {
 
 static bool s_exitWarpArmed = false;
 
+static s32 s_exitRestoreTbl = -1;
+static dSv_memory_c s_exitRestoreMemory;
+static char s_exitRestoreStage[8] = {};
+static int s_exitRestoreFrames = 0;
+constexpr int kExitRestoreGuardFrames = 600;
+
+static s32 current_stage_save_tbl() {
+    stage_stag_info_class* stag = g_dComIfG_gameInfo.play.getStage().getStagInfo();
+    if (stag == nullptr) {
+        return -1;
+    }
+    const s32 tbl = dStage_stagInfo_GetSaveTbl(stag);
+    return (tbl >= 0 && tbl < dSv_save_c::STAGE_MAX) ? tbl : -1;
+}
+
+static void sync_exit_stage_memory() {
+    s_exitRestoreTbl = -1;
+    s_exitRestoreFrames = 0;
+    const s32 tbl = current_stage_save_tbl();
+    if (tbl < 0) {
+        return;
+    }
+    s_exitRestoreMemory = g_dComIfG_gameInfo.info.getSavedata().getSave(tbl);
+    g_dComIfG_gameInfo.info.getMemory() = s_exitRestoreMemory;
+    if (!dComIfGp_isEnableNextStage()) {
+        return;
+    }
+    s_exitRestoreTbl = tbl;
+    const char* stage = dComIfGp_getStartStageName();
+    std::strncpy(s_exitRestoreStage, stage != nullptr ? stage : "", sizeof(s_exitRestoreStage) - 1);
+    s_exitRestoreStage[sizeof(s_exitRestoreStage) - 1] = '\0';
+}
+
+static void update_boss_rush_exit_memory_guard() {
+    if (s_exitRestoreTbl < 0) {
+        return;
+    }
+    if (++s_exitRestoreFrames >= kExitRestoreGuardFrames) {
+        s_exitRestoreTbl = -1;
+        return;
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    if (stage == nullptr || std::strncmp(stage, s_exitRestoreStage, sizeof(s_exitRestoreStage)) == 0) {
+        return;
+    }
+    g_dComIfG_gameInfo.info.getSavedata().getSave(s_exitRestoreTbl) = s_exitRestoreMemory;
+    s_exitRestoreTbl = -1;
+}
+
 static void install_boss_rush_exit_save() {
     const u8 slot = dComIfGs_getDataNum();
     dComIfGs_setCardToMemory(s_exitCardBuf, slot);
+    sync_exit_stage_memory();
 
     for (int i = 0; i < 4; ++i) {
         dComIfGp_setSelectItem(i);
@@ -4924,6 +4974,7 @@ static void close_boss_rush_session() {
     s_exitCardDataReady = false;
     s_exitWarpArmed = false;
     s_exitSaveReloadFrames = 0;
+    s_exitRestoreTbl = -1;
     s_morpheelPosPinFrames = 0;
     s_morpheelCamArmFrames = 0;
     s_horsebackGanonKoTimer = -1;
@@ -4987,6 +5038,9 @@ void exit_boss_rush() {
     s_returnSawFadeOut = false;
     s_needsChamberSpawn = false;
     s_chamberCamArmFrames = 0;
+    s_pendingGearSaveApply = false;
+    s_pendingGearSaveKind = 0;
+    s_pendingGearBoss = nullptr;
     reset_boss_rush_midna_flow();
 
     s_exitSaveReloadPending = true;
@@ -5462,6 +5516,7 @@ void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
         return;
     }
 
+    update_boss_rush_exit_memory_guard();
     update_dark_link_retry_fade(log_svc, mod_ctx);
     update_boss_rush_darklink_retry_skip();
     apply_pending_gear_save_if_covered();
