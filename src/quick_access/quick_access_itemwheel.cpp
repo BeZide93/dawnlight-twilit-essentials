@@ -4,7 +4,8 @@
 #include "../boss_rush/boss_rush.hpp"
 
 #include "d/d_com_inf_game.h"
-#include "d/d_menu_ring.h"
+#include "d/d_menu_window.h"
+#include "d/d_meter2_info.h"
 #include "d/d_save.h"
 #include "mods/svc/hook.hpp"
 
@@ -88,22 +89,30 @@ static int itemwheel_lineup_missing_count() {
     return expected - linedUp;
 }
 
-DEFINE_HOOK(&dMenu_Ring_c::_delete, RingDeleteQuickAccessHook);
+static bool s_ringArchiveInUse = false;
 
-static void on_ring_delete_quick_access_post(ModContext*, void*, void*, void*) {
-    quick_access_radial_reset();
+void quick_access_itemwheel_sync_ring_archive() {
+    dMw_c* mw = g_meter2_info.getMenuWindowClass();
+    if (mw != nullptr && mw->mpMenuRing != nullptr) {
+        s_ringArchiveInUse = true;
+        return;
+    }
+    if (s_ringArchiveInUse) {
+        s_ringArchiveInUse = false;
+        quick_access_radial_reset();
+    }
 }
 
 ModResult init_quick_access_itemwheel(const HookService* hook_svc, ModError*) {
     if (hook_svc) {
         mods::hook::add_post<SvSetLineUpItemQuickAccessHook>(hook_svc,
             on_set_line_up_item_quick_access_post);
-        mods::hook::add_post<RingDeleteQuickAccessHook>(hook_svc, on_ring_delete_quick_access_post);
     }
     return MOD_OK;
 }
 
 void update_quick_access_itemwheel() {
+    quick_access_itemwheel_sync_ring_archive();
     if (itemwheel_lineup_missing_count() > 0) {
         quick_access_itemwheel_refresh();
     } else if (itemwheel_filter_active() && itemwheel_lineup_has_hidden_item()) {

@@ -11,3 +11,4 @@ void update_quick_access_itemwheel();
 void shutdown_quick_access_itemwheel();
 
 void quick_access_itemwheel_refresh();
+void quick_access_itemwheel_sync_ring_archive();

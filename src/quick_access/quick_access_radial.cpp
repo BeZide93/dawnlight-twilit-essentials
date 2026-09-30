@@ -1,4 +1,5 @@
 #include "quick_access_internal.hpp"
+#include "quick_access_itemwheel.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
@@ -163,6 +164,7 @@ void qa_radial_draw_wheel(f32 centerX, f32 centerY, u8 alpha, f32 alphaRate, boo
     const f32 wheelScale = 0.85f;
     const f32 radius = 92.0f;
 
+    quick_access_itemwheel_sync_ring_archive();
     load_radial_wheel_resources();
 
     if (s_wheelCircle != nullptr && s_wheelScreen != nullptr) {
