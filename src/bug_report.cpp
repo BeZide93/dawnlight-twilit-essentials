@@ -1,4 +1,4 @@
-#include "bug-report.hpp"
+#include "bug_report.hpp"
 
 #include "mods/svc/host.h"
 #include "mods/svc/http.h"
@@ -27,7 +27,6 @@ extern const UiService* svc_ui;
 namespace bug_report {
 namespace {
 
-// ty ai
 constexpr uint8_t kWebhookKey[] = {
     0x23, 0x41, 0xEE, 0x10, 0x25, 0x5E, 0xFF, 0xE8, 0xEB, 0xB9, 0x67, 0x6B, 0x6E, 0x60, 0x15, 0x39,
 };
@@ -49,6 +48,7 @@ constexpr size_t kMaxLogBytes = 2u * 1024u * 1024u;
 constexpr size_t kMaxConfigBytes = 1024u * 1024u;
 constexpr size_t kMaxModListBytes = 256u * 1024u;
 constexpr size_t kMaxSaveBytes = 8u * 1024u * 1024u;
+constexpr size_t kMaxLogCount = 3;
 
 constexpr size_t kCardBlockSize = 0x2000;
 constexpr size_t kMaxCardBlocks = 0x800;
@@ -63,6 +63,7 @@ struct Attachment {
 
 struct Report {
     std::string content;
+    std::string embed;
     std::vector<Attachment> attachments;
 };
 
@@ -335,17 +336,47 @@ bool extract_gci_from_raw(const std::filesystem::path& rawPath, Attachment* out)
     return true;
 }
 
-bool collect_log(const std::filesystem::path& root, Attachment* out) {
-    std::filesystem::path newest;
+void collect_logs(
+    const std::filesystem::path& root, Report* report, std::vector<std::string>* names) {
     const std::filesystem::path logsDir = root / "logs";
-    if (!newest_matching_file(logsDir, ".log", "dusklight", &newest) &&
-        !newest_matching_file(logsDir, ".log", "dusk", &newest) &&
-        !newest_matching_file(logsDir, ".log", nullptr, &newest)) {
-        return false;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(logsDir, ec)) return;
+
+    struct LogCandidate {
+        std::filesystem::path path;
+        std::filesystem::file_time_type mtime;
+    };
+    std::vector<LogCandidate> logs;
+    std::filesystem::directory_iterator it(logsDir,
+        std::filesystem::directory_options::skip_permission_denied, ec);
+    if (ec) return;
+    std::filesystem::directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec) break;
+        const std::filesystem::directory_entry& entry = *it;
+        std::error_code entryEc;
+        if (!entry.is_regular_file(entryEc) || entryEc) continue;
+        if (entry.path().extension().string() != ".log") continue;
+        auto modified = entry.last_write_time(entryEc);
+        if (entryEc) continue;
+        logs.push_back({entry.path(), modified});
     }
-    out->filename = newest.filename().string();
-    out->mime = "text/plain";
-    return read_file_bytes(newest, kMaxLogBytes, true, out);
+
+    std::sort(logs.begin(), logs.end(), [](const LogCandidate& a, const LogCandidate& b) {
+        return a.mtime > b.mtime;
+    });
+    if (logs.size() > kMaxLogCount) {
+        logs.resize(kMaxLogCount);
+    }
+
+    for (const LogCandidate& log : logs) {
+        Attachment attachment;
+        if (!read_file_bytes(log.path, kMaxLogBytes, true, &attachment)) continue;
+        attachment.filename = log.path.filename().string();
+        attachment.mime = "text/plain";
+        names->push_back(attachment.filename);
+        report->attachments.push_back(std::move(attachment));
+    }
 }
 
 bool collect_config(const std::filesystem::path& root, Attachment* out) {
@@ -655,6 +686,8 @@ bool collect_save(const std::filesystem::path& root, Attachment* out) {
     return false;
 }
 
+std::string json_escape(std::string_view text);
+
 void build_report(Report* report, const std::string& id) {
     const std::filesystem::path root = resolve_data_root();
 
@@ -673,9 +706,9 @@ void build_report(Report* report, const std::string& id) {
 
     report->content = std::move(lines);
 
+    std::vector<std::string> logNames;
+    collect_logs(root, report, &logNames);
     Attachment attachment;
-    if (collect_log(root, &attachment)) report->attachments.push_back(std::move(attachment));
-    attachment = Attachment{};
     if (collect_config(root, &attachment)) {
         report->attachments.push_back(std::move(attachment));
     }
@@ -685,6 +718,19 @@ void build_report(Report* report, const std::string& id) {
     }
     attachment = Attachment{};
     if (collect_save(root, &attachment)) report->attachments.push_back(std::move(attachment));
+
+    std::string logValue;
+    for (size_t i = 0; i < logNames.size(); ++i) {
+        if (i != 0) logValue += "\\n";
+        logValue += json_escape(logNames[i]);
+    }
+    const std::string logField =
+        logValue.empty() ? std::string("none found") : logValue;
+
+    std::string fields;
+    fields += "{\"name\":\"Logs (newest first)\",\"value\":\"" + logField + "\"}";
+    report->embed = "{\"title\":\"" + json_escape("Bug report " + id) +
+                    "\",\"color\":15158332,\"fields\":[" + fields + "]}";
 }
 
 std::string json_escape(std::string_view text) {
@@ -727,7 +773,11 @@ std::string build_multipart(const std::string& id, const Report& report) {
     body += "--" + boundary + "\r\n";
     body += "Content-Disposition: form-data; name=\"payload_json\"\r\n";
     body += "Content-Type: application/json\r\n\r\n";
-    body += "{\"content\":\"" + json_escape(report.content) + "\"}";
+    body += "{\"content\":\"" + json_escape(report.content) + "\"";
+    if (!report.embed.empty()) {
+        body += ",\"embeds\":[" + report.embed + "]";
+    }
+    body += "}";
 
     int index = 0;
     for (const Attachment& attachment : report.attachments) {
@@ -947,7 +997,7 @@ void on_create_bug_report_pressed(ModContext* ctx, void*) {
     desc.body_rml =
         "<p>Do you agree to send a bug report to Fimmel? "
         "It will include:</p>"
-        "<p>\xe2\x80\x93 The most recent log file<br/>"
+        "<p>\xe2\x80\x93 The last three log files<br/>"
         "\xe2\x80\x93 config.json (your settings)<br/>"
         "\xe2\x80\x93 Your current save file<br/>"
         "\xe2\x80\x93 The list of installed mods<br/>"
