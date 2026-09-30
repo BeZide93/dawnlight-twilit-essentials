@@ -21,6 +21,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
 #include "d/d_meter2_info.h"
+#include "d/d_meter_map.h"
 #include "d/d_menu_window.h"
 #include "d/d_kantera_icon_meter.h"
 #include "d/d_msg_object.h"
@@ -1674,6 +1675,10 @@ static QaDpadRepeat s_shoulderRepeat;
 static dMeter2Draw_c* s_lastDraw = nullptr;
 static J2DScreen* s_lastScreen = nullptr;
 
+static bool qa_button_held() {
+    return controls_binding_held(CTRL_BIND_QUICK_ACCESS) || quick_access_mobile_held();
+}
+
 static void suppress_menu_buttons(interface_of_controller_pad& pad) {
     const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
     pad.mButtonFlags &= ~qaBit;
@@ -1979,7 +1984,7 @@ void qa_edit_pointer_back() {
     if (!s_editMode) {
         return;
     }
-    leave_edit_mode(controls_binding_held(CTRL_BIND_QUICK_ACCESS));
+    leave_edit_mode(qa_button_held());
     play_ok_se();
 }
 
@@ -2145,7 +2150,7 @@ static void wolf_menu_select(f32 stickY) {
 }
 
 static void wolf_quick_access_input(interface_of_controller_pad& pad) {
-    bool held = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
+    bool held = qa_button_held();
     if (s_dpadCancelLatch) {
         if (!held) {
             s_dpadCancelLatch = false;
@@ -2255,7 +2260,7 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
             close_menu();
         }
         if (s_bottleRequest) {
-            if (!controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
+            if (!qa_button_held()) {
                 s_bottleRequest = false;
             }
             return;
@@ -2264,14 +2269,14 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
         return;
     }
 
-    bool dpadDownHeld = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
+    bool dpadDownHeld = qa_button_held();
     if (s_dpadCancelLatch) {
         if (!dpadDownHeld) {
             s_dpadCancelLatch = false;
         }
         dpadDownHeld = false;
     }
-    if (s_editMode && s_editDpadDownLatch && !controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
+    if (s_editMode && s_editDpadDownLatch && !qa_button_held()) {
         s_editDpadDownLatch = false;
     }
 
@@ -2292,7 +2297,7 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_X;
             pad.mButtonFlags &= ~PAD_BUTTON_X;
             s_editDpadDownLatch = false;
-            dpadDownHeld = controls_binding_held(CTRL_BIND_QUICK_ACCESS);
+            dpadDownHeld = qa_button_held();
             leave_edit_mode(dpadDownHeld);
             play_ok_se();
             suppress_menu_buttons(pad);
@@ -2617,7 +2622,93 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
     suppress_menu_buttons(pad);
 }
 
+static bool s_hdMinimapToggleTrig = false;
+
+static void consume_quick_access_button(interface_of_controller_pad& pad) {
+    const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    pad.mButtonFlags &= ~qaBit;
+    pad.mPressedButtonFlags &= ~qaBit;
+    if (!controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
+        return;
+    }
+    const int button = controls_binding_button(CTRL_BIND_QUICK_ACCESS);
+    if (button == CTRL_BTN_L2) {
+        pad.mButtonFlags &= ~PAD_TRIGGER_L;
+        pad.mPressedButtonFlags &= ~PAD_TRIGGER_L;
+        pad.mTriggerLeft = 0.0f;
+        pad.mTrigLockL = false;
+        pad.mHoldLockL = false;
+    } else if (button == CTRL_BTN_R2) {
+        pad.mButtonFlags &= ~PAD_TRIGGER_R;
+        pad.mPressedButtonFlags &= ~PAD_TRIGGER_R;
+        pad.mTriggerRight = 0.0f;
+        pad.mTrigLockR = false;
+        pad.mHoldLockR = false;
+    }
+}
+
+static void take_hd_minimap_right(interface_of_controller_pad& pad) {
+    if (!controls_hd_minimap_on_right() || s_menuOpen || s_editMode) {
+        return;
+    }
+    if ((pad.mPressedButtonFlags & PAD_BUTTON_RIGHT) != 0) {
+        s_hdMinimapToggleTrig = true;
+    }
+    pad.mButtonFlags &= ~PAD_BUTTON_RIGHT;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_RIGHT;
+}
+
+static bool s_hdCollectionRouted = false;
+
+static void route_hd_collection_left(interface_of_controller_pad& pad) {
+    s_hdCollectionRouted = false;
+    if (!controls_hd_collection_on_left() || s_menuOpen || s_editMode) {
+        return;
+    }
+    const bool held = (pad.mButtonFlags & PAD_BUTTON_LEFT) != 0;
+    s_hdCollectionRouted = held;
+    const bool pressed = (pad.mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
+    pad.mButtonFlags &= ~PAD_BUTTON_LEFT;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_LEFT;
+    if (held) {
+        pad.mButtonFlags |= PAD_BUTTON_DOWN;
+    }
+    if (pressed) {
+        pad.mPressedButtonFlags |= PAD_BUTTON_DOWN;
+    }
+}
+
+DEFINE_HOOK(&dMeterMap_c::ctrlShowMap, QaMeterMapCtrlShowHook);
+
+static HookAction on_qa_ctrl_show_map_pre(ModContext*, void* args, void*, void*) {
+    if (!s_hdMinimapToggleTrig) {
+        return HOOK_CONTINUE;
+    }
+    s_hdMinimapToggleTrig = false;
+    dMeterMap_c* map = mods::arg<dMeterMap_c*>(args, 0);
+    if (map == nullptr || dMeter2Info_isGameStatus(1) || map->isEventRunCheck()) {
+        return HOOK_CONTINUE;
+    }
+    const u8 mapStatus = dMeter2Info_getMapStatus();
+    if ((mapStatus != 0 && mapStatus != 1) || !dMeterMap_c::isEnableDispMapAndMapDispSizeTypeNo()) {
+        return HOOK_CONTINUE;
+    }
+    if (map->isDispPosInsideFlg()) {
+        map->setDispPosOutsideFlg_SE_On();
+        Z2GetAudioMgr()->seStart(Z2SE_SY_MAP_CLOSE_S, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dMeter2Info_setMapStatus(0);
+    } else {
+        map->setDispPosInsideFlg_SE_On();
+        Z2GetAudioMgr()->seStart(Z2SE_SY_MAP_OPEN_S, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dMeter2Info_set2DVibration();
+        dMeter2Info_setMapStatus(1);
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
 static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
+    s_hdMinimapToggleTrig = false;
+    s_hdCollectionRouted = false;
     if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
         close_menu();
         s_menuAlpha = 0.0f;
@@ -2644,11 +2735,10 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         return;
     }
 
+    take_hd_minimap_right(pad);
     quick_access_game_input(pad);
-
-    const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
-    pad.mButtonFlags &= ~qaBit;
-    pad.mPressedButtonFlags &= ~qaBit;
+    consume_quick_access_button(pad);
+    route_hd_collection_left(pad);
 }
 
 DEFINE_HOOK(&dMw_c::key_wait_proc, QaMwKeyWaitHook);
@@ -2662,7 +2752,10 @@ static HookAction on_qa_mw_key_wait_pre(ModContext*, void*, void*, void*) {
     if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
         return HOOK_CONTINUE;
     }
-    const u32 ringBits = controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & (PAD_BUTTON_UP | PAD_BUTTON_DOWN);
+    u32 ringBits = controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & (PAD_BUTTON_UP | PAD_BUTTON_DOWN);
+    if (controls_hd_collection_on_left()) {
+        ringBits &= ~PAD_BUTTON_DOWN;
+    }
     if (ringBits == 0) {
         return HOOK_CONTINUE;
     }
@@ -2672,6 +2765,40 @@ static HookAction on_qa_mw_key_wait_pre(ModContext*, void*, void*, void*) {
     pad.mPressedButtonFlags &= ~ringBits;
     pad.mButtonFlags &= ~ringBits;
     return HOOK_CONTINUE;
+}
+
+DEFINE_HOOK(&dMw_c::_execute, QaMwExecuteHook);
+
+static u32 s_mwExecuteHiddenPressed = 0;
+static u32 s_mwExecuteHiddenHeld = 0;
+
+static HookAction on_qa_mw_execute_pre(ModContext*, void*, void*, void*) {
+    s_mwExecuteHiddenPressed = 0;
+    s_mwExecuteHiddenHeld = 0;
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active() ||
+        !controls_hd_collection_on_left() || s_hdCollectionRouted ||
+        dMeter2Info_getWindowStatus() != 0 ||
+        (controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & PAD_BUTTON_DOWN) == 0)
+    {
+        return HOOK_CONTINUE;
+    }
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    s_mwExecuteHiddenPressed = pad.mPressedButtonFlags & PAD_BUTTON_DOWN;
+    s_mwExecuteHiddenHeld = pad.mButtonFlags & PAD_BUTTON_DOWN;
+    pad.mPressedButtonFlags &= ~PAD_BUTTON_DOWN;
+    pad.mButtonFlags &= ~PAD_BUTTON_DOWN;
+    return HOOK_CONTINUE;
+}
+
+static void on_qa_mw_execute_post(ModContext*, void*, void*, void*) {
+    if (s_mwExecuteHiddenPressed == 0 && s_mwExecuteHiddenHeld == 0) {
+        return;
+    }
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    pad.mPressedButtonFlags |= s_mwExecuteHiddenPressed;
+    pad.mButtonFlags |= s_mwExecuteHiddenHeld;
+    s_mwExecuteHiddenPressed = 0;
+    s_mwExecuteHiddenHeld = 0;
 }
 
 static void on_qa_mw_key_wait_post(ModContext*, void*, void*, void*) {
@@ -2726,6 +2853,44 @@ void qa_hud_scale_end() {
     s_scaledHudActive = false;
 }
 
+static bool dpad_cross_bounds(J2DScreen* screen, f32& left, f32& top, f32& right, f32& bottom) {
+    static const u64 kCrossTags[] = {
+        MULTI_CHAR('juji_001'), MULTI_CHAR('juji_002'),
+        MULTI_CHAR('juji_003'), MULTI_CHAR('juji_004'),
+    };
+    bool found = false;
+    for (const u64 tag : kCrossTags) {
+        J2DPane* piece = screen->search(tag);
+        if (piece == nullptr || !piece->isVisible()) {
+            continue;
+        }
+        const Vec a = piece->getGlbVtx(0);
+        const Vec b = piece->getGlbVtx(3);
+        const f32 minX = a.x < b.x ? a.x : b.x;
+        const f32 maxX = a.x < b.x ? b.x : a.x;
+        const f32 minY = a.y < b.y ? a.y : b.y;
+        const f32 maxY = a.y < b.y ? b.y : a.y;
+        if (!std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX) ||
+            !std::isfinite(maxY))
+        {
+            continue;
+        }
+        if (!found) {
+            left = minX;
+            top = minY;
+            right = maxX;
+            bottom = maxY;
+            found = true;
+        } else {
+            left = minX < left ? minX : left;
+            top = minY < top ? minY : top;
+            right = maxX > right ? maxX : right;
+            bottom = maxY > bottom ? maxY : bottom;
+        }
+    }
+    return found && right > left && bottom > top;
+}
+
 static void draw_strip_hud_icon(J2DScreen* screen) {
     if (controls_binding_blocked(CTRL_BIND_QUICK_ACCESS)) {
         return;
@@ -2762,6 +2927,23 @@ static void draw_strip_hud_icon(J2DScreen* screen) {
     f32 drawY = bounds.i.y + (isLantern ? 31.5f : 33.0f) * hudScale + shrinkH;
     targetW *= hudScale;
     targetH *= hudScale;
+
+    f32 crossLeft = 0.0f;
+    f32 crossTop = 0.0f;
+    f32 crossRight = 0.0f;
+    f32 crossBottom = 0.0f;
+    const int qaButton = controls_binding_button(CTRL_BIND_QUICK_ACCESS);
+    if (qaButton == CTRL_BTN_DPAD_LEFT &&
+        dpad_cross_bounds(screen, crossLeft, crossTop, crossRight, crossBottom))
+    {
+        const f32 crossW = crossRight - crossLeft;
+        drawX = crossLeft - targetW + crossW * 0.08f;
+        drawY = (crossTop + crossBottom - targetH) * 0.5f;
+    } else if (qaButton == CTRL_BTN_DPAD_DOWN && controls_hd_collection_on_left() &&
+               dpad_cross_bounds(screen, crossLeft, crossTop, crossRight, crossBottom))
+    {
+        drawX = (crossLeft + crossRight - targetW) * 0.5f;
+    }
 
     u8 alpha = juji->getAlpha();
     J2DPane* midnaPane = screen->search(MULTI_CHAR('midona_n'));
@@ -2872,6 +3054,143 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
     quick_access_strip_draw(screenW, screenH, alpha, glow);
 }
 
+DEFINE_HOOK(&J2DScreen::draw, QaHdDpadScreenDrawHook);
+
+static constexpr int kQaHdDpadShiftPanes = 3;
+static J2DScreen* s_hdDpadShiftScreen = nullptr;
+static J2DPane* s_hdDpadShiftPane[kQaHdDpadShiftPanes] = {};
+static f32 s_hdDpadShiftLocalX[kQaHdDpadShiftPanes] = {};
+static f32 s_hdDpadShiftLocalY[kQaHdDpadShiftPanes] = {};
+static int s_hdDpadShiftCount = 0;
+
+static bool qa_hd_dpad_shift_wanted() {
+    return g_configQuickAccessEnabled && !isTitleOrMainMenu() && controls_hd_collection_on_left();
+}
+
+static bool qa_hd_world_bounds(CPaneMgr* mgr, J2DPane* pane, f32& left, f32& top, f32& right,
+                               f32& bottom, bool& found)
+{
+    if (pane == nullptr) {
+        return false;
+    }
+    Mtx mtx;
+    for (u8 corner = 0; corner < 4; corner++) {
+        const Vec v = mgr->getGlobalVtx(pane, &mtx, corner, false, 0);
+        if (!std::isfinite(v.x) || !std::isfinite(v.y)) {
+            return false;
+        }
+        if (!found) {
+            left = right = v.x;
+            top = bottom = v.y;
+            found = true;
+        } else {
+            left = v.x < left ? v.x : left;
+            right = v.x > right ? v.x : right;
+            top = v.y < top ? v.y : top;
+            bottom = v.y > bottom ? v.y : bottom;
+        }
+    }
+    return true;
+}
+
+static HookAction on_qa_hd_dpad_screen_draw_pre(ModContext*, void* args, void*, void*) {
+    if (s_hdDpadShiftScreen != nullptr || !qa_hd_dpad_shift_wanted()) {
+        return HOOK_CONTINUE;
+    }
+    J2DScreen* screen = mods::arg<J2DScreen*>(args, 0);
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    dMeter2Draw_c* draw = meter != nullptr ? meter->getMeterDrawPtr() : nullptr;
+    if (screen == nullptr || draw == nullptr || screen != draw->getMainScreenPtr() ||
+        draw->mpTextI == nullptr)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    static const u64 kCrossTags[] = {
+        MULTI_CHAR('juji_001'), MULTI_CHAR('juji_002'),
+        MULTI_CHAR('juji_003'), MULTI_CHAR('juji_004'),
+    };
+    f32 cl = 0.0f, ct = 0.0f, cr = 0.0f, cb = 0.0f;
+    bool crossFound = false;
+    for (const u64 tag : kCrossTags) {
+        qa_hd_world_bounds(draw->mpTextI, screen->search(tag), cl, ct, cr, cb, crossFound);
+    }
+    f32 tl = 0.0f, tt = 0.0f, tr = 0.0f, tb = 0.0f;
+    bool textFound = false;
+    qa_hd_world_bounds(draw->mpTextI, screen->search(MULTI_CHAR('cont_ju4')), tl, tt, tr, tb,
+                       textFound);
+    if (!crossFound || !textFound || cr <= cl || tr <= tl) {
+        return HOOK_CONTINUE;
+    }
+
+    const f32 gap = 4.0f * qa_user_hud_scale();
+    const f32 labelDx = (cl - gap) - tr;
+    const f32 labelDy = (ct + cb) * 0.5f - (tt + tb) * 0.5f;
+    const f32 labelLeft = cl - gap - (tr - tl);
+    const f32 safeLeft = mDoGph_gInf_c::getSafeMinXF() - 4.0f;
+    const f32 shift = labelLeft < safeLeft ? safeLeft - labelLeft : 0.0f;
+
+    J2DPane* textPane = draw->mpTextI->getPanePtr();
+    J2DPane* candidates[kQaHdDpadShiftPanes] = {
+        draw->mpButtonCrossParent != nullptr ? draw->mpButtonCrossParent->getPanePtr() : nullptr,
+        textPane,
+        draw->mpTextM != nullptr ? draw->mpTextM->getPanePtr() : nullptr,
+    };
+    for (J2DPane* pane : candidates) {
+        if (pane == nullptr) {
+            continue;
+        }
+        bool inherited = false;
+        f32 scaleX = 1.0f;
+        f32 scaleY = 1.0f;
+        for (J2DPane* parent = pane->getParentPane(); parent != nullptr;
+             parent = parent->getParentPane())
+        {
+            for (J2DPane* other : candidates) {
+                if (other == parent) {
+                    inherited = true;
+                }
+            }
+            scaleX *= parent->getScaleX();
+            scaleY *= parent->getScaleY();
+        }
+        if (std::fabs(scaleX) < 0.001f || std::fabs(scaleY) < 0.001f) {
+            continue;
+        }
+        f32 dx = inherited ? 0.0f : shift;
+        f32 dy = 0.0f;
+        if (pane == textPane) {
+            dx += labelDx + 8.0f * qa_user_hud_scale();
+            dy += labelDy;
+        }
+        if (dx == 0.0f && dy == 0.0f) {
+            continue;
+        }
+        const f32 localX = dx / scaleX;
+        const f32 localY = dy / scaleY;
+        pane->add(localX, localY);
+        s_hdDpadShiftPane[s_hdDpadShiftCount] = pane;
+        s_hdDpadShiftLocalX[s_hdDpadShiftCount] = localX;
+        s_hdDpadShiftLocalY[s_hdDpadShiftCount] = localY;
+        s_hdDpadShiftCount++;
+    }
+    if (s_hdDpadShiftCount > 0) {
+        s_hdDpadShiftScreen = screen;
+    }
+    return HOOK_CONTINUE;
+}
+
+static void on_qa_hd_dpad_meter_draw_post(ModContext*, void*, void*, void*) {
+    if (s_hdDpadShiftScreen == nullptr) {
+        return;
+    }
+    for (int i = 0; i < s_hdDpadShiftCount; i++) {
+        s_hdDpadShiftPane[i]->add(-s_hdDpadShiftLocalX[i], -s_hdDpadShiftLocalY[i]);
+    }
+    s_hdDpadShiftCount = 0;
+    s_hdDpadShiftScreen = nullptr;
+}
+
 DEFINE_HOOK(&dComIfGp_getSelectItem, QaGetSelectItemHook);
 DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, QaMidnaTalkTriggerHook);
 
@@ -2920,7 +3239,12 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre, &beforeTwilightHd);
         mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
         mods::hook::add_pre<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_pre);
+        mods::hook::add_pre<QaMeterMapCtrlShowHook>(hook_svc, on_qa_ctrl_show_map_pre, &beforeTwilightHd);
+        mods::hook::add_pre<QaHdDpadScreenDrawHook>(hook_svc, on_qa_hd_dpad_screen_draw_pre, &afterTwilightHd);
+        mods::hook::add_post<Meter2DrawRadialMenuHook>(hook_svc, on_qa_hd_dpad_meter_draw_post, &beforeTwilightHd);
         mods::hook::add_post<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_post);
+        mods::hook::add_pre<QaMwExecuteHook>(hook_svc, on_qa_mw_execute_pre, &beforeTwilightHd);
+        mods::hook::add_post<QaMwExecuteHook>(hook_svc, on_qa_mw_execute_post, &afterTwilightHd);
         quick_access_mobile_init(hook_svc);
     }
 

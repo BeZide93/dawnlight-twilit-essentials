@@ -37,6 +37,29 @@ enum ControlsBinding {
     CTRL_BIND_COUNT,
 };
 
+enum ControlsQuickAccessOption {
+    CTRL_QA_DPAD_DOWN = 0,
+    CTRL_QA_DPAD_LEFT,
+    CTRL_QA_L3,
+    CTRL_QA_R3,
+    CTRL_QA_L2,
+    CTRL_QA_R2,
+    CTRL_QA_OPTION_COUNT,
+};
+
+extern const char* const kControlsQuickAccessLabels[CTRL_QA_OPTION_COUNT];
+
+enum ControlsSprintOption {
+    CTRL_SPRINT_A = 0,
+    CTRL_SPRINT_L3,
+    CTRL_SPRINT_R3,
+    CTRL_SPRINT_L2,
+    CTRL_SPRINT_R2,
+    CTRL_SPRINT_OPTION_COUNT,
+};
+
+extern const char* const kControlsSprintLabels[CTRL_SPRINT_OPTION_COUNT];
+
 extern int g_controlsBinding[CTRL_BIND_COUNT];
 extern ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT];
 
@@ -55,6 +78,16 @@ bool controls_l_shoulder_raw_held();
 u32 controls_l_shoulder_pad_mask();
 bool controls_l_physical_held();
 
+bool controls_hd_minimap_on_right();
+bool controls_hd_collection_on_left();
+int controls_quick_access_option();
+int controls_quick_access_default_option();
+void controls_set_quick_access_option(int option);
+int controls_sprint_option();
+void controls_set_sprint_option(int option);
+void update_controls();
+
+int controls_binding_button(int b);
 bool controls_binding_blocked(int b);
 u32 controls_binding_bit(int b);
 bool controls_binding_held(int b);

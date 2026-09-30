@@ -4,3 +4,4 @@
 
 void quick_access_mobile_init(const HookService* hook_svc);
 void quick_access_mobile_shutdown();
+bool quick_access_mobile_held();

@@ -1,5 +1,6 @@
 #include "controls.hpp"
 #include "../compat/twilight_hd.hpp"
+#include "../quick_access/quick_access.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 
@@ -33,22 +34,56 @@ int g_controlsBinding[CTRL_BIND_COUNT] = {
 
 ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT] = {};
 
+const char* const kControlsQuickAccessLabels[CTRL_QA_OPTION_COUNT] = {
+    "D-Pad Down", "D-Pad Left", "L3", "R3", "L2", "R2",
+};
+
+static const int kQuickAccessButtons[CTRL_QA_OPTION_COUNT] = {
+    CTRL_BTN_DPAD_DOWN, CTRL_BTN_DPAD_LEFT, CTRL_BTN_L3, CTRL_BTN_R3, CTRL_BTN_L2, CTRL_BTN_R2,
+};
+
+const char* const kControlsSprintLabels[CTRL_SPRINT_OPTION_COUNT] = {
+    "A", "L3", "R3", "L2", "R2",
+};
+
+static const int kSprintButtons[CTRL_SPRINT_OPTION_COUNT] = {
+    CTRL_BTN_A, CTRL_BTN_L3, CTRL_BTN_R3, CTRL_BTN_L2, CTRL_BTN_R2,
+};
+
+extern bool g_configCustomZButtonEnabled;
+
+static const ConfigService* s_cfg = nullptr;
+static ModContext* s_cfgCtx = nullptr;
+static int s_lastHdMinimapMode = -1;
+
 const char* const kControlsMidnaLabels[CTRL_MIDNA_COUNT] = {"D-Pad Left", "L"};
 ConfigVarHandle g_controlsMidnaVar = 0;
-static int s_midnaButton = CTRL_MIDNA_DPAD_LEFT;
+static int s_midnaButton = CTRL_MIDNA_L;
 
+constexpr s32 kSdlLeftStickButton = 7;
+constexpr s32 kSdlRightStickButton = 8;
 constexpr s32 kSdlLeftShoulderButton = 9;
 constexpr s32 kSdlRightShoulderButton = 10;
+constexpr s32 kSdlLeftTriggerAxis = 4;
+constexpr s32 kSdlRightTriggerAxis = 5;
+constexpr s16 kSdlTriggerThreshold = 16384;
+constexpr int kClampedTriggerMax = 150;
 using GetSdlGamepadButtonFn = bool (*)(SDL_Gamepad*, int);
+using GetSdlGamepadAxisFn = s16 (*)(SDL_Gamepad*, int);
 static GetSdlGamepadButtonFn s_getSdlGamepadButton = nullptr;
+static GetSdlGamepadAxisFn s_getSdlGamepadAxis = nullptr;
 
 bool controls_midna_on_l() {
     return s_midnaButton == CTRL_MIDNA_L;
 }
 
-static bool sdl_button_raw_held(s32 button) {
+static SDL_Gamepad* sdl_gamepad() {
     const s32 index = PADGetIndexForPort(PAD_1);
-    SDL_Gamepad* gamepad = index < 0 ? nullptr : PADGetSDLGamepadForIndex(static_cast<u32>(index));
+    return index < 0 ? nullptr : PADGetSDLGamepadForIndex(static_cast<u32>(index));
+}
+
+static bool sdl_button_raw_held(s32 button) {
+    SDL_Gamepad* gamepad = sdl_gamepad();
     if (gamepad != nullptr && s_getSdlGamepadButton != nullptr) {
         return s_getSdlGamepadButton(gamepad, button);
     }
@@ -104,7 +139,7 @@ static void on_controls_midna_changed(ModContext*, ConfigVarHandle, const Config
         return;
     }
     const int v = static_cast<int>(value->int_value);
-    s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? v : CTRL_MIDNA_DPAD_LEFT;
+    s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? v : CTRL_MIDNA_L;
 }
 
 static int clamp_button_index(int idx, int binding) {
@@ -114,16 +149,105 @@ static int clamp_button_index(int idx, int binding) {
     return idx;
 }
 
+static int option_for_button(const int* buttons, int count, int button) {
+    for (int i = 0; i < count; i++) {
+        if (buttons[i] == button) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int quick_access_option_for_button(int button) {
+    return option_for_button(kQuickAccessButtons, CTRL_QA_OPTION_COUNT, button);
+}
+
+static int sprint_option_for_button(int button) {
+    return option_for_button(kSprintButtons, CTRL_SPRINT_OPTION_COUNT, button);
+}
+
+int controls_binding_button(int b) {
+    if (b < 0 || b >= CTRL_BIND_COUNT) {
+        return -1;
+    }
+    const int button = clamp_button_index(g_controlsBinding[b], b);
+    if (b == CTRL_BIND_QUICK_ACCESS && quick_access_option_for_button(button) < 0) {
+        return kControlsDefaultBinding[CTRL_BIND_QUICK_ACCESS];
+    }
+    if (b == CTRL_BIND_SPRINT && sprint_option_for_button(button) < 0) {
+        return kControlsDefaultBinding[CTRL_BIND_SPRINT];
+    }
+    return button;
+}
+
+bool controls_hd_minimap_on_right() {
+    return g_configQuickAccessEnabled && twilight_hd_dpad_shortcuts();
+}
+
+int controls_quick_access_option() {
+    const int option = quick_access_option_for_button(controls_binding_button(CTRL_BIND_QUICK_ACCESS));
+    return option < 0 ? CTRL_QA_DPAD_DOWN : option;
+}
+
+int controls_quick_access_default_option() {
+    return CTRL_QA_DPAD_DOWN;
+}
+
+bool controls_hd_collection_on_left() {
+    return controls_hd_minimap_on_right() && !(g_configCustomZButtonEnabled && !controls_midna_on_l());
+}
+
+static void write_quick_access_button(int button) {
+    g_controlsBinding[CTRL_BIND_QUICK_ACCESS] = button;
+    if (s_cfg != nullptr && g_controlsVars[CTRL_BIND_QUICK_ACCESS] != 0) {
+        s_cfg->set_int(s_cfgCtx, g_controlsVars[CTRL_BIND_QUICK_ACCESS], button);
+    }
+}
+
+void controls_set_quick_access_option(int option) {
+    if (option < 0 || option >= CTRL_QA_OPTION_COUNT) {
+        return;
+    }
+    write_quick_access_button(kQuickAccessButtons[option]);
+}
+
+int controls_sprint_option() {
+    const int option = sprint_option_for_button(controls_binding_button(CTRL_BIND_SPRINT));
+    return option < 0 ? CTRL_SPRINT_A : option;
+}
+
+void controls_set_sprint_option(int option) {
+    if (option < 0 || option >= CTRL_SPRINT_OPTION_COUNT) {
+        return;
+    }
+    g_controlsBinding[CTRL_BIND_SPRINT] = kSprintButtons[option];
+    if (s_cfg != nullptr && g_controlsVars[CTRL_BIND_SPRINT] != 0) {
+        s_cfg->set_int(s_cfgCtx, g_controlsVars[CTRL_BIND_SPRINT], kSprintButtons[option]);
+    }
+}
+
+void update_controls() {
+    const int mode = controls_hd_collection_on_left() ? 1 : 0;
+    if (mode == s_lastHdMinimapMode) {
+        return;
+    }
+    s_lastHdMinimapMode = mode;
+    if (mode == 1 && controls_binding_button(CTRL_BIND_QUICK_ACCESS) == CTRL_BTN_DPAD_LEFT) {
+        write_quick_access_button(CTRL_BTN_DPAD_DOWN);
+    }
+}
+
 bool controls_binding_blocked(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT || !twilight_hd_dpad_shortcuts()) {
         return false;
     }
-    switch (clamp_button_index(g_controlsBinding[b], b)) {
+    switch (controls_binding_button(b)) {
     case CTRL_BTN_DPAD_UP:
-    case CTRL_BTN_DPAD_DOWN:
     case CTRL_BTN_DPAD_LEFT:
     case CTRL_BTN_DPAD_RIGHT:
         return true;
+    case CTRL_BTN_DPAD_DOWN:
+        return !controls_hd_collection_on_left();
     default:
         return false;
     }
@@ -133,7 +257,7 @@ u32 controls_binding_bit(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return 0;
     }
-    switch (clamp_button_index(g_controlsBinding[b], b)) {
+    switch (controls_binding_button(b)) {
     case CTRL_BTN_Z: return PAD_TRIGGER_Z;
     case CTRL_BTN_L: return PAD_TRIGGER_L;
     case CTRL_BTN_R: return PAD_TRIGGER_R;
@@ -152,6 +276,8 @@ u32 controls_binding_bit(int b) {
 static s32 controls_sdl_button(int button) {
     if (button == CTRL_BTN_LB) return kSdlLeftShoulderButton;
     if (button == CTRL_BTN_RB) return kSdlRightShoulderButton;
+    if (button == CTRL_BTN_L3) return kSdlLeftStickButton;
+    if (button == CTRL_BTN_R3) return kSdlRightStickButton;
     return -1;
 }
 
@@ -162,16 +288,17 @@ static u32 controls_ext_button_bit(int button) {
 }
 
 static bool controls_trigger_held(bool left) {
+    SDL_Gamepad* gamepad = sdl_gamepad();
+    if (gamepad != nullptr && s_getSdlGamepadAxis != nullptr) {
+        return s_getSdlGamepadAxis(gamepad, left ? kSdlLeftTriggerAxis : kSdlRightTriggerAxis) >=
+               kSdlTriggerThreshold;
+    }
     JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
     if (gamePad == nullptr) {
         return false;
     }
     const int raw = left ? gamePad->getAnalogL() : gamePad->getAnalogR();
-    const PADDeadZones* deadZones = PADGetDeadZones(PAD_1);
-    const int zone = (deadZones != nullptr) ? (left ? deadZones->leftTriggerActivationZone
-                                                    : deadZones->rightTriggerActivationZone)
-                                            : 31150;
-    return raw * 32767 > zone * 255;
+    return raw * 2 >= kClampedTriggerMax;
 }
 
 bool controls_l_physical_held() {
@@ -184,19 +311,25 @@ bool controls_l_physical_held() {
 
 DEFINE_HOOK(&mDoCPd_c::read, ControlsPadRead);
 
-static u32 s_extHeldPrev = 0;
-static u32 s_extHeldCur  = 0;
 static bool s_sdlHeldPrev[CTRL_BIND_COUNT] = {};
 static bool s_sdlHeldCur[CTRL_BIND_COUNT] = {};
 
 static bool sdl_binding_raw_held(int b) {
-    const s32 sdlButton = controls_sdl_button(clamp_button_index(g_controlsBinding[b], b));
-    return sdlButton >= 0 && !ui_blocks_game_input() && sdl_button_raw_held(sdlButton);
+    if (controls_binding_blocked(b) || controls_binding_bit(b) != 0 || ui_blocks_game_input()) {
+        return false;
+    }
+    const int button = controls_binding_button(b);
+    if (button == CTRL_BTN_L2 || button == CTRL_BTN_R2) {
+        return controls_trigger_held(button == CTRL_BTN_L2);
+    }
+    const s32 sdlButton = controls_sdl_button(button);
+    if (sdlButton >= 0 && sdl_button_raw_held(sdlButton)) {
+        return true;
+    }
+    return (JUTGamePad::mPadStatus[PAD_1].extButton & controls_ext_button_bit(button)) != 0;
 }
 
 static void controls_pad_read_post(ModContext*, void*, void*, void*) {
-    s_extHeldPrev = s_extHeldCur;
-    s_extHeldCur = JUTGamePad::mPadStatus[PAD_1].extButton;
     for (int b = 0; b < CTRL_BIND_COUNT; b++) {
         s_sdlHeldPrev[b] = s_sdlHeldCur[b];
         s_sdlHeldCur[b] = sdl_binding_raw_held(b);
@@ -207,34 +340,22 @@ bool controls_binding_held(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return false;
     }
-    const int button = clamp_button_index(g_controlsBinding[b], b);
-    switch (button) {
-    case CTRL_BTN_L2: return controls_trigger_held(true);
-    case CTRL_BTN_R2: return controls_trigger_held(false);
-    case CTRL_BTN_LB:
-    case CTRL_BTN_RB: return s_sdlHeldCur[b];
-    default: break;
-    }
     const u32 bit = controls_binding_bit(b);
     if (bit != 0) {
         return (mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags & bit) != 0;
     }
-    return (JUTGamePad::mPadStatus[PAD_1].extButton & controls_ext_button_bit(button)) != 0;
+    return s_sdlHeldCur[b];
 }
 
 bool controls_binding_pressed(int b) {
     if (b < 0 || b >= CTRL_BIND_COUNT || controls_binding_blocked(b)) {
         return false;
     }
-    if (controls_sdl_button(clamp_button_index(g_controlsBinding[b], b)) >= 0) {
-        return s_sdlHeldCur[b] && !s_sdlHeldPrev[b];
-    }
     const u32 bit = controls_binding_bit(b);
     if (bit != 0) {
         return (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & bit) != 0;
     }
-    return (s_extHeldCur & ~s_extHeldPrev &
-            controls_ext_button_bit(clamp_button_index(g_controlsBinding[b], b))) != 0;
+    return s_sdlHeldCur[b] && !s_sdlHeldPrev[b];
 }
 
 static void on_controls_binding_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
@@ -250,28 +371,38 @@ static void on_controls_binding_changed(ModContext*, ConfigVarHandle, const Conf
 ModResult init_controls_config(const ConfigService* cfg, const HookService* hook_svc,
                                ModContext* ctx) {
     if (hook_svc) {
-        mods::hook::add_post<ControlsPadRead>(hook_svc, controls_pad_read_post);
+        HookOptions padReadFirst = HOOK_OPTIONS_INIT;
+        padReadFirst.priority = 1000;
+        mods::hook::add_post<ControlsPadRead>(hook_svc, controls_pad_read_post, &padReadFirst);
         void* addr = nullptr;
         if (hook_svc->resolve != nullptr &&
             hook_svc->resolve(ctx, "SDL_GetGamepadButton", &addr, nullptr) == MOD_OK &&
             addr != nullptr) {
             s_getSdlGamepadButton = reinterpret_cast<GetSdlGamepadButtonFn>(addr);
         }
+        addr = nullptr;
+        if (hook_svc->resolve != nullptr &&
+            hook_svc->resolve(ctx, "SDL_GetGamepadAxis", &addr, nullptr) == MOD_OK &&
+            addr != nullptr) {
+            s_getSdlGamepadAxis = reinterpret_cast<GetSdlGamepadAxisFn>(addr);
+        }
     }
     if (cfg == nullptr) {
         return MOD_OK;
     }
+    s_cfg = cfg;
+    s_cfgCtx = ctx;
 
     {
         ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
         d.name = "controlsMidnaButton";
         d.type = CONFIG_VAR_INT;
-        d.default_int = CTRL_MIDNA_DPAD_LEFT;
+        d.default_int = CTRL_MIDNA_L;
         if (cfg->register_var(ctx, &d, &g_controlsMidnaVar) == MOD_OK) {
-            int64_t v = CTRL_MIDNA_DPAD_LEFT;
+            int64_t v = CTRL_MIDNA_L;
             cfg->get_int(ctx, g_controlsMidnaVar, &v);
             s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? static_cast<int>(v)
-                                                              : CTRL_MIDNA_DPAD_LEFT;
+                                                              : CTRL_MIDNA_L;
             cfg->subscribe(ctx, g_controlsMidnaVar, on_controls_midna_changed, nullptr, nullptr);
         }
     }

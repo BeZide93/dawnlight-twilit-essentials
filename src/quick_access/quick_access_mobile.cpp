@@ -556,7 +556,7 @@ bool common_wanted() {
 }
 
 bool qa_wanted() {
-    return g_configQuickAccessEnabled && controls_binding_bit(CTRL_BIND_QUICK_ACCESS) != 0;
+    return g_configQuickAccessEnabled && !controls_binding_blocked(CTRL_BIND_QUICK_ACCESS);
 }
 
 void release_touch() {
@@ -1108,6 +1108,10 @@ void quick_access_mobile_init(const HookService* hook_svc) {
     }
 }
 
+bool quick_access_mobile_held() {
+    return s_qaHeld;
+}
+
 void quick_access_mobile_shutdown() {
     release_touch();
     s_game = {};
@@ -1119,5 +1123,8 @@ void quick_access_mobile_shutdown() {
 
 void quick_access_mobile_init(const HookService*) {}
 void quick_access_mobile_shutdown() {}
+bool quick_access_mobile_held() {
+    return false;
+}
 
 #endif

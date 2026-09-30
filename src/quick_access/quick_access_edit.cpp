@@ -1,5 +1,6 @@
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
+#include "../compat/twilight_hd.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_pane_class.h"
@@ -302,6 +303,7 @@ struct QaBtnLayer {
     J2DPicture* pic;
     f32 ox, oy;
     f32 w, h;
+    bool glyph;
 };
 
 struct QaEditButtonIcons {
@@ -376,6 +378,14 @@ static bool load_button_icons() {
         MULTI_CHAR('xbtn_n'), MULTI_CHAR('bbtn_n'),
     };
     static const char* kNames[4] = { "A", "Y", "X", "B" };
+    static const char* kGlyphNames[] = {
+        "tt_zelda_button_a_text.bti", "tt_zelda_button_b_text.bti",
+        "tt_zelda_button_x_text.bti", "tt_zelda_button_y_text.bti",
+    };
+    const ResTIMG* glyphTex[4] = {};
+    for (int g = 0; g < 4; g++) {
+        glyphTex[g] = static_cast<const ResTIMG*>(arc->getResource('TIMG', kGlyphNames[g]));
+    }
 
     for (int i = 0; i < 4 && ok; i++) {
         J2DPane* group = s_btnIcons.screen->search(kTags[i]);
@@ -433,11 +443,18 @@ static bool load_button_icons() {
             layer.h = bounds[l].f.y - bounds[l].i.y;
             layer.ox = (bounds[l].i.x + layer.w * 0.5f) - refCx;
             layer.oy = (bounds[l].i.y + layer.h * 0.5f) - refCy;
+            layer.glyph = false;
+            for (const ResTIMG* g : glyphTex) {
+                if (g != nullptr && g == timg) {
+                    layer.glyph = true;
+                }
+            }
             if (l > 0) {
                 const f32 maxDim = layer.w > layer.h ? layer.w : layer.h;
                 if (maxDim <= circle * 0.7f) {
                     layer.ox = 0.0f;
                     layer.oy = 0.0f;
+                    layer.glyph = true;
                 }
             }
             s_btnIcons.layerCount[i]++;
@@ -497,8 +514,12 @@ void qa_draw_hint_button(int idx, f32 x, f32 y, f32 h, u8 alpha) {
     const f32 s = s_btnIcons.scale[idx] * (h / QA_HINT_ICON_H);
     const f32 cx = x + w * 0.5f;
     const f32 cy = y + h * 0.5f;
+    const bool hdTexture = twilight_hd_enabled();
     for (int l = 0; l < s_btnIcons.layerCount[idx]; l++) {
         QaBtnLayer& layer = s_btnIcons.layers[idx][l];
+        if (hdTexture && layer.glyph) {
+            continue;
+        }
         const f32 lw = layer.w * s;
         const f32 lh = layer.h * s;
         layer.pic->setAlpha(alpha);

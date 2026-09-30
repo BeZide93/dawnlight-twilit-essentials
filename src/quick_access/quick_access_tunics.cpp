@@ -1,9 +1,14 @@
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
 #include "../collection_menu/collection_menu.hpp"
+#include "../compat/twilight_hd.hpp"
 #include "../controls/controls.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_meter2.h"
+#include "d/d_meter2_draw.h"
+#include "d/d_meter2_info.h"
+#include "JSystem/J2DGraph/J2DScreen.h"
 #include "d/d_select_cursor.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_ext.h"
@@ -51,6 +56,10 @@ J2DPicture* s_tunicPic[COLLECTION_TUNIC_COUNT] = {};
 const ResTIMG* s_tunicPicTex[COLLECTION_TUNIC_COUNT] = {};
 J2DPicture* s_shoulderPic = nullptr;
 const ResTIMG* s_shoulderTex = nullptr;
+J2DPicture* s_hdLShoulderPic = nullptr;
+const ResTIMG* s_hdLShoulderTex = nullptr;
+JUtility::TColor s_hdLShoulderBlack(0, 0, 0, 0);
+JUtility::TColor s_hdLShoulderWhite(255, 255, 255, 255);
 bool s_lPrev = false;
 bool s_rPrev = false;
 bool s_pageBtnValid[2] = {};
@@ -161,6 +170,33 @@ constexpr f32 kShoulderFontW = 9.0f;
 constexpr f32 kShoulderFontH = 11.5f;
 constexpr f32 kShoulderGap = 6.0f;
 
+const ResTIMG* twilight_hd_l_shoulder_texture() {
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    dMeter2Draw_c* draw = meter != nullptr ? meter->getMeterDrawPtr() : nullptr;
+    J2DScreen* screen = draw != nullptr ? draw->getMainScreenPtr() : nullptr;
+    J2DPane* pane = screen != nullptr ? screen->search(MULTI_CHAR('hd_mbtn')) : nullptr;
+    if (pane == nullptr || pane->getTypeID() != 18) {
+        return nullptr;
+    }
+    J2DPicture* badge = static_cast<J2DPicture*>(pane);
+    if (badge->getTexture(0) == nullptr) {
+        return nullptr;
+    }
+    s_hdLShoulderBlack = badge->getBlack();
+    s_hdLShoulderWhite = badge->getWhite();
+    return badge->getTexture(0)->getTexInfo();
+}
+
+J2DPicture* hd_l_shoulder_picture() {
+    const ResTIMG* tex = twilight_hd_l_shoulder_texture();
+    if (tex == nullptr) return nullptr;
+    if (s_hdLShoulderPic == nullptr || s_hdLShoulderTex != tex) {
+        s_hdLShoulderPic = make_picture(s_hdLShoulderPic, tex);
+        s_hdLShoulderTex = tex;
+    }
+    return s_hdLShoulderPic;
+}
+
 f32 shoulder_button_width() {
     J2DPicture* pic = shoulder_picture();
     if (pic != nullptr && s_shoulderTex->height > 0) {
@@ -180,8 +216,14 @@ void draw_shoulder_button(bool left, const char* label, f32 anchorX, f32 y, u8 a
     const f32 fontH = kShoulderFontH;
     const f32 gap = kShoulderGap;
 
-    const f32 btnW = shoulder_button_width();
-    J2DPicture* pic = shoulder_picture();
+    const bool hd = twilight_hd_enabled();
+    J2DPicture* hdLPic = (hd && left) ? hd_l_shoulder_picture() : nullptr;
+    J2DPicture* pic = hdLPic != nullptr ? hdLPic : ((hd && left) ? nullptr : shoulder_picture());
+    f32 btnW = shoulder_button_width();
+    if (hdLPic != nullptr && s_hdLShoulderTex->height > 0) {
+        btnW = btnH * static_cast<f32>(s_hdLShoulderTex->width) /
+               static_cast<f32>(s_hdLShoulderTex->height);
+    }
     const f32 labelW = qa_get_text_width(label, fontW);
 
     const f32 btnX = left ? anchorX : anchorX - btnW;
@@ -193,15 +235,22 @@ void draw_shoulder_button(bool left, const char* label, f32 anchorX, f32 y, u8 a
     s_pageBtnRect[side][3] = y + btnH;
     s_pageBtnValid[side] = true;
 
+    const bool hdTexture = pic != nullptr && hd;
     if (pic != nullptr) {
-        pic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
+        if (hdLPic != nullptr) {
+            pic->setBlackWhite(s_hdLShoulderBlack, s_hdLShoulderWhite);
+        } else {
+            pic->setBlackWhite(get_orig_z_button_black(), get_orig_z_button_white());
+        }
         pic->setAlpha(alpha);
-        pic->draw(btnX, y, btnW, btnH, left, false, false);
+        pic->draw(btnX, y, btnW, btnH, left && !hdTexture, false, false);
     } else {
         qa_draw_rounded_rect(btnX, y, btnW, btnH, btnH * 0.45f,
                              JUtility::TColor(40, 90, 160, alpha));
     }
-    draw_button_letter(left ? "L" : "R", btnX + btnW * 0.5f, y + btnH * 0.5f, btnH, alpha);
+    if (!hdTexture) {
+        draw_button_letter(left ? "L" : "R", btnX + btnW * 0.5f, y + btnH * 0.5f, btnH, alpha);
+    }
 
     qa_draw_text(label, labelX, y + btnH * 0.5f + fontH * 0.4f, fontW, fontH,
                  JUtility::TColor(255, 248, 210, alpha), JUtility::TColor(235, 185, 65, alpha),
@@ -653,6 +702,9 @@ void quick_access_tunics_shutdown() {
     JKR_DELETE(s_shoulderPic);
     s_shoulderPic = nullptr;
     s_shoulderTex = nullptr;
+    JKR_DELETE(s_hdLShoulderPic);
+    s_hdLShoulderPic = nullptr;
+    s_hdLShoulderTex = nullptr;
     s_page = QA_PAGE_ITEMS;
     s_tunicSelected = SLOT_NONE;
     s_bottleSelected = SLOT_NONE;
