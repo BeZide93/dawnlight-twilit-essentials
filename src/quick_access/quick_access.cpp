@@ -64,8 +64,6 @@ int s_selectedSlot = SLOT_NONE;
 f32 s_menuAlpha = 0.0f;
 f32 s_glowTimer = 0.0f;
 
-extern const LogService* svc_log;
-
 static ModContext* s_modCtx = nullptr;
 static const SaveService* s_saveSvc = nullptr;
 
@@ -2921,13 +2919,8 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);
         mods::hook::add_pre<QaSetHeavyBootsHook>(hook_svc, on_qa_set_heavy_boots_pre, &beforeTwilightHd);
         mods::hook::add_pre<QaBootsEquipInitHook>(hook_svc, on_qa_boots_equip_init_pre);
-        if (mods::hook::add_pre<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_pre) != MOD_OK ||
-            mods::hook::add_post<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_post) != MOD_OK)
-        {
-            if (svc_log != nullptr && svc_log->warn != nullptr && mod_ctx != nullptr) {
-                svc_log->warn(mod_ctx, "[QuickAccess] dMw_c::key_wait_proc hook not installed");
-            }
-        }
+        mods::hook::add_pre<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_pre);
+        mods::hook::add_post<QaMwKeyWaitHook>(hook_svc, on_qa_mw_key_wait_post);
         quick_access_mobile_init(hook_svc);
     }
 
