@@ -457,7 +457,8 @@ static bool discover_midna_flow_topology() {
         return false;
     }
 
-    const auto* bmg = static_cast<const uint8_t*>(msgObject->getMsgDtPtrLocal());
+    const void* commonBmg = msgObject->mpMsgRes != nullptr ? msgObject->mpMsgRes : msgObject->getMsgDtPtrLocal();
+    const auto* bmg = static_cast<const uint8_t*>(commonBmg);
     if (bmg == nullptr) {
         return false;
     }
@@ -922,6 +923,10 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
 
     if (triggered) {
         s_talkHoldTicks = 600;
+        boss_rush_debug_log("[midna] z-talk stage=%s group=%d horse=%d midna=%p graph=%d horseNode=%u",
+                            dComIfGp_getStartStageName(), (int)dMsgObject_getGroupID(),
+                            (int)link->checkHorseRide(), daAlink_c::getMidnaActor(),
+                            (int)s_bossRushMidnaMode, (unsigned)s_bossRushMidnaHorseNextNode);
 
         fopAc_ac_c* midna = daAlink_c::getMidnaActor();
 

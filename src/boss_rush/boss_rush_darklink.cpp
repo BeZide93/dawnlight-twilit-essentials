@@ -71,13 +71,13 @@ constexpr u32 kOrdonSwordIndex = 0x3C;
 constexpr u32 kOrdonSheathIndex = 0x3B;
 constexpr u32 kMasterSwordIndex = 0x38;
 constexpr u32 kMasterSheathIndex = 0x37;
+constexpr u32 kWoodSwordIndex = 0x11;
 constexpr u32 kShieldIndex = 0x3;
 constexpr u32 kHeapSize = 0x600000;
 constexpr u32 kRootHeapReserve = 0xC00000;
 constexpr u32 kGameHeapReserve = 0x400000;
 constexpr u32 kModelHeadroom = 0x40000;
 constexpr u32 kMaxPartFileSize = 0x4000000;
-constexpr int kMaxPartHeaps = 3;
 constexpr u32 kIdleWaitAnmIndex = 0x26A;
 constexpr u32 kLinkAnmBufferSize = 0x10800;
 constexpr u32 kBodyDiffFlags = 0x11000084;
@@ -160,8 +160,11 @@ public:
 
 State s_state = State::Idle;
 JKRExpHeap* s_heap = nullptr;
-JKRExpHeap* s_partHeaps[kMaxPartHeaps] = {};
-int s_partHeapCount = 0;
+JKRExpHeap* s_swordHeap = nullptr;
+JKRExpHeap* s_sheathHeap = nullptr;
+JKRExpHeap* s_shieldHeap = nullptr;
+u8 s_loadedSword = dItemNo_NONE_e;
+u8 s_loadedShield = dItemNo_NONE_e;
 mDoDvdThd_mountArchive_c* s_mountCmd = nullptr;
 JKRArchive* s_archive = nullptr;
 JKRArchive* s_alinkArchive = nullptr;
@@ -824,8 +827,8 @@ u32 probe_model_size(JKRArchive* archive, u32 index) {
     return read_be32(header + 8);
 }
 
-J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char* label) {
-    if (archive == nullptr || s_partHeapCount >= kMaxPartHeaps) return nullptr;
+J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char* label, JKRExpHeap*& partHeap) {
+    if (archive == nullptr || partHeap != nullptr) return nullptr;
     const u32 size = probe_model_size(archive, index);
     if (size < 0x20 || size > kMaxPartFileSize) {
         dl_log("[darklink] %s: bad resource size %u", label, size);
@@ -853,7 +856,7 @@ J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char*
         mDoExt_destroyExpHeap(heap);
         return nullptr;
     }
-    s_partHeaps[s_partHeapCount++] = heap;
+    partHeap = heap;
     return model;
 }
 
@@ -866,21 +869,55 @@ JKRArchive* mount_dvd_archive(const char* path) {
     return JKRArchive::mount(path, JKRArchive::MOUNT_DVD, s_heap, JKRArchive::MOUNT_DIRECTION_HEAD);
 }
 
+void forget_solid(J3DModelData* data) {
+    int kept = 0;
+    for (int i = 0; i < s_solidCount; i++) {
+        if (s_solid[i].data != data) s_solid[kept++] = s_solid[i];
+    }
+    s_solidCount = kept;
+}
+
+void release_part(J3DModel*& model, JKRExpHeap*& heap) {
+    if (model != nullptr) {
+        forget_solid(model->getModelData());
+        JKR_DELETE(model);
+        model = nullptr;
+    }
+    if (heap != nullptr) {
+        mDoExt_destroyExpHeap(heap);
+        heap = nullptr;
+    }
+}
+
+void release_equipment() {
+    release_part(s_sword, s_swordHeap);
+    release_part(s_sheath, s_sheathHeap);
+    release_part(s_shield, s_shieldHeap);
+    for (JKRArchive** archive : {&s_shieldArchive, &s_alinkArchive}) {
+        if (*archive != nullptr) {
+            (*archive)->unmount();
+            *archive = nullptr;
+        }
+    }
+}
+
 void load_equipment() {
     const u8 sword = dComIfGs_getSelectEquipSword();
     const u8 shield = dComIfGs_getSelectEquipShield();
+    s_loadedSword = sword;
+    s_loadedShield = shield;
 
     if (sword == dItemNo_SWORD_e || sword == dItemNo_MASTER_SWORD_e || sword == dItemNo_LIGHT_SWORD_e) {
         s_alinkArchive = mount_dvd_archive(kAlinkPath);
         if (sword == dItemNo_SWORD_e) {
-            s_sword = create_part_model(s_alinkArchive, kOrdonSwordIndex, kTagBmwr, "ordon sword");
-            s_sheath = create_part_model(s_alinkArchive, kOrdonSheathIndex, kTagBmwr, "ordon sheath");
+            s_sword = create_part_model(s_alinkArchive, kOrdonSwordIndex, kTagBmwr, "ordon sword", s_swordHeap);
+            s_sheath = create_part_model(s_alinkArchive, kOrdonSheathIndex, kTagBmwr, "ordon sheath", s_sheathHeap);
         } else {
-            s_sword = create_part_model(s_alinkArchive, kMasterSwordIndex, kTagBmwe, "master sword");
-            s_sheath = create_part_model(s_alinkArchive, kMasterSheathIndex, kTagBmwe, "master sheath");
+            s_sword = create_part_model(s_alinkArchive, kMasterSwordIndex, kTagBmwe, "master sword", s_swordHeap);
+            s_sheath = create_part_model(s_alinkArchive, kMasterSheathIndex, kTagBmwe, "master sheath", s_sheathHeap);
         }
     } else if (sword == dItemNo_WOOD_STICK_e) {
-        s_sword = create_kmdl_model("al_swb.bmd", kEquipDiffFlags);
+        s_sword = create_part_model(s_archive, kWoodSwordIndex, kTagBmwr, "wood sword", s_swordHeap);
     }
 
     const char* shieldPath = nullptr;
@@ -893,7 +930,7 @@ void load_equipment() {
     }
     if (shieldPath != nullptr) {
         s_shieldArchive = mount_dvd_archive(shieldPath);
-        s_shield = create_part_model(s_shieldArchive, kShieldIndex, kTagBmwr, "shield");
+        s_shield = create_part_model(s_shieldArchive, kShieldIndex, kTagBmwr, "shield", s_shieldHeap);
     }
 
     if (s_sword != nullptr) {
@@ -913,12 +950,8 @@ void load_equipment() {
     }
 }
 
-bool setup_hands(J3DModel* hands) {
+void update_hand_grips(J3DModel* hands) {
     J3DModelData* data = hands->getModelData();
-    if (data->getMaterialNum() < kHandsMinMaterials) return false;
-    for (u16 j = 0; j < data->getJointNum(); j++) {
-        data->getJointNodePointer(j)->setCallBack(hands_joint_callback);
-    }
     for (u16 i = 0; i < data->getShapeNum(); i++) {
         data->getShapeNodePointer(i)->hide();
     }
@@ -927,7 +960,26 @@ bool setup_hands(J3DModel* hands) {
     for (u16 index : {grip, guard}) {
         if (J3DShape* shape = data->getMaterialNodePointer(index)->getShape()) shape->show();
     }
+}
+
+bool setup_hands(J3DModel* hands) {
+    J3DModelData* data = hands->getModelData();
+    if (data->getMaterialNum() < kHandsMinMaterials) return false;
+    for (u16 j = 0; j < data->getJointNum(); j++) {
+        data->getJointNodePointer(j)->setCallBack(hands_joint_callback);
+    }
+    update_hand_grips(hands);
     return true;
+}
+
+void reload_equipment() {
+    JKRHeap* oldHeap = mDoExt_setCurrentHeap(s_heap);
+    release_equipment();
+    load_equipment();
+    mDoExt_setCurrentHeap(oldHeap);
+    update_hand_grips(s_hands);
+    dl_log("[darklink] equipment changed: sword=%d shield=%d heap free %u", s_sword != nullptr,
+           s_shield != nullptr, static_cast<u32>(s_heap->getFreeSize()));
 }
 
 bool setup_hat(J3DModel* head) {
@@ -1014,7 +1066,8 @@ void release_all() {
         JKR_DELETE(s_bck);
         s_bck = nullptr;
     }
-    for (J3DModel** model : {&s_shield, &s_sheath, &s_sword, &s_hands, &s_face, &s_head, &s_body}) {
+    release_equipment();
+    for (J3DModel** model : {&s_hands, &s_face, &s_head, &s_body}) {
         if (*model != nullptr) {
             JKR_DELETE(*model);
             *model = nullptr;
@@ -1026,16 +1079,9 @@ void release_all() {
     for (J3DModel*& model : s_depthPacket.mModels) {
         model = nullptr;
     }
-    for (int i = 0; i < s_partHeapCount; i++) {
-        mDoExt_destroyExpHeap(s_partHeaps[i]);
-        s_partHeaps[i] = nullptr;
-    }
-    s_partHeapCount = 0;
-    for (JKRArchive** archive : {&s_shieldArchive, &s_alinkArchive, &s_archive}) {
-        if (*archive != nullptr) {
-            (*archive)->unmount();
-            *archive = nullptr;
-        }
+    if (s_archive != nullptr) {
+        s_archive->unmount();
+        s_archive = nullptr;
     }
     if (s_heap != nullptr) {
         mDoExt_destroyExpHeap(s_heap);
@@ -1186,6 +1232,10 @@ void boss_rush_darklink_draw(const cXyz& pos, const csXyz& angle) {
     }
     cXyz lightPos = pos;
     g_env_light.settingTevStruct(0, &lightPos, &s_tevstr);
+
+    if (dComIfGs_getSelectEquipSword() != s_loadedSword || dComIfGs_getSelectEquipShield() != s_loadedShield) {
+        reload_equipment();
+    }
 
     calc_models(pos, angle.y);
 
