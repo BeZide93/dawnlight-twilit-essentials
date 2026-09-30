@@ -19,17 +19,16 @@ const char* const kControlsButtonLabels[CTRL_BTN_COUNT] = {
 };
 
 static const int kControlsDefaultBinding[CTRL_BIND_COUNT] = {
-    CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_A,
+    CTRL_BTN_DPAD_DOWN, CTRL_BTN_A,
 };
 
 static const char* const kControlsVarNames[CTRL_BIND_COUNT] = {
     "controlsQuickAccessButton",
-    "controlsBottlesButton",
     "controlsSprintButton",
 };
 
 int g_controlsBinding[CTRL_BIND_COUNT] = {
-    CTRL_BTN_DPAD_DOWN, CTRL_BTN_L, CTRL_BTN_A,
+    CTRL_BTN_DPAD_DOWN, CTRL_BTN_A,
 };
 
 ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT] = {};

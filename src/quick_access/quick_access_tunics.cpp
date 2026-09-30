@@ -376,6 +376,13 @@ void qa_page_reset() {
     s_rPrev = true;
 }
 
+void qa_page_open_bottles() {
+    s_page = QA_PAGE_BOTTLES;
+    s_pageAnimT = 0.0f;
+    s_bottleSelected = SLOT_NONE;
+    s_selectedSlot = SLOT_NONE;
+}
+
 void qa_page_step(int dir) {
     const int next = s_page + dir;
     if (next < QA_PAGE_BOTTLES || next > QA_PAGE_TUNICS) return;

@@ -33,7 +33,6 @@ extern const char* const kControlsButtonLabels[CTRL_BTN_COUNT];
 
 enum ControlsBinding {
     CTRL_BIND_QUICK_ACCESS = 0,
-    CTRL_BIND_BOTTLES,
     CTRL_BIND_SPRINT,
     CTRL_BIND_COUNT,
 };

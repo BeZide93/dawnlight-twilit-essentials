@@ -20,11 +20,7 @@ bool itemwheel_filter_active() {
 }
 
 static bool itemwheel_is_hidden_item(u8 itemNo) {
-    if (qa_custom_contains_family(itemNo)) {
-        return true;
-    }
-
-    return qa_bottles_menu_owns_item(itemNo);
+    return qa_custom_contains_family(itemNo);
 }
 
 DEFINE_HOOK(&dSv_player_item_c::setLineUpItem, SvSetLineUpItemQuickAccessHook);

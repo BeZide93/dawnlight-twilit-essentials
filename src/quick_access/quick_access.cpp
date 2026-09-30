@@ -1761,7 +1761,7 @@ static void qa_run_item_repress(daAlink_c* link, u8 itemNo) {
 static bool s_hdShoulderLatch = false;
 
 static bool qa_owns_shoulders() {
-    return s_menuOpen || s_editMode || quick_access_bottles_menu_open();
+    return s_menuOpen || s_editMode;
 }
 
 static bool qa_twilight_hd_shoulders_blocked() {
@@ -1834,6 +1834,15 @@ void qa_strip_tap_action() {
     }
 }
 
+static void qa_bottle_tap_action() {
+    const int slot = qa_bottle_assigned_slot();
+    if (slot < 0) {
+        play_error_se();
+        return;
+    }
+    qa_bottle_use(slot);
+}
+
 static void on_pad_read_qa_twilight_hd_post(ModContext*, void*, void*, void*) {
     if (!twilight_hd_third_item_slot()) {
         s_hdShoulderLatch = false;
@@ -1859,8 +1868,7 @@ bool quick_access_owns_l() {
 }
 
 static bool qa_owns_input() {
-    return s_menuOpen || s_editMode || quick_access_bottles_hotkey_active() ||
-           quick_access_bottles_menu_open();
+    return s_menuOpen || s_editMode;
 }
 
 DEFINE_HOOK_SYMBOL("dusk::getActionBindTrig", bool(int, u32), QaActionBindTrigHook);
@@ -1915,8 +1923,7 @@ static void swallow_l_trigger(interface_of_controller_pad& pad) {
 }
 
 static void on_pad_read_qa_l_owner_post(ModContext*, void*, void*, void*) {
-    const bool owning = s_menuOpen || s_editMode || quick_access_bottles_hotkey_active() ||
-                        quick_access_bottles_menu_open();
+    const bool owning = s_menuOpen || s_editMode;
     if (owning) {
         s_lOwnedLatch = true;
     } else if (!controls_l_physical_held()) {
@@ -1927,7 +1934,14 @@ static void on_pad_read_qa_l_owner_post(ModContext*, void*, void*, void*) {
     }
 }
 
+static bool s_bottleRequest = false;
+
+void quick_access_request_bottle_page() {
+    s_bottleRequest = true;
+}
+
 static void close_menu() {
+    s_bottleRequest = false;
     if (s_editMode) {
         s_editMode = false;
         quick_access_edit_exit();
@@ -2203,33 +2217,7 @@ static void wolf_quick_access_input(interface_of_controller_pad& pad) {
     suppress_menu_buttons(pad);
 }
 
-static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
-        close_menu();
-        s_menuAlpha = 0.0f;
-        return;
-    }
-
-    sync_wheel_down_assignment();
-    sync_ooccoo_assignment();
-
-    qa_tick_bomb_tracking();
-
-    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-
-    u8 windowStatus = dMeter2Info_getWindowStatus();
-    bool isMenuOrPause = (windowStatus != 0) || dComIfGp_isPauseFlag() || dScnPly_c::isPause()
-                         || dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag()
-                         || dMsgObject_isTalkNowCheck();
-
-    if (isMenuOrPause) {
-        if (s_aimItem != QA_ITEM_NONE) {
-            qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
-        }
-        close_menu();
-        return;
-    }
-
+static void quick_access_game_input(interface_of_controller_pad& pad) {
     if (s_aimItem != QA_ITEM_NONE) {
         daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
         if (link == nullptr || !qa_is_item_available(s_aimItem)) {
@@ -2238,7 +2226,6 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     }
 
     if (s_aimItem == QA_ITEM_NONE && !s_editMode && !s_menuOpen &&
-        !quick_access_bottles_hotkey_active() &&
         (pad.mPressedButtonFlags & PAD_BUTTON_B) != 0)
     {
         daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
@@ -2266,9 +2253,13 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             s_dpadCancelLatch = true;
             close_menu();
         }
-        if (!quick_access_bottles_hotkey_active()) {
-            wolf_quick_access_input(pad);
+        if (s_bottleRequest) {
+            if (!controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
+                s_bottleRequest = false;
+            }
+            return;
         }
+        wolf_quick_access_input(pad);
         return;
     }
 
@@ -2277,9 +2268,6 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
         if (!dpadDownHeld) {
             s_dpadCancelLatch = false;
         }
-        dpadDownHeld = false;
-    }
-    if (quick_access_bottles_hotkey_active()) {
         dpadDownHeld = false;
     }
     if (s_editMode && s_editDpadDownLatch && !controls_binding_held(CTRL_BIND_QUICK_ACCESS)) {
@@ -2374,8 +2362,13 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
                 close_menu();
             } else if (s_holdFrames > 0) {
                 s_holdFrames = 0;
-                qa_strip_tap_action();
+                if (s_bottleRequest) {
+                    qa_bottle_tap_action();
+                } else {
+                    qa_strip_tap_action();
+                }
             }
+            s_bottleRequest = false;
             return;
         }
 
@@ -2389,6 +2382,9 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             s_menuOpen = true;
             s_selectedSlot = SLOT_NONE;
             qa_page_reset();
+            if (s_bottleRequest) {
+                qa_page_open_bottles();
+            }
             qa_invalidate_msg_window();
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
         }
@@ -2500,8 +2496,13 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
             close_menu();
         } else if (s_holdFrames > 0) {
             s_holdFrames = 0;
-            qa_strip_tap_action();
+            if (s_bottleRequest) {
+                qa_bottle_tap_action();
+            } else {
+                qa_strip_tap_action();
+            }
         }
+        s_bottleRequest = false;
         return;
     }
 
@@ -2516,6 +2517,9 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
                 quick_access_strip_reset_selection();
             }
             qa_page_reset();
+            if (s_bottleRequest) {
+                qa_page_open_bottles();
+            }
             qa_invalidate_msg_window();
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 0.9f, 1.2f, -1.0f, -1.0f, 0);
         }
@@ -2610,6 +2614,40 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     swallow_shoulder_triggers(pad);
 
     suppress_menu_buttons(pad);
+}
+
+static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
+        close_menu();
+        s_menuAlpha = 0.0f;
+        return;
+    }
+
+    sync_wheel_down_assignment();
+    sync_ooccoo_assignment();
+
+    qa_tick_bomb_tracking();
+
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+
+    u8 windowStatus = dMeter2Info_getWindowStatus();
+    bool isMenuOrPause = (windowStatus != 0) || dComIfGp_isPauseFlag() || dScnPly_c::isPause()
+                         || dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag()
+                         || dMsgObject_isTalkNowCheck();
+
+    if (isMenuOrPause) {
+        if (s_aimItem != QA_ITEM_NONE) {
+            qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
+        }
+        close_menu();
+        return;
+    }
+
+    quick_access_game_input(pad);
+
+    const u32 qaBit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
+    pad.mButtonFlags &= ~qaBit;
+    pad.mPressedButtonFlags &= ~qaBit;
 }
 
 static dusk::config::ConfigVar<f32>* s_qaHudScaleVar = nullptr;

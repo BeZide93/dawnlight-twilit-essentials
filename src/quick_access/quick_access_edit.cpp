@@ -72,62 +72,13 @@ static const u8 kCustomizeHardBlacklist[] = {
     dItemNo_HAWK_EYE_e,
 };
 
-static const u8 kCustomizeBlacklist[] = {
-    dItemNo_EMPTY_BOTTLE_e,
-    dItemNo_RED_BOTTLE_e,
-    dItemNo_GREEN_BOTTLE_e,
-    dItemNo_BLUE_BOTTLE_e,
-    dItemNo_MILK_BOTTLE_e,
-    dItemNo_HALF_MILK_BOTTLE_e,
-    dItemNo_OIL_BOTTLE_e,
-    dItemNo_WATER_BOTTLE_e,
-    dItemNo_OIL_BOTTLE_2_e,
-    dItemNo_RED_BOTTLE_2_e,
-    dItemNo_UGLY_SOUP_e,
-    dItemNo_HOT_SPRING_e,
-    dItemNo_FAIRY_e,
-    dItemNo_HOT_SPRING_2_e,
-    dItemNo_OIL2_e,
-    dItemNo_OIL_e,
-    dItemNo_FAIRY_DROP_e,
-    dItemNo_WORM_e,
-    dItemNo_DROP_BOTTLE_e,
-    dItemNo_BEE_CHILD_e,
-    dItemNo_CHUCHU_RARE_e,
-    dItemNo_CHUCHU_RED_e,
-    dItemNo_CHUCHU_BLUE_e,
-    dItemNo_CHUCHU_GREEN_e,
-    dItemNo_CHUCHU_YELLOW_e,
-    dItemNo_CHUCHU_PURPLE_e,
-    dItemNo_LV1_SOUP_e,
-    dItemNo_LV2_SOUP_e,
-    dItemNo_LV3_SOUP_e,
-    dItemNo_CHUCHU_YELLOW2_e,
-    dItemNo_OIL_BOTTLE3_e,
-    dItemNo_SHOP_BEE_CHILD_e,
-    dItemNo_CHUCHU_BLACK_e,
-    dItemNo_LIGHT_DROP_e,
-};
-
-bool qa_bottles_menu_owns_item(u8 itemNo) {
-    if (!g_configBottlesQuickAccessEnabled) {
-        return false;
-    }
-    for (const u8 banned : kCustomizeBlacklist) {
-        if (itemNo == banned) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool customize_blacklisted(u8 itemNo) {
     for (const u8 banned : kCustomizeHardBlacklist) {
         if (itemNo == banned) {
             return true;
         }
     }
-    return qa_bottles_menu_owns_item(itemNo);
+    return false;
 }
 
 static void edit_list_add(u8 itemNo) {

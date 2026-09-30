@@ -225,7 +225,8 @@ BarElements s_game;
 bool s_barShown = false;
 bool s_touchActive = false;
 uint64_t s_touchFinger = 0;
-int s_heldBinding = -1;
+bool s_qaHeld = false;
+bool s_bottlesHeld = false;
 void* s_pressedButton = nullptr;
 
 bool s_inDisplaySync = false;
@@ -476,14 +477,14 @@ bool apply_layout(BarElements& els, const Props& props) {
     return true;
 }
 
-void apply_button_visibility(BarElements& els, bool qa, bool bottles) {
-    const int mask = (qa ? 1 : 0) | (bottles ? 2 : 0);
+void apply_button_visibility(BarElements& els, bool qa) {
+    const int mask = qa ? 1 : 0;
     if (els.applied.shownMask == mask) {
         return;
     }
     set_property(els.qa, "display", qa ? "flex" : "none");
-    set_property(els.bottles, "display", bottles ? "flex" : "none");
-    set_property(els.separator, "display", (qa && bottles) ? "block" : "none");
+    set_property(els.bottles, "display", qa ? "flex" : "none");
+    set_property(els.separator, "display", qa ? "block" : "none");
     els.applied.shownMask = mask;
 }
 
@@ -558,12 +559,9 @@ bool qa_wanted() {
     return g_configQuickAccessEnabled && controls_binding_bit(CTRL_BIND_QUICK_ACCESS) != 0;
 }
 
-bool bottles_wanted() {
-    return g_configBottlesQuickAccessEnabled && controls_binding_bit(CTRL_BIND_BOTTLES) != 0;
-}
-
 void release_touch() {
-    s_heldBinding = -1;
+    s_qaHeld = false;
+    s_bottlesHeld = false;
     if (s_pressedButton != nullptr) {
         set_class(s_pressedButton, "pressed", false);
         s_pressedButton = nullptr;
@@ -592,8 +590,7 @@ void sync_game_bar(void* actionBar) {
     const bool actionBarShown =
         actionBar != nullptr && !s_rmlIsPseudoClassSet(actionBar, &hiddenClass);
     const bool qa = qa_wanted();
-    const bool bottles = bottles_wanted();
-    if (!actionBarShown || !common_wanted() || (!qa && !bottles)) {
+    if (!actionBarShown || !common_wanted() || !qa) {
         set_bar_shown(false);
         return;
     }
@@ -619,11 +616,7 @@ void sync_game_bar(void* actionBar) {
             return;
         }
     }
-    if ((s_heldBinding == CTRL_BIND_QUICK_ACCESS && !qa) ||
-        (s_heldBinding == CTRL_BIND_BOTTLES && !bottles)) {
-        release_touch();
-    }
-    apply_button_visibility(s_game, qa, bottles);
+    apply_button_visibility(s_game, qa);
     apply_layout(s_game, s_savedProps);
     set_bar_shown(true);
 }
@@ -651,7 +644,8 @@ HookAction before_touch_down(ModContext*, void* args, void*, void*) {
     if (!s_touchActive && hit != s_game.bar) {
         s_touchActive = true;
         s_touchFinger = s_touchEventId(event);
-        s_heldBinding = (hit == s_game.qa) ? CTRL_BIND_QUICK_ACCESS : CTRL_BIND_BOTTLES;
+        s_qaHeld = true;
+        s_bottlesHeld = hit == s_game.bottles;
         s_pressedButton = hit;
         set_class(hit, "pressed", true);
     }
@@ -668,12 +662,15 @@ HookAction before_touch_release(ModContext*, void* args, void*, void*) {
 }
 
 void after_pad_read(ModContext*, void*, void*, void*) {
-    if (s_heldBinding < 0) {
+    if (!s_qaHeld) {
         return;
     }
-    const u32 bit = controls_binding_bit(s_heldBinding);
+    const u32 bit = controls_binding_bit(CTRL_BIND_QUICK_ACCESS);
     if (bit == 0) {
         return;
+    }
+    if (s_bottlesHeld) {
+        quick_access_request_bottle_page();
     }
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
     if ((pad.mButtonFlags & bit) == 0) {
@@ -819,12 +816,11 @@ void editor_sync(void* root) {
         return;
     }
     const bool qa = g_configQuickAccessEnabled;
-    const bool bottles = g_configBottlesQuickAccessEnabled;
-    set_property(s_editor.bar, "display", (qa || bottles) ? "flex" : "none");
-    if (!qa && !bottles) {
+    set_property(s_editor.bar, "display", qa ? "flex" : "none");
+    if (!qa) {
         editor_set_selected(false);
     }
-    apply_button_visibility(s_editor, qa, bottles);
+    apply_button_visibility(s_editor, qa);
     editor_apply();
 }
 
