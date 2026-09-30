@@ -1,3 +1,4 @@
+// this file mostly ai cuz of guessing
 #include "boss_rush_darklink.hpp"
 
 #include "../util.hpp"
@@ -53,6 +54,9 @@ constexpr u32 kShieldIndex = 0x3;
 constexpr u32 kHeapSize = 0x600000;
 constexpr u32 kRootHeapReserve = 0xC00000;
 constexpr u32 kGameHeapReserve = 0x400000;
+constexpr u32 kModelHeadroom = 0x40000;
+constexpr u32 kMaxPartFileSize = 0x4000000;
+constexpr int kMaxPartHeaps = 3;
 constexpr u32 kBattleWaitAnmIndex = 0x256;
 constexpr u32 kIdleWaitAnmIndex = 0x26A;
 constexpr u32 kLinkAnmBufferSize = 0x10800;
@@ -109,6 +113,8 @@ enum class State { Idle, Mounting, Ready, Failed };
 
 State s_state = State::Idle;
 JKRExpHeap* s_heap = nullptr;
+JKRExpHeap* s_partHeaps[kMaxPartHeaps] = {};
+int s_partHeapCount = 0;
 mDoDvdThd_mountArchive_c* s_mountCmd = nullptr;
 JKRArchive* s_archive = nullptr;
 JKRArchive* s_alinkArchive = nullptr;
@@ -133,15 +139,20 @@ void dl_log(const char* fmt, ...) {
     svc_log->info(mod_ctx, msg);
 }
 
-JKRHeap* pick_parent_heap() {
+JKRHeap* pick_parent_heap(u32 size) {
     JKRHeap* root = JKRHeap::getRootHeap();
     const u32 rootFree = root != nullptr ? static_cast<u32>(root->getFreeSize()) : 0;
-    if (rootFree > kHeapSize + kRootHeapReserve) return root;
+    if (rootFree > size + kRootHeapReserve) return root;
     JKRHeap* game = mDoExt_getGameHeap();
     const u32 gameFree = game != nullptr ? static_cast<u32>(game->getFreeSize()) : 0;
-    if (gameFree > kHeapSize + kGameHeapReserve) return game;
-    dl_log("[darklink] not enough memory (root free %u, game free %u)", rootFree, gameFree);
+    if (gameFree > size + kGameHeapReserve) return game;
+    dl_log("[darklink] not enough memory for %u bytes (root free %u, game free %u)", size, rootFree,
+           gameFree);
     return nullptr;
+}
+
+u32 model_budget(u32 size) {
+    return size * 2 + kModelHeadroom;
 }
 
 u8 clamp_u8(f32 v) {
@@ -442,26 +453,7 @@ void patch_bmd_file(u8* file, u32 size) {
     patch_tex1(tex, file, end);
 }
 
-J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, const char* label) {
-    if (archive == nullptr || raw == nullptr) return nullptr;
-    u32 size = archive->getExpandedResSize(raw);
-    const u8* rawBytes = static_cast<const u8*>(raw);
-    const u32 headerSize = (static_cast<u32>(rawBytes[8]) << 24) | (static_cast<u32>(rawBytes[9]) << 16) |
-                           (static_cast<u32>(rawBytes[10]) << 8) | static_cast<u32>(rawBytes[11]);
-    if (std::memcmp(rawBytes, "J3D2", 4) == 0 && headerSize > 0 && headerSize < 0x800000 &&
-        (size == 0xFFFFFFFFu || headerSize > size)) {
-        size = headerSize;
-    }
-    if (size == 0 || size == 0xFFFFFFFFu) {
-        dl_log("[darklink] %s: bad resource size %u", label, size);
-        return nullptr;
-    }
-    u8* copy = JKR_NEW_ARRAY_ARGS(u8, size, 0x20);
-    if (copy == nullptr) {
-        dl_log("[darklink] %s: no memory for %u bytes", label, size);
-        return nullptr;
-    }
-    std::memcpy(copy, raw, size);
+J3DModel* build_model(u8* copy, u32 size, u32 tag, const char* label) {
     patch_bmd_file(copy, size);
     J3DModelData* data = dRes_info_c::loaderBasicBmd(tag, copy);
     if (data == nullptr || data->getMaterialNum() == 0 || data->getJointNum() == 0) {
@@ -477,6 +469,73 @@ J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, const c
     dl_log("[darklink] %s: %u bytes, %d joints, %d materials, %d specular, %d eye materials, %d eye textures",
            label, size, static_cast<int>(data->getJointNum()),
            static_cast<int>(data->getMaterialNum()), s_specularPatched, s_eyeMaterials, s_eyeTextures);
+    return model;
+}
+
+J3DModel* create_model_from_raw(JKRArchive* archive, void* raw, u32 tag, const char* label) {
+    if (archive == nullptr || raw == nullptr) return nullptr;
+    u32 size = archive->getExpandedResSize(raw);
+    const u8* rawBytes = static_cast<const u8*>(raw);
+    const u32 headerSize = read_be32(rawBytes + 8);
+    if (std::memcmp(rawBytes, "J3D2", 4) == 0 && headerSize > 0 && headerSize < 0x800000 &&
+        (size == 0xFFFFFFFFu || headerSize > size)) {
+        size = headerSize;
+    }
+    if (size == 0 || size == 0xFFFFFFFFu) {
+        dl_log("[darklink] %s: bad resource size %u", label, size);
+        return nullptr;
+    }
+    const u32 heapFree = static_cast<u32>(s_heap->getFreeSize());
+    if (heapFree < model_budget(size)) {
+        dl_log("[darklink] %s: %u bytes do not fit (heap free %u)", label, size, heapFree);
+        return nullptr;
+    }
+    u8* copy = JKR_NEW_ARRAY_ARGS(u8, size, 0x20);
+    if (copy == nullptr) {
+        dl_log("[darklink] %s: no memory for %u bytes", label, size);
+        return nullptr;
+    }
+    std::memcpy(copy, raw, size);
+    return build_model(copy, size, tag, label);
+}
+
+u32 probe_model_size(JKRArchive* archive, u32 index) {
+    alignas(32) u8 header[0x20];
+    if (archive->readIdxResource(header, sizeof(header), index) < sizeof(header)) return 0;
+    if (std::memcmp(header, "J3D2", 4) != 0) return 0;
+    return read_be32(header + 8);
+}
+
+J3DModel* create_part_model(JKRArchive* archive, u32 index, u32 tag, const char* label) {
+    if (archive == nullptr || s_partHeapCount >= kMaxPartHeaps) return nullptr;
+    const u32 size = probe_model_size(archive, index);
+    if (size < 0x20 || size > kMaxPartFileSize) {
+        dl_log("[darklink] %s: bad resource size %u", label, size);
+        return nullptr;
+    }
+    const u32 bufferSize = (size + 0x1F) & ~0x1Fu;
+    const u32 heapSize = model_budget(bufferSize);
+    const bool fitsPrivate = static_cast<u32>(s_heap->getFreeSize()) > heapSize + kModelHeadroom;
+    JKRHeap* parent = fitsPrivate ? s_heap : pick_parent_heap(heapSize);
+    JKRExpHeap* heap = parent != nullptr ? JKRExpHeap::create(heapSize, parent, false) : nullptr;
+    if (heap == nullptr) {
+        dl_log("[darklink] %s: no heap for %u bytes", label, size);
+        return nullptr;
+    }
+    JKRHeap* oldHeap = mDoExt_setCurrentHeap(heap);
+    J3DModel* model = nullptr;
+    u8* copy = JKR_NEW_ARRAY_ARGS(u8, bufferSize, 0x20);
+    if (copy != nullptr && archive->readIdxResource(copy, bufferSize, index) >= size) {
+        model = build_model(copy, size, tag, label);
+    } else {
+        dl_log("[darklink] %s: read of %u bytes failed", label, size);
+    }
+    mDoExt_setCurrentHeap(oldHeap);
+    if (model == nullptr) {
+        mDoExt_destroyExpHeap(heap);
+        return nullptr;
+    }
+    s_partHeaps[s_partHeapCount++] = heap;
     return model;
 }
 
@@ -587,6 +646,11 @@ void release_all() {
             *model = nullptr;
         }
     }
+    for (int i = 0; i < s_partHeapCount; i++) {
+        mDoExt_destroyExpHeap(s_partHeaps[i]);
+        s_partHeaps[i] = nullptr;
+    }
+    s_partHeapCount = 0;
     for (JKRArchive** archive : {&s_shieldArchive, &s_alinkArchive, &s_archive}) {
         if (*archive != nullptr) {
             (*archive)->unmount();
@@ -607,17 +671,10 @@ bool build_models() {
     s_face = create_kmdl_model("al_face.bmd");
     s_hands = create_kmdl_model("al_hands.bmd");
     s_alinkArchive = mount_dvd_archive(kAlinkPath);
-    if (s_alinkArchive != nullptr) {
-        s_sword = create_model_from_raw(s_alinkArchive, s_alinkArchive->getIdxResource(kMasterSwordIndex),
-                                        kTagBmwe, "sword");
-        s_sheath = create_model_from_raw(s_alinkArchive, s_alinkArchive->getIdxResource(kMasterSheathIndex),
-                                         kTagBmwe, "sheath");
-    }
+    s_sword = create_part_model(s_alinkArchive, kMasterSwordIndex, kTagBmwe, "sword");
+    s_sheath = create_part_model(s_alinkArchive, kMasterSheathIndex, kTagBmwe, "sheath");
     s_shieldArchive = mount_dvd_archive(kShieldPath);
-    if (s_shieldArchive != nullptr) {
-        s_shield = create_model_from_raw(s_shieldArchive, s_shieldArchive->getIdxResource(kShieldIndex),
-                                         kTagBmwr, "shield");
-    }
+    s_shield = create_part_model(s_shieldArchive, kShieldIndex, kTagBmwr, "shield");
     s_bck = create_link_bck(kBattleWaitAnmIndex);
     if (s_bck == nullptr) s_bck = create_link_bck(kIdleWaitAnmIndex);
     mDoExt_setCurrentHeap(oldHeap);
@@ -643,7 +700,7 @@ bool update_loading() {
     case State::Failed:
         return false;
     case State::Idle: {
-        JKRHeap* parent = pick_parent_heap();
+        JKRHeap* parent = pick_parent_heap(kHeapSize);
         s_heap = parent != nullptr ? JKRExpHeap::create(kHeapSize, parent, false) : nullptr;
         if (s_heap == nullptr) {
             s_state = State::Failed;
