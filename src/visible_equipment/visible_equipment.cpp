@@ -82,6 +82,13 @@ static bool s_gearShaderCapable[3] = {};
 static bool s_gearModelWarpOn[3] = {};
 
 static J3DModelData *s_lanternWarpModelData = nullptr;
+static J3DModel *s_lanternWarpModel = nullptr;
+static fpc_ProcID s_lanternWarpOwnerId = fpcM_ERROR_PROCESS_ID_e;
+
+static fpc_ProcID currentPlayerId() {
+  fopAc_ac_c *player = dComIfGp_getPlayer(0);
+  return player != nullptr ? fopAcM_GetID(player) : fpcM_ERROR_PROCESS_ID_e;
+}
 
 DEFINE_HOOK(&daAlink_c::draw, AlinkDrawHook);
 DEFINE_HOOK(&daAlink_c::statusWindowDraw, AlinkStatusWindowDrawHook);
@@ -907,6 +914,35 @@ static bool addDormantWarpStage(J3DModel *lanternModel, J3DModelData *modelData)
   return true;
 }
 
+static void adoptLanternWarpModel(J3DModel *lanternModel, J3DModelData *modelData) {
+  s_lanternWarpModel = lanternModel;
+  s_lanternWarpOwnerId = currentPlayerId();
+  safeOffWarpMaterial(modelData);
+  if ((lanternModel->mDiffFlag & 0x2000400) == 0) {
+    JKRHeap *rootHeap = JKRHeap::getRootHeap();
+    JKRHeap *oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
+    safeOnWarpMaterial(modelData);
+    lanternModel->newDifferedDisplayList(0x11000084 | 0x2000400);
+    safeOffWarpMaterial(modelData);
+    if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
+  }
+  s_gearModelWarpOn[2] = false;
+}
+
+static void releaseLanternWarpStage() {
+  if (!s_gearModelWarpOn[2] || s_lanternWarpModel == nullptr || s_lanternWarpModelData == nullptr) {
+    return;
+  }
+  daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
+  if (alink == nullptr || alink->mpKanteraModel != s_lanternWarpModel ||
+      fopAcM_GetID(alink) != s_lanternWarpOwnerId ||
+      s_lanternWarpModel->getModelData() != s_lanternWarpModelData) {
+    return;
+  }
+  safeOffWarpMaterial(s_lanternWarpModelData);
+  s_gearModelWarpOn[2] = false;
+}
+
 static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
   if (!s_gearShaderUsable || lanternModel == nullptr) {
     return false;
@@ -916,6 +952,9 @@ static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
     return false;
   }
   if (modelData == s_lanternWarpModelData && s_gearShaderCapable[2]) {
+    if (lanternModel != s_lanternWarpModel || currentPlayerId() != s_lanternWarpOwnerId) {
+      adoptLanternWarpModel(lanternModel, modelData);
+    }
     return true;
   }
 
@@ -944,19 +983,9 @@ static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
 
     healLanternTextures(modelData);
     J3DShape::resetVcdVatCache();
-    safeOffWarpMaterial(modelData);
-
-    if ((lanternModel->mDiffFlag & 0x2000400) == 0) {
-      JKRHeap *rootHeap = JKRHeap::getRootHeap();
-      JKRHeap *oldHeap = (rootHeap != nullptr) ? mDoExt_setCurrentHeap(rootHeap) : nullptr;
-      safeOnWarpMaterial(modelData);
-      lanternModel->newDifferedDisplayList(0x11000084 | 0x2000400);
-      safeOffWarpMaterial(modelData);
-      if (oldHeap != nullptr) mDoExt_setCurrentHeap(oldHeap);
-    }
+    adoptLanternWarpModel(lanternModel, modelData);
 
     s_gearShaderCapable[2] = true;
-    s_gearModelWarpOn[2] = false;
     s_lanternWarpModelData = modelData;
     s_lanternWarp = {true, 1.0f};
     return true;
@@ -1029,6 +1058,8 @@ static bool ensureLanternWarpCapability(J3DModel *lanternModel) {
   }
 
   s_gearShaderCapable[2] = true;
+  s_lanternWarpModel = lanternModel;
+  s_lanternWarpOwnerId = currentPlayerId();
   return true;
 }
 
@@ -1340,6 +1371,7 @@ static void on_alink_draw_post(ModContext *ctx, void *args, void *retval, void *
 
 static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
   if (!g_configVisibleEquipmentEnabled || isTitleOrMainMenu()) {
+    releaseLanternWarpStage();
     return;
   }
 
@@ -1604,6 +1636,8 @@ void shutdown_visible_equipment() {
     }
     s_lanternWarpModelData = nullptr;
   }
+  s_lanternWarpModel = nullptr;
+  s_lanternWarpOwnerId = fpcM_ERROR_PROCESS_ID_e;
   for (int i = 0; i < 8; ++i) {
     s_vanillaTevBlocks[i] = nullptr;
     s_vanillaSharedDLObj[i] = nullptr;
