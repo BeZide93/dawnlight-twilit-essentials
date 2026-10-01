@@ -1151,6 +1151,23 @@ static void execute_iron_boots() {
         return;
     }
 
+    if (link->checkBoardRide()) {
+        play_error_se();
+        return;
+    }
+
+    const bool grounded =
+        (link->mLinkAcch.ChkGroundHit() && !link->checkModeFlg(0x70C52)) ||
+        link->checkMagneBootsOn() || link->mProcID == daAlink_c::PROC_HANG_CLIMB;
+    if (!grounded) {
+        s_qaBootsDesired = !equipped;
+        s_qaBootsGraceFrames = 45;
+        link->setHeavyBoots(1);
+        qa_mark_held_item(dItemNo_HVY_BOOTS_e);
+        play_ok_se();
+        return;
+    }
+
     if (link->checkEquipHeavyBoots()) {
         s_qaBootsDesired = false;
         s_qaBootsGraceFrames = 45;
