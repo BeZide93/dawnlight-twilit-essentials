@@ -183,6 +183,16 @@ bool z_item_ammo(u8 itemNo, int& count, int& maxCount) {
         u8 bombType = dComIfGs_getItem((u8)(bagIdx + 15), false);
         count = dComIfGs_getBombNum(bagIdx);
         maxCount = dComIfGs_getBombMax(bombType);
+        if (itemNo == dItemNo_BOMB_ARROW_e) {
+            int arrowNum = dComIfGs_getArrowNum();
+            int arrowMax = dComIfGs_getArrowMax();
+            if (count > arrowNum) {
+                count = arrowNum;
+            }
+            if (maxCount < arrowMax) {
+                maxCount = arrowMax;
+            }
+        }
     }
     else if (itemNo == dItemNo_BOW_e || itemNo == dItemNo_HAWK_ARROW_e || itemNo == 0x43 ||
              itemNo == 0x53 || itemNo == 0x54 || itemNo == 0x55 || itemNo == 0x56 || itemNo == 0x5A) {
