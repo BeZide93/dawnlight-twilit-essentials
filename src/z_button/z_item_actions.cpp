@@ -85,7 +85,7 @@ static bool s_inItemChangeFromButton = false;
 HookAction on_qa_all_unequip_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
     const int param0 = mods::arg<int>(args, 1);
-    if (alink == nullptr || !g_configQuickAccessEnabled) {
+    if (alink == nullptr || !quick_access_enabled()) {
         return HOOK_CONTINUE;
     }
 

@@ -56,6 +56,10 @@
 
 bool g_configQuickAccessEnabled = false;
 
+bool quick_access_enabled() {
+    return g_configQuickAccessEnabled && !boss_rush_session_active();
+}
+
 int g_qaSelectOverrideDepth[4] = {0, 0, 0, 0};
 int g_configQuickAccessAppearance = QA_APPEARANCE_RADIAL;
 
@@ -87,7 +91,7 @@ void qa_mark_held_item(u8 itemNo) {
 }
 
 bool qa_is_held_item(int itemNo) {
-    return g_configQuickAccessEnabled && s_qaHeldItem != QA_ITEM_NONE && s_qaHeldGrace > 0 &&
+    return quick_access_enabled() && s_qaHeldItem != QA_ITEM_NONE && s_qaHeldGrace > 0 &&
            itemNo == static_cast<int>(s_qaHeldItem);
 }
 
@@ -528,18 +532,18 @@ int qa_get_active_items(u8 outItems[QA_QUICK_SLOTS]) {
 }
 
 bool quick_access_is_active() {
-    return g_configQuickAccessEnabled && s_menuOpen;
+    return quick_access_enabled() && s_menuOpen;
 }
 
 bool quick_access_keep_boots_equipped(daAlink_c* link) {
-    if (!g_configQuickAccessEnabled || link == nullptr) {
+    if (!quick_access_enabled() || link == nullptr) {
         return false;
     }
     return link->checkEquipHeavyBoots() != 0;
 }
 
 bool quick_access_boots_on_quick_access() {
-    return g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e;
+    return quick_access_enabled() && s_assignedItem == dItemNo_HVY_BOOTS_e;
 }
 
 static u32 qa_bti_image_size(const ResTIMG* t) {
@@ -1074,7 +1078,7 @@ HookAction on_qa_boots_equip_init_pre(ModContext*, void* args, void* retval, voi
         return HOOK_CONTINUE;
     }
 
-    if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
+    if (quick_access_enabled() && s_assignedItem == dItemNo_HVY_BOOTS_e) {
         if (s_qaBootsEquipAllowed) {
             s_qaBootsEquipAllowed = false;
             return HOOK_CONTINUE;
@@ -1404,7 +1408,7 @@ static void qa_tick_bomb_tracking() {
 }
 
 bool quick_access_keep_bomb_equipped(daAlink_c* link) {
-    if (!g_configQuickAccessEnabled || link == nullptr || s_qaBombItem == QA_ITEM_NONE) {
+    if (!quick_access_enabled() || link == nullptr || s_qaBombItem == QA_ITEM_NONE) {
         return false;
     }
     return (link->mEquipItem == s_qaBombItem) ||
@@ -1412,7 +1416,7 @@ bool quick_access_keep_bomb_equipped(daAlink_c* link) {
 }
 
 bool quick_access_keep_lantern_equipped(daAlink_c* link) {
-    if (!g_configQuickAccessEnabled || link == nullptr) {
+    if (!quick_access_enabled() || link == nullptr) {
         return false;
     }
     if (s_assignedItem != dItemNo_KANTERA_e && s_assignedItem != dItemNo_KANTERA2_e) {
@@ -1426,7 +1430,7 @@ DEFINE_HOOK(&daAlink_c::execute, QaAlinkExecuteHook);
 DEFINE_HOOK(&daAlink_c::setHeavyBoots, QaSetHeavyBootsHook);
 
 HookAction on_qa_set_heavy_boots_pre(ModContext*, void* args, void* retval, void*) {
-    if (!g_configQuickAccessEnabled) {
+    if (!quick_access_enabled()) {
         return HOOK_CONTINUE;
     }
 
@@ -1457,7 +1461,7 @@ HookAction on_qa_set_heavy_boots_pre(ModContext*, void* args, void* retval, void
 static u8 s_qaPreEquipItem = 0xFF;
 
 HookAction on_qa_alink_execute_pre(ModContext*, void*, void*, void*) {
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!quick_access_enabled() || isTitleOrMainMenu()) {
         return HOOK_CONTINUE;
     }
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
@@ -1472,8 +1476,10 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     if (s_qaBootsCooldown > 0) {
         s_qaBootsCooldown--;
     }
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!quick_access_enabled() || isTitleOrMainMenu()) {
         s_qaLanternLit = false;
+        s_qaBootsDesired = false;
+        s_qaBootsGraceFrames = 0;
         return;
     }
 
@@ -1488,7 +1494,7 @@ static void on_qa_alink_execute_post(ModContext*, void*, void*, void*) {
     qa_tick_held_item(link);
     qa_tick_pending_ooccoo();
 
-    if (g_configQuickAccessEnabled && s_assignedItem == dItemNo_HVY_BOOTS_e) {
+    if (quick_access_enabled() && s_assignedItem == dItemNo_HVY_BOOTS_e) {
         if (s_qaBootsGraceFrames > 0) {
             s_qaBootsGraceFrames--;
         }
@@ -1805,7 +1811,7 @@ static void on_set_stick_data_qa_post(ModContext*, void* args, void*, void*) {
             blockedLink->mItemButton &= ~daAlink_c::BTN_Z;
         }
     }
-    if (!g_configQuickAccessEnabled || args == nullptr) {
+    if (!quick_access_enabled() || args == nullptr) {
         return;
     }
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
@@ -2759,7 +2765,7 @@ static HookAction on_qa_ctrl_show_map_pre(ModContext*, void* args, void*, void*)
 static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     s_hdMinimapToggleTrig = false;
     s_hdCollectionRouted = false;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!quick_access_enabled() || isTitleOrMainMenu()) {
         close_menu();
         s_menuAlpha = 0.0f;
         return;
@@ -2799,7 +2805,7 @@ static u32 s_keyWaitHiddenHeld = 0;
 static HookAction on_qa_mw_key_wait_pre(ModContext*, void*, void*, void*) {
     s_keyWaitHiddenPressed = 0;
     s_keyWaitHiddenHeld = 0;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!quick_access_enabled() || isTitleOrMainMenu()) {
         return HOOK_CONTINUE;
     }
     u32 ringBits = controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & (PAD_BUTTON_UP | PAD_BUTTON_DOWN);
@@ -2825,7 +2831,7 @@ static u32 s_mwExecuteHiddenHeld = 0;
 static HookAction on_qa_mw_execute_pre(ModContext*, void*, void*, void*) {
     s_mwExecuteHiddenPressed = 0;
     s_mwExecuteHiddenHeld = 0;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() ||
+    if (!quick_access_enabled() || isTitleOrMainMenu() ||
         !controls_hd_collection_on_left() || s_hdCollectionRouted ||
         dMeter2Info_getWindowStatus() != 0 ||
         (controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & PAD_BUTTON_DOWN) == 0)
@@ -3025,7 +3031,7 @@ static void qa_draw_background_dim(f32 alphaRate) {
 }
 
 static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, void*) {
-    if (!args || !g_configQuickAccessEnabled || isTitleOrMainMenu()) {
+    if (!args || !quick_access_enabled() || isTitleOrMainMenu()) {
         s_menuAlpha = 0.0f;
         quick_access_strip_cursor_reset();
         return;
@@ -3114,7 +3120,7 @@ static f32 s_hdDpadShiftLocalY[kQaHdDpadShiftPanes] = {};
 static int s_hdDpadShiftCount = 0;
 
 static bool qa_hd_dpad_shift_wanted() {
-    return g_configQuickAccessEnabled && !isTitleOrMainMenu() && controls_hd_collection_on_left();
+    return quick_access_enabled() && !isTitleOrMainMenu() && controls_hd_collection_on_left();
 }
 
 static bool qa_hd_world_bounds(CPaneMgr* mgr, J2DPane* pane, f32& left, f32& top, f32& right,
@@ -3253,7 +3259,7 @@ static HookAction on_qa_midna_talk_trigger_pre(ModContext*, void*, void* retval,
 }
 
 bool quick_access_z_scratch_active() {
-    return g_configQuickAccessEnabled &&
+    return quick_access_enabled() &&
            (g_qaSelectOverrideDepth[2] > 0 || s_aimItem != QA_ITEM_NONE ||
             s_qaOoccooActive != QA_ITEM_NONE || s_qaBombSlotHeld);
 }
@@ -3288,7 +3294,7 @@ DEFINE_HOOK(&dMeter2_c::_execute, QaMeterExecuteHook);
 
 static HookAction on_qa_meter_execute_pre(ModContext*, void*, void*, void*) {
     s_meterZStash = QaZSlotStash{};
-    if (!isNativeZButtonEngine() || !g_configQuickAccessEnabled) {
+    if (!isNativeZButtonEngine() || !quick_access_enabled()) {
         return HOOK_CONTINUE;
     }
     const bool ooccoo = s_qaOoccooActive != QA_ITEM_NONE;

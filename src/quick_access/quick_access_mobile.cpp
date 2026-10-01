@@ -552,11 +552,11 @@ void store_saved_props() {
 }
 
 bool common_wanted() {
-    return !isTitleOrMainMenu() && !is_pause_menu_open();
+    return !isTitleOrMainMenu() && !is_pause_menu_open() && !is_boss_rush_active();
 }
 
 bool qa_wanted() {
-    return g_configQuickAccessEnabled && !controls_binding_blocked(CTRL_BIND_QUICK_ACCESS);
+    return quick_access_enabled() && !controls_binding_blocked(CTRL_BIND_QUICK_ACCESS);
 }
 
 void release_touch() {

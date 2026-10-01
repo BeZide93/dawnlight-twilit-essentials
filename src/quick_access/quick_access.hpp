@@ -9,6 +9,7 @@ class daAlink_c;
 struct SaveService;
 
 extern bool g_configQuickAccessEnabled;
+bool quick_access_enabled();
 
 extern int g_configQuickAccessAppearance;
 
