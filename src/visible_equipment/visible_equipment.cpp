@@ -959,7 +959,8 @@ static void releaseLanternWarpStage() {
     return;
   }
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
-  if (alink == nullptr || alink->mpKanteraModel != s_lanternWarpModel ||
+  if (alink == nullptr || alink->getClothesChangeWaitTimer() != 0 ||
+      alink->mpKanteraModel != s_lanternWarpModel ||
       fopAcM_GetID(alink) != s_lanternWarpOwnerId ||
       s_lanternWarpModel->getModelData() != s_lanternWarpModelData ||
       !isLanternDataRetrofitted(s_lanternWarpModelData)) {
@@ -1506,7 +1507,8 @@ static void on_alink_draw_post_impl(ModContext *, void *, void *, void *) {
 
   const bool inWarp = isLinkWarpMaterialOn(alink);
 
-  J3DModel *lanternModel = alink->mpKanteraModel;
+  J3DModel *lanternModel =
+      (alink->getClothesChangeWaitTimer() == 0) ? alink->mpKanteraModel : nullptr;
   bool lanternShaderReady = ensureLanternWarpCapability(lanternModel);
 
   J3DModelData *capableData[3] = {
@@ -1680,7 +1682,8 @@ void shutdown_visible_equipment() {
   const LogService *log_svc = s_logSvc;
   ModContext *mod_ctx = s_modCtx;
   daAlink_c *alink = static_cast<daAlink_c *>(dComIfGp_getPlayer(0));
-  J3DModel *liveLanternModel = (alink != nullptr) ? alink->mpKanteraModel : nullptr;
+  J3DModel *liveLanternModel =
+      (alink != nullptr && alink->getClothesChangeWaitTimer() == 0) ? alink->mpKanteraModel : nullptr;
   const bool lanternAlive = s_lanternWarpModelData != nullptr && liveLanternModel != nullptr &&
                             liveLanternModel->getModelData() == s_lanternWarpModelData;
   if (s_lanternWarpModelData != nullptr) {
