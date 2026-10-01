@@ -2,10 +2,16 @@
 
 #include "../util.hpp"
 
+#include "mods/svc/hook.hpp"
+
 #include "SSystem/SComponent/c_counter.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
+#include "d/d_meter2_info.h"
 #include "d/d_pane_class.h"
 #include "JSystem/J2DGraph/J2DScreen.h"
+#include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
 
 #include <algorithm>
@@ -120,4 +126,89 @@ bool twilight_hd_meter_frame_bounds(J2DScreen* screen, f32& left, f32& top, f32&
         }
     }
     return hasBounds;
+}
+
+DEFINE_HOOK(&mDoCPd_c::read, TwilightHdRDedupePadReadHook);
+DEFINE_HOOK(&dMeter2Draw_c::draw, TwilightHdRupeeMeterDrawHook);
+
+namespace {
+
+bool s_prevRHeld = false;
+bool s_prevRLockHeld = false;
+
+void on_pad_read_r_dedupe_post(ModContext*, void*, void*, void*) {
+    interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+    if (twilight_hd_third_item_slot()) {
+        if (s_prevRHeld) {
+            pad.mPressedButtonFlags &= ~PAD_TRIGGER_R;
+        }
+        if (s_prevRLockHeld) {
+            pad.mTrigLockR = false;
+        }
+    }
+    s_prevRHeld = (pad.mButtonFlags & PAD_TRIGGER_R) != 0;
+    s_prevRLockHeld = pad.mHoldLockR;
+}
+
+bool s_rupeeSwapped = false;
+u16 s_rupeeSaved = 0;
+u16 s_rupeeShown = 0;
+
+void restore_swapped_rupee() {
+    if (!s_rupeeSwapped) {
+        return;
+    }
+    s_rupeeSwapped = false;
+    if (dComIfGs_getRupee() == s_rupeeShown) {
+        dComIfGs_setRupee(s_rupeeSaved);
+    }
+}
+
+HookAction on_meter_draw_rupee_pre(ModContext*, void*, void*, void*) {
+    restore_swapped_rupee();
+    if (!twilight_hd_enabled()) {
+        return HOOK_CONTINUE;
+    }
+    dMeter2_c* meter = g_meter2_info.getMeterClass();
+    if (meter == nullptr || meter->mRupeeNum < 0) {
+        return HOOK_CONTINUE;
+    }
+    const u16 saved = dComIfGs_getRupee();
+    const u16 shown = static_cast<u16>(meter->mRupeeNum);
+    if (shown == saved) {
+        return HOOK_CONTINUE;
+    }
+    s_rupeeSaved = saved;
+    s_rupeeShown = shown;
+    s_rupeeSwapped = true;
+    dComIfGs_setRupee(shown);
+    return HOOK_CONTINUE;
+}
+
+void on_meter_draw_rupee_post(ModContext*, void*, void*, void*) {
+    restore_swapped_rupee();
+}
+
+}
+
+ModResult init_twilight_hd_compat(const HookService* hook_svc) {
+    if (hook_svc == nullptr) {
+        return MOD_ERROR;
+    }
+    const HookOptions beforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+    const HookOptions afterTwilightHd = twilight_hd_hook_order(kTwilightHdRunAfter);
+    if (mods::hook::add_post<TwilightHdRDedupePadReadHook>(hook_svc, on_pad_read_r_dedupe_post,
+                                                           &afterTwilightHd) != MOD_OK ||
+        mods::hook::add_pre<TwilightHdRupeeMeterDrawHook>(hook_svc, on_meter_draw_rupee_pre,
+                                                          &beforeTwilightHd) != MOD_OK ||
+        mods::hook::add_post<TwilightHdRupeeMeterDrawHook>(hook_svc, on_meter_draw_rupee_post,
+                                                           &afterTwilightHd) != MOD_OK)
+    {
+        return MOD_ERROR;
+    }
+    return MOD_OK;
+}
+
+void shutdown_twilight_hd_compat() {
+    restore_swapped_rupee();
 }

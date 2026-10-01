@@ -3332,6 +3332,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
     init_shade_shield_fix(svc_hook, error);
+    log_init_result("twilight_hd_compat", init_twilight_hd_compat(svc_hook) == MOD_OK);
 
     s_hpBarsInitialized = init_hp_bars(svc_hook, error) == MOD_OK;
     log_init_result("hp_bars", s_hpBarsInitialized);
@@ -3435,6 +3436,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("flurry_vignette", shutdown_flurry_vignette);
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
     run_shutdown_step("shade_shield_fix", shutdown_shade_shield_fix);
+    run_shutdown_step("twilight_hd_compat", shutdown_twilight_hd_compat);
     run_shutdown_step("hp_bars", shutdown_hp_bars);
     run_shutdown_step("boss_bar", shutdown_boss_bar);
     run_shutdown_step("boss_rush_gamemode", shutdown_boss_rush_gamemode);

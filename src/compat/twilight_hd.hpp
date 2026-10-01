@@ -17,6 +17,9 @@ bool twilight_hd_gauge_visible(dMeter2Draw_c* draw);
 bool twilight_hd_meter_frame_bounds(J2DScreen* screen, f32& left, f32& top, f32& right,
                                     f32& bottom);
 
+ModResult init_twilight_hd_compat(const HookService* hook_svc);
+void shutdown_twilight_hd_compat();
+
 constexpr int32_t kTwilightHdRunBefore = 100;
 constexpr int32_t kTwilightHdRunAfter = -100;
 
