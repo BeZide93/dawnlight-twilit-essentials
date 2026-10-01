@@ -1733,18 +1733,15 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "<p>Quick item access and input modifications.</p>", nullptr);
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
-    static const char* const kQuickAccessAppearances[] = { "Radial", "Item Bar (BotW-style)" };
     ui_add_toggle(left, "Enabled", s_varQuickAccess,
         "<p>Tap the Quick Access button to use the item assigned to it. Hold it to open the "
-        "item menu. The button can be changed in the Controls tab.</p>");
-    ui_add_select(left, "Appearance", s_varQuickAccessAppearance,
-        "<p><b>Radial</b>: vanilla item wheel look. <b>Item Bar</b>: horizontal bar at the top "
-        "of the screen, like in Breath of the Wild. Press X while the menu is open to "
-        "customize its items.</p>",
-        kQuickAccessAppearances, 2, is_quick_access_sub_disabled);
+        "item menu. The button can be changed in the Controls tab. The look of the menu can be "
+        "changed in the Customization tab.</p>");
     ui_add_toggle(left, "Hide items from item wheel", s_varQuickAccessHideWheelItems,
-        "<p>Hides your quick items from the normal item wheel. Disabling Quick Access "
-        "restores them.</p>",
+        "<p>Hides your quick items and bottles from the normal item wheel. Bottles stay "
+        "reachable on the Quick Access bottle page (L). Items equipped on X or Y stay "
+        "visible. Your inventory is never changed: turning this off, disabling Quick Access "
+        "or disabling the mod shows them again.</p>",
         is_quick_access_sub_disabled);
 
     return MOD_OK;
@@ -2034,7 +2031,7 @@ static ModResult customization_tab_update(ModContext*, void*, ModError*) {
 static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle left,
                                    UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
-        "<p>Customize the bars here</p>",
+        "<p>Customize the look of the bars and menus here.</p>",
         nullptr);
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina Bar");
@@ -2061,6 +2058,14 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
         "<p>Horizontal position of the boss bar as an offset.</p>");
     ui_add_number(left, "Y Offset", g_bossBarVars[1],
         "<p>Vertical position of the boss bar as an offset.</p>");
+
+    svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
+    static const char* const kQuickAccessAppearances[] = { "Radial", "Item Bar (BotW-style)" };
+    ui_add_select(left, "Appearance", s_varQuickAccessAppearance,
+        "<p><b>Radial</b>: vanilla item wheel look. <b>Item Bar</b>: horizontal bar at the top "
+        "of the screen, like in Breath of the Wild. Press X while the menu is open to "
+        "customize its items.</p>",
+        kQuickAccessAppearances, 2, is_quick_access_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Boss Rush Timer");
     ui_add_number(left, "X Offset", g_bossRushTimerPosVars[0],
@@ -3304,7 +3309,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("quick_access_bottles", init_quick_access_bottles(svc_hook, svc_save, mod_ctx, error) == MOD_OK);
     s_quickAccessInitialized = init_quick_access(svc_hook, svc_save, mod_ctx, error) == MOD_OK;
     log_init_result("quick_access", s_quickAccessInitialized);
-    log_init_result("quick_access_itemwheel", init_quick_access_itemwheel(svc_hook, error) == MOD_OK);
+    log_init_result("quick_access_itemwheel", init_quick_access_itemwheel(svc_hook, svc_save, mod_ctx, error) == MOD_OK);
     s_sheathedSpinInitialized = init_sheathed_spin(svc_hook) == MOD_OK;
     log_init_result("sheathed_spin", s_sheathedSpinInitialized);
     s_flurryRushInitialized = init_flurry_rush(svc_hook, svc_log, error) == MOD_OK;

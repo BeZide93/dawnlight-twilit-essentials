@@ -2,6 +2,7 @@
 
 #include "mods/svc/hook.hpp"
 
+#include "Z2AudioLib/Z2AudioMgr.h"
 #include "Z2AudioLib/Z2SeqMgr.h"
 
 bool g_configNoBattleMusic = true;
@@ -13,15 +14,21 @@ namespace {
 
 constexpr u8 kNoEnemyNear = 3;
 
+bool suppress_battle_music() {
+    if (!g_configNoBattleMusic) return false;
+    Z2AudioMgr* audio = Z2GetAudioMgr();
+    return audio == nullptr || !audio->isForceBattle();
+}
+
 HookAction on_set_battle_dist_state_pre(ModContext*, void* args, void*, void*) {
-    if (g_configNoBattleMusic && args != nullptr) {
+    if (args != nullptr && suppress_battle_music()) {
         mods::arg_ref<u8>(args, 1) = kNoEnemyNear;
     }
     return HOOK_CONTINUE;
 }
 
 HookAction on_start_battle_bgm_pre(ModContext*, void*, void*, void*) {
-    return g_configNoBattleMusic ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
+    return suppress_battle_music() ? HOOK_SKIP_ORIGINAL : HOOK_CONTINUE;
 }
 
 }

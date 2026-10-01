@@ -65,6 +65,7 @@ void qa_execute_item(u8 itemNo);
 bool qa_is_lantern_active();
 bool qa_load_boots_worn();
 bool qa_is_rod_item(u8 itemNo);
+bool qa_items_same_family(u8 a, u8 b);
 bool qa_get_item_icon(u8 itemNo, J2DPicture** outPic, ResTIMG** outImg, J2DPicture** outPic2 = nullptr);
 void qa_item_label(u8 itemNo, char* buf, size_t bufSize);
 
@@ -87,6 +88,7 @@ dSelect_cursor_c* qa_sel_cursor(int idx = 0);
 void qa_sel_cursor_destroy();
 
 bool itemwheel_filter_active();
+int itemwheel_full_lineup(u8 out[MAX_ITEM_SLOTS]);
 
 f32 qa_user_hud_scale();
 void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
@@ -133,6 +135,7 @@ u8 qa_bottle_item(int idx);
 bool qa_bottle_owned(int idx);
 int qa_bottle_assigned_slot();
 void qa_bottle_use(int idx);
+bool qa_bottle_use_item(u8 itemNo);
 
 bool quick_access_strip_cycle(int dir);
 void quick_access_strip_reset_selection();

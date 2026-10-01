@@ -161,7 +161,7 @@ u8 qa_custom_item(int idx) {
 }
 
 bool qa_custom_contains(u8 itemNo) {
-    for (int i = 0; i < qa_custom_count(); i++) {
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
         if (s_customItems[i] == itemNo) {
             return true;
         }
@@ -472,8 +472,11 @@ static bool items_same_family(u8 a, u8 b) {
     return false;
 }
 
+bool qa_items_same_family(u8 a, u8 b) {
+    return items_same_family(a, b);
+}
+
 bool qa_custom_contains_family(u8 itemNo) {
-    const int count = qa_custom_count();
     for (int i = 0; i < QA_QUICK_SLOTS; i++) {
         if (s_customItems[i] != QA_ITEM_NONE && items_same_family(s_customItems[i], itemNo)) {
             return true;
@@ -1607,7 +1610,7 @@ void qa_execute_item(u8 itemNo) {
     } else if (qa_is_rod_item(itemNo)) {
         qa_extinguish_lantern_for_item();
         execute_fishing_rod();
-    } else {
+    } else if (!qa_bottle_use_item(itemNo)) {
         qa_extinguish_lantern_for_item();
         execute_generic_item(itemNo);
     }

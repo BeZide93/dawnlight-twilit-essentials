@@ -386,6 +386,11 @@ bool is_item_get_proc() {
     }
 }
 
+bool is_gameplay_event_proc() {
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    return link != nullptr && link->mProcID == daAlink_c::PROC_MONKEY_MOVE;
+}
+
 bool is_item_get_event(dEvt_control_c* evt) {
     if (evt == nullptr || evt->mEventStatus != 1) return false;
     const int idx = static_cast<int>(evt->mOrderIdx);
@@ -447,6 +452,8 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
     if (allowDoors && is_chest_open_event(evt)) return true;
 
     if (is_item_get_proc() || is_item_get_event(evt)) return false;
+
+    if (is_gameplay_event_proc()) return false;
 
     if (allowDoors && human_warp_cinematic_active()) return true;
 

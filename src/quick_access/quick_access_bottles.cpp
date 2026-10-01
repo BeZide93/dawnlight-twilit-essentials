@@ -285,6 +285,16 @@ int qa_bottle_assigned_slot() {
     return s_assignedSlot < 4 ? static_cast<int>(s_assignedSlot) : -1;
 }
 
+bool qa_bottle_use_item(u8 itemNo) {
+    for (int i = 0; i < 4; i++) {
+        if (bottle_owned(i) && bottle_item(i) == itemNo) {
+            bottles_use_bottle(i);
+            return true;
+        }
+    }
+    return false;
+}
+
 void qa_bottle_use(int idx) {
     if (!bottle_owned(idx)) {
         bottles_play_error_se();

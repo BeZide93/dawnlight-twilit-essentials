@@ -105,12 +105,10 @@ void quick_access_edit_enter() {
 
     const dSv_player_item_c& inv = g_dComIfG_gameInfo.info.getPlayer().getItem();
 
-    for (int i = 0; i < MAX_ITEM_SLOTS; i++) {
-        u8 slot = inv.mItemSlots[i];
-        if (slot == 0xFF || slot >= 24) {
-            continue;
-        }
-        edit_list_add(inv.mItems[slot]);
+    u8 lineup[MAX_ITEM_SLOTS];
+    const int lineupCount = itemwheel_full_lineup(lineup);
+    for (int i = 0; i < lineupCount; i++) {
+        edit_list_add(inv.mItems[lineup[i]]);
     }
 
     for (int i = 0; i < QA_QUICK_SLOTS; i++) {
