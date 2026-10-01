@@ -971,7 +971,7 @@ static void strip_pointer_update() {
     }
 
     if (qa_side_page_active()) {
-        for (int t = 0; t < qa_side_slot_count(); t++) {
+        for (int t = 0; t < qa_side_strip_slot_count(); t++) {
             if (!pointer_hits_cell(qa_side_strip_slot_x(t, cx), QA_STRIP_BAR_Y, kQaPointerSlotHalf,
                                    kQaPointerSlotHalf, cx, 0.0f, scale)) {
                 continue;

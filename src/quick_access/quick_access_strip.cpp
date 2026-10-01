@@ -113,7 +113,7 @@ void quick_access_strip_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow) {
     const f32 slide = -(1.0f - s_menuAlpha) * 16.0f;
 
     const f32 totalSpan = (QA_QUICK_SLOTS - 1) * BOX_SPACING;
-    qa_draw_msg_window(centerX - 140.0f, 34.0f + slide, 280.0f, 52.0f, s_menuAlpha);
+    qa_draw_strip_window(centerX, 34.0f + slide, 140.0f);
 
     const f32 pageOffset = qa_page_anim_offset();
     const f32 pageAlphaRate = qa_page_anim_alpha();

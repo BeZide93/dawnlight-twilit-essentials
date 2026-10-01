@@ -474,6 +474,11 @@ int qa_side_slot_count() {
     return s_page == QA_PAGE_BOTTLES ? kBottleSlots : COLLECTION_TUNIC_COUNT;
 }
 
+int qa_side_strip_slot_count() {
+    if (s_page == QA_PAGE_BOTTLES) return kBottleSlots;
+    return collection_ordon_hero_enabled() ? COLLECTION_TUNIC_COUNT : COLLECTION_TUNIC_ORDON_HERO;
+}
+
 void qa_side_slot_center(int slot, f32 centerX, f32 centerY, f32* x, f32* y) {
     if (s_page == QA_PAGE_BOTTLES) {
         bottle_slot_pos(slot, centerX, centerY, x, y);
@@ -483,7 +488,7 @@ void qa_side_slot_center(int slot, f32 centerX, f32 centerY, f32* x, f32* y) {
 }
 
 f32 qa_side_strip_slot_x(int slot, f32 centerX) {
-    const int count = qa_side_slot_count();
+    const int count = qa_side_strip_slot_count();
     const f32 span = static_cast<f32>(count - 1) * QA_STRIP_BOX_SPACING;
     return centerX - span * 0.5f + static_cast<f32>(slot) * QA_STRIP_BOX_SPACING;
 }
@@ -555,7 +560,7 @@ void qa_side_select(f32 stickX, f32 stickY, f32 stickMag) {
 
 void qa_side_strip_cycle(int dir) {
     const bool bottles = s_page == QA_PAGE_BOTTLES;
-    const int count = qa_side_slot_count();
+    const int count = qa_side_strip_slot_count();
     int& selected = bottles ? s_bottleSelected : s_tunicSelected;
     int i = selected == SLOT_NONE ? (bottles ? assigned_or_first_bottle() : equipped_or_first_tunic())
                                   : selected;
@@ -570,10 +575,21 @@ void qa_side_strip_cycle(int dir) {
     }
 }
 
+static f32 s_stripWindowHalf = 140.0f;
+
+void qa_draw_strip_window(f32 centerX, f32 y, f32 targetHalf) {
+    if (s_menuAlpha < 0.05f) {
+        s_stripWindowHalf = targetHalf;
+    } else {
+        s_stripWindowHalf += (targetHalf - s_stripWindowHalf) * 0.28f;
+    }
+    qa_draw_msg_window(centerX - s_stripWindowHalf, y, s_stripWindowHalf * 2.0f, 52.0f, s_menuAlpha);
+}
+
 void qa_draw_page_buttons_strip(f32 centerX, f32 y, u8 alpha) {
     s_pageBtnValid[0] = false;
     s_pageBtnValid[1] = false;
-    const f32 edge = 148.0f;
+    const f32 edge = s_stripWindowHalf + 8.0f;
     const f32 btnY = y - kShoulderBtnH * 0.5f;
     if (s_page > QA_PAGE_BOTTLES) {
         const char* label = page_name(s_page - 1);
@@ -610,14 +626,16 @@ void quick_access_side_page_strip_draw(f32 screenW, f32 screenH, u8 alpha) {
     const f32 pageOffset = qa_page_anim_offset();
     alpha = static_cast<u8>(alpha * qa_page_anim_alpha());
 
-    qa_draw_msg_window(centerX - 140.0f, 34.0f + slide, 280.0f, 52.0f, s_menuAlpha);
+    qa_draw_strip_window(centerX, 34.0f + slide,
+                         !bottles && collection_ordon_hero_enabled() ? 170.0f : 140.0f);
 
+    const int count = qa_side_strip_slot_count();
     int& selected = bottles ? s_bottleSelected : s_tunicSelected;
-    if (selected == SLOT_NONE) {
+    if (selected == SLOT_NONE || selected >= count) {
         selected = bottles ? assigned_or_first_bottle() : equipped_or_first_tunic();
     }
 
-    for (int i = 0; i < qa_side_slot_count(); i++) {
+    for (int i = 0; i < count; i++) {
         const bool isSel = selected == i;
         f32& scale = bottles ? s_bottleScale[i] : s_tunicScale[i];
         scale += ((isSel ? 1.16f : 1.0f) - scale) * 0.28f;
