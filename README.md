@@ -47,10 +47,10 @@ The in-game settings window is organized into tabs.
 </p>
 
 ### Visuals
-* **Visible Equipment** — shows the Bow, Quiver, and Lantern on Link's model, with toggles and placement options.
+* **Visual Equipment** — shows the Bow, Quiver, and Lantern on Link's model, with toggles and placement options.
 
 <p align="center">
-  <img src="images/new/visual_equipment.png" alt="Visible Equipment" width="100%" />
+  <img src="images/new/visual_equipment.png" alt="Visual Equipment" width="100%" />
 </p>
 
 ### Quick Access

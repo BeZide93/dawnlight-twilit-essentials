@@ -1342,7 +1342,7 @@ static void on_open_visible_equip_dialog(ModContext* ctx, void*) {
     s_doneAction.keep_open = false;
 
     UiDialogDesc desc = UI_DIALOG_DESC_INIT;
-    desc.title = "Visible Equipment";
+    desc.title = "Visual Equipment";
     desc.body_rml = "Select which items to display on Link's model:";
     desc.variant = UI_DIALOG_NORMAL;
     desc.actions = &s_doneAction;
@@ -1696,7 +1696,7 @@ static ModResult tab_visuals(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>Visual customization options.</p>", nullptr);
 
-    svc_ui->pane_add_section(mod_ctx, left, "Visible Equipment");
+    svc_ui->pane_add_section(mod_ctx, left, "Visual Equipment");
     ui_add_toggle(left, "Enabled", s_varVisibleEquip,
         "<p>Shows the bow, quiver and lantern on Link.</p>");
     {
