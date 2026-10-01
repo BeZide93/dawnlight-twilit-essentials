@@ -25,25 +25,31 @@ MOD_DECLARE_SERVICE(InterpService, svc_interp, INTERP_SERVICE_ID, INTERP_SERVICE
 
 #include "SSystem/SComponent/c_xyz.h"
 
-inline void interp_record_pos(const void* key, const cXyz& pos) {
-    if (svc_interp == nullptr || mod_ctx == nullptr) return;
-    InterpMtx m = {
-        {1.0f, 0.0f, 0.0f, pos.x},
-        {0.0f, 1.0f, 0.0f, pos.y},
-        {0.0f, 0.0f, 1.0f, pos.z},
+struct InterpPos {
+    InterpMtx mtx = {
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
     };
-    svc_interp->record_mtx_keyed(mod_ctx, m, key);
-}
 
-inline bool interp_lookup_pos(const void* key, cXyz& out) {
-    if (svc_interp == nullptr) return false;
-    InterpMtx m;
-    if (!svc_interp->lookup_replacement_mtx(key, m)) return false;
-    out.set(m[0][3], m[1][3], m[2][3]);
-    return true;
-}
+    void record(const cXyz& pos) {
+        mtx[0][3] = pos.x;
+        mtx[1][3] = pos.y;
+        mtx[2][3] = pos.z;
+        if (svc_interp == nullptr || mod_ctx == nullptr) return;
+        svc_interp->record_mtx(mod_ctx, mtx);
+    }
 
-inline void interp_forget(const void* key) {
-    if (svc_interp == nullptr || mod_ctx == nullptr) return;
-    svc_interp->forget_mtx(mod_ctx, key);
-}
+    bool lookup(cXyz& out) const {
+        if (svc_interp == nullptr) return false;
+        InterpMtx m;
+        if (!svc_interp->lookup_replacement_mtx(&mtx, m)) return false;
+        out.set(m[0][3], m[1][3], m[2][3]);
+        return true;
+    }
+
+    void forget() const {
+        if (svc_interp == nullptr || mod_ctx == nullptr) return;
+        svc_interp->forget_mtx(mod_ctx, &mtx);
+    }
+};

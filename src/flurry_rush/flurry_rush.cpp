@@ -1,6 +1,5 @@
 #include "flurry_rush.hpp"
 #include "../general/fast_forward_cutscenes.hpp"
-#include "flurry_interp.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_b_tn.h"
@@ -40,6 +39,7 @@ constexpr f32 kFlurryApproachRange = 160.0f;
 constexpr f32 kFlurryApproachSpeed = 22.0f;
 constexpr int kLinkSlowTicks = 5;
 constexpr int kMinWindowTicks = 90;
+constexpr int kFinisherGraceTicks = 60;
 
 constexpr f32 kFlurryReachXZ = 260.0f;
 constexpr f32 kFlurryReachY = 200.0f;
@@ -101,6 +101,7 @@ f32 s_dealtPower = 0.0f;
 f32 s_bonusCarry = 0.0f;
 
 bool s_targetProven = false;
+bool s_finisherNeeded = false;
 Z2Creature* s_hitSound = nullptr;
 u32 s_hitSeId = 0;
 u32 s_hitMapInfo = kDefaultHitMapInfo;
@@ -169,6 +170,7 @@ void clear_rush_state() {
     s_dealtPower = 0.0f;
     s_bonusCarry = 0.0f;
     s_targetProven = false;
+    s_finisherNeeded = false;
     s_hitSound = nullptr;
     s_hitSeId = 0;
     s_hitMapInfo = kDefaultHitMapInfo;
@@ -303,6 +305,16 @@ int sword_hit_power(daAlink_c* link, int atp) {
     return power < 1 ? 1 : power;
 }
 
+bool finish_downed_target(fopAc_ac_c* target) {
+    if (target == nullptr || target->health <= 0 || target->health > 1) return false;
+    if (fopAcM_GetGroup(target) != fopAc_ENEMY_e) return false;
+    auto* enemy = static_cast<fopEn_enemy_c*>(target);
+    if (!enemy->checkDownFlg()) return false;
+    enemy->onCutDownHitFlg();
+    s_finisherNeeded = false;
+    return true;
+}
+
 void apply_bonus_hit(int atp) {
     auto* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
     fopAc_ac_c* target = rush_target(link);
@@ -319,8 +331,10 @@ void apply_bonus_hit(int atp) {
     s_bonusCarry -= static_cast<f32>(damage);
 
     const s16 before = target->health;
-    const int after = before - damage < 1 ? 1 : before - damage;
+    int after = before - damage;
+    if (after < 1) after = 1;
     target->health = static_cast<s16>(after);
+    if (before - damage < 1) s_finisherNeeded = !finish_downed_target(target);
 
     cXyz pos = target->eyePos;
     dComIfGp_setHitMark(1, target, &pos, nullptr, nullptr, 0);
@@ -525,6 +539,7 @@ static void on_at_check_post(ModContext*, void* args, void*, void*) {
     ++s_hitCount;
     if (isTarget) {
         s_targetProven = true;
+        s_finisherNeeded = false;
         if (info->mpSound != nullptr && info->mpCollider != nullptr) {
             s_hitSound = info->mpSound;
             s_hitSeId = dCcD_GObjInf::getHitSeID(
@@ -548,7 +563,7 @@ static HookAction on_link_execute_pre(ModContext*, void* args, void*, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link != nullptr) clear_cut_recovery(link);
     if (s_reentering) return HOOK_CONTINUE;
-    if (s_swingCount >= g_configFlurryRushHits) {
+    if (s_swingCount >= g_configFlurryRushHits && !s_finisherNeeded) {
         interface_of_controller_pad& capPad = mDoCPd_c::getCpadInfo(PAD_1);
         capPad.mPressedButtonFlags &= ~PAD_BUTTON_B;
         capPad.mButtonFlags &= ~PAD_BUTTON_B;
@@ -843,7 +858,6 @@ static HookAction on_king_bulblin_damage_check_pre(ModContext*, void* args, void
 
 void install_hooks() {
     if (s_hooksInstalled || s_hookSvc == nullptr) return;
-    flurry_interp_install(s_hookSvc);
     mods::hook::add_post<FlurryRushSideStepInitHook>(s_hookSvc, on_sidestep_init_post);
     mods::hook::add_pre<FlurryRushDamageActionHook>(s_hookSvc, on_check_damage_action_pre);
     mods::hook::add_pre<FlurryRushSetDamagePointHook>(s_hookSvc, on_set_damage_point_pre);
@@ -901,8 +915,6 @@ ModResult init_flurry_rush(const HookService* hook_svc, const LogService*, ModEr
         s_frameInterpVar = getConfigVar("game.enableFrameInterpolation");
     }
 
-    flurry_interp_resolve(hook_svc);
-
     flurry_rush_apply_enabled();
     return MOD_OK;
 }
@@ -945,6 +957,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
             end_rush("target gone");
             return;
         }
+        if (s_finisherNeeded) finish_downed_target(target);
         if (player != nullptr) {
             const f32 dist = (target->current.pos - player->current.pos).absXZ();
             if (s_rushStartDist < 0.0f) {
@@ -974,7 +987,9 @@ void update_flurry_rush(const LogService*, ModContext*) {
             }
         }
 
-        if (s_swingCount >= g_configFlurryRushHits && (!s_swingOpen || s_swingLanded)) {
+        if (s_swingCount >= g_configFlurryRushHits && (!s_swingOpen || s_swingLanded) &&
+            s_pendingBonus == 0 && !s_finisherNeeded)
+        {
             end_rush("flurry complete");
             return;
         }
@@ -995,6 +1010,7 @@ void update_flurry_rush(const LogService*, ModContext*) {
         if (capTicks < kMinWindowTicks) {
             capTicks = kMinWindowTicks;
         }
+        if (s_finisherNeeded) capTicks += kFinisherGraceTicks;
         shouldEnd = link == nullptr || link->checkEventRun() ||
                 dComIfGp_isPauseFlag() != 0 ||
                 is_damage_proc(static_cast<u16>(link->mProcID)) ||

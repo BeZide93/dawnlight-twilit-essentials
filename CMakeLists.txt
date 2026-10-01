@@ -89,7 +89,6 @@ add_mod(twilit_essentials
             src/quick_access/quick_access_tunics.cpp
             src/sheathed_spin/sheathed_spin.cpp
             src/flurry_rush/flurry_rush.cpp
-            src/flurry_rush/flurry_interp.cpp
             src/flurry_rush/flurry_vignette.cpp
             src/puppet_zelda_pattern/puppet_zelda_pattern.cpp
             src/stamina/stamina.cpp

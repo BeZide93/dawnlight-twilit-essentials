@@ -60,13 +60,14 @@ struct DamagePopup {
     int currentFrame;
     int maxFrames;
     bool isCritical;
+    InterpPos interp;
 };
 
 static std::unordered_map<fpc_ProcID, s16> s_lastHealthMap;
 static std::list<DamagePopup> s_damagePopups;
 
 static void clear_damage_popups() {
-    for (const auto& popup : s_damagePopups) interp_forget(&popup);
+    for (const auto& popup : s_damagePopups) popup.interp.forget();
     s_damagePopups.clear();
 }
 
@@ -450,7 +451,7 @@ void update_hp_bars(const LogService*, ModContext*) {
         it->velY *= 0.90f;
 
         if (it->currentFrame >= it->maxFrames) {
-            interp_forget(&*it);
+            it->interp.forget();
             it = s_damagePopups.erase(it);
         } else {
             ++it;
@@ -459,7 +460,7 @@ void update_hp_bars(const LogService*, ModContext*) {
 }
 
 static void on_popup_alink_execute_post(ModContext*, void*, void*, void*) {
-    for (const auto& popup : s_damagePopups) interp_record_pos(&popup, popup.worldPos);
+    for (auto& popup : s_damagePopups) popup.interp.record(popup.worldPos);
 }
 
 static void draw_damage_popups() {
@@ -471,7 +472,7 @@ static void draw_damage_popups() {
 
     for (const auto& popup : s_damagePopups) {
         cXyz pos = popup.worldPos;
-        interp_lookup_pos(&popup, pos);
+        popup.interp.lookup(pos);
         Vec screenPos;
         mDoLib_project(&pos, &screenPos);
 

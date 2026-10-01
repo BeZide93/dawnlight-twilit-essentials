@@ -35,7 +35,7 @@ static constexpr f32 kWheelScreenMargin = 6.0f;
 static constexpr f32 kWheelTeleportDist = 250.0f;
 static constexpr f32 kTwoPi = 6.2831853f;
 
-static char s_wheelAnchorKey = 0;
+static InterpPos s_wheelAnchor;
 
 static bool wheel_anchor_world(cXyz& out) {
     daPy_py_c* player = daPy_getLinkPlayerActorClass();
@@ -47,7 +47,7 @@ static bool wheel_anchor_world(cXyz& out) {
 
 static void on_wheel_alink_execute_post(ModContext*, void*, void*, void*) {
     cXyz anchor;
-    if (wheel_anchor_world(anchor)) interp_record_pos(&s_wheelAnchorKey, anchor);
+    if (wheel_anchor_world(anchor)) s_wheelAnchor.record(anchor);
 }
 
 struct WheelRing {
@@ -123,7 +123,7 @@ static bool wheel_link_screen_pos(f32& sx, f32& sy, f32& side) {
     if (!wheel_anchor_world(live) || view == nullptr) return false;
     cXyz pos = live;
     cXyz smooth;
-    if (interp_lookup_pos(&s_wheelAnchorKey, smooth) &&
+    if (s_wheelAnchor.lookup(smooth) &&
         smooth.abs2(live) < kWheelTeleportDist * kWheelTeleportDist) {
         pos = smooth;
     }
@@ -220,5 +220,5 @@ void stamina_radial_init(const HookService* hook_svc) {
 }
 
 void stamina_radial_shutdown() {
-    interp_forget(&s_wheelAnchorKey);
+    s_wheelAnchor.forget();
 }
