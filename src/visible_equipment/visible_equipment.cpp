@@ -12,6 +12,7 @@
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JKernel/JKRDvdRipper.h"
 #include "JSystem/JKernel/JKRHeap.h"
+#include "SSystem/SComponent/c_counter.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
 #include "d/d_com_inf_game.h"
@@ -93,6 +94,11 @@ static fpc_ProcID currentPlayerId() {
 
 DEFINE_HOOK(&daAlink_c::draw, AlinkDrawHook);
 DEFINE_HOOK(&daAlink_c::statusWindowDraw, AlinkStatusWindowDrawHook);
+DEFINE_HOOK(&daAlink_c::setItemMatrix, AlinkSetItemMatrixHook);
+
+static bool s_itemMatrixHookOk = false;
+static bool s_lanternBeltPosed = false;
+static u32 s_lanternBeltPoseTick = 0;
 
 static bool s_inStatusWindow = false;
 
@@ -1132,26 +1138,31 @@ static void sync_gear_to_warp(daAlink_c *alink, bool wantBow, bool wantQuiver,
   gear_warp_step(s_lanternWarp, wantLantern, isMetamorphose);
 }
 
-static void renderLantern(daAlink_c *alink) {
+static bool canShowBeltLantern(daAlink_c *alink) {
   if (alink == nullptr || s_lanternWarp.scale <= 0.001f) {
-    return;
+    return false;
   }
 
   if (alink->checkNoResetFlg2(static_cast<daPy_py_c::daPy_FLG2>(0x1)) ||
       alink->checkNoResetFlg2(static_cast<daPy_py_c::daPy_FLG2>(0x20000)) ||
       alink->mEquipItem == dItemNo_KANTERA_e) {
-    return;
+    return false;
   }
 
   if (alink->getClothesChangeWaitTimer() != 0) {
-    return;
+    return false;
   }
 
+  return alink->mpKanteraModel != nullptr;
+}
+
+static bool isLanternBeltPoseFresh() {
+  return s_itemMatrixHookOk && s_lanternBeltPosed &&
+         g_Counter.mCounter0 - s_lanternBeltPoseTick <= 1;
+}
+
+static bool poseLanternOnBelt(daAlink_c *alink) {
   J3DModel *model = alink->mpKanteraModel;
-  if (model == nullptr) {
-    return;
-  }
-
   J3DModelData *modelData = (alink->mpLinkModel != nullptr) ? alink->mpLinkModel->getModelData() : nullptr;
   MtxP beltMtx = (modelData != nullptr && modelData->getJointNum() > 0x10)
                      ? alink->mpLinkModel->getAnmMtx(0x10)
@@ -1163,7 +1174,7 @@ static void renderLantern(daAlink_c *alink) {
   } else if (s_hasLastLanternBeltMtx) {
     mDoMtx_stack_c::copy(s_lastLanternBeltMtx);
   } else {
-    return;
+    return false;
   }
 
   const f32 lanternY =
@@ -1181,11 +1192,58 @@ static void renderLantern(daAlink_c *alink) {
   }
 
   model->calc();
+  return true;
+}
+
+static void renderLantern(daAlink_c *alink) {
+  if (!canShowBeltLantern(alink)) {
+    return;
+  }
+
+  J3DModel *model = alink->mpKanteraModel;
+  const bool tickPosed = !s_inStatusWindow && isLanternBeltPoseFresh();
+  if (!tickPosed && !poseLanternOnBelt(alink)) {
+    return;
+  }
 
   g_env_light.settingTevStruct_colget_player(&alink->tevStr);
   g_env_light.setLightTevColorType_MAJI(model, &alink->tevStr);
-  mDoExt_modelUpdateDL(model);
+  if (tickPosed) {
+    mDoExt_modelEntryDL(model);
+  } else {
+    mDoExt_modelUpdateDL(model);
+  }
   addModelShadow(alink, model);
+}
+
+static bool isTitleOrMainMenu();
+
+static void on_alink_set_item_matrix_post_impl(void *args) {
+  daAlink_c *alink = mods::arg<daAlink_c *>(args, 0);
+  if (mods::arg<int>(args, 1) != 0 || alink == nullptr ||
+      alink != static_cast<daAlink_c *>(dComIfGp_getPlayer(0))) {
+    return;
+  }
+
+  s_lanternBeltPosed = false;
+  if (!g_configVisibleEquipmentEnabled || !g_configVisibleEquipShowLantern || isTitleOrMainMenu() ||
+      !checkShouldShowLantern()) {
+    return;
+  }
+  if (!canShowBeltLantern(alink) || alink->checkEndResetFlg1(daPy_py_c::ERFLG1_UNK_4)) {
+    return;
+  }
+  if (poseLanternOnBelt(alink)) {
+    s_lanternBeltPosed = true;
+    s_lanternBeltPoseTick = g_Counter.mCounter0;
+  }
+}
+
+static void on_alink_set_item_matrix_post(ModContext *, void *args, void *, void *) {
+  VE_SEH_TRY {
+    on_alink_set_item_matrix_post_impl(args);
+  } VE_SEH_EXCEPT {
+  }
 }
 
 static void renderBow(daAlink_c *alink, bool shouldShowEquipment,
@@ -1575,6 +1633,8 @@ ModResult init_visible_equipment(const HookService *hook_svc, ModError *) {
 
   if (hook_svc) {
     mods::hook::add_post<AlinkDrawHook>(hook_svc, on_alink_draw_post);
+    s_itemMatrixHookOk =
+        mods::hook::add_post<AlinkSetItemMatrixHook>(hook_svc, on_alink_set_item_matrix_post) == MOD_OK;
     mods::hook::add_post<AlinkStatusWindowDrawHook>(
         hook_svc, on_alink_status_window_draw_post);
   }
@@ -1665,6 +1725,8 @@ void shutdown_visible_equipment() {
   }
   s_lanternWarpModel = nullptr;
   s_lanternWarpTexMtx = nullptr;
+  s_lanternBeltPosed = false;
+  s_itemMatrixHookOk = false;
   s_lanternWarpOwnerId = fpcM_ERROR_PROCESS_ID_e;
   for (int i = 0; i < 8; ++i) {
     s_vanillaTevBlocks[i] = nullptr;
