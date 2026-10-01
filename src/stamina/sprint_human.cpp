@@ -43,6 +43,11 @@ static bool in_front_roll(const daAlink_c* link) {
            proc == daAlink_c::PROC_FRONT_ROLL_SUCCESS;
 }
 
+static bool sprint_ride_blocked(daAlink_c* link) {
+    return link->checkHorseRide() || link->checkBoardRide() || link->checkCanoeRide() ||
+           link->checkSpinnerRide();
+}
+
 DEFINE_HOOK(&daAlink_c::setDoubleAnime, SprintHumanRunAnm);
 
 static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
@@ -52,7 +57,7 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
     }
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
 
-    if (link != nullptr && link->checkHorseRide()) {
+    if (link != nullptr && sprint_ride_blocked(link)) {
         s_sprintLatched = false;
         return HOOK_CONTINUE;
     }
@@ -222,7 +227,7 @@ void update_sprint_human() {
         s_holdFrames = 0;
     }
 
-    if (s_sprintLatched && link != nullptr && !link->checkHorseRide()) {
+    if (s_sprintLatched && link != nullptr && !sprint_ride_blocked(link)) {
         update_sprint_wind_effect(link);
     } else {
         stop_sprint_wind_effect();
@@ -236,7 +241,7 @@ static void sprint_pad_read_post(ModContext*, void*, void*, void*) {
 
     {
         daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
-        if (link != nullptr && link->checkHorseRide()) {
+        if (link != nullptr && sprint_ride_blocked(link)) {
             return;
         }
     }
@@ -263,7 +268,8 @@ static HookAction sprint_jump_attack_pre(ModContext*, void* args, void* retval, 
     }
 
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
-    if (link == nullptr || link->mEquipItem == 0x103 || link->checkEquipAnime()) {
+    if (link == nullptr || sprint_ride_blocked(link) || link->mEquipItem == 0x103 ||
+        link->checkEquipAnime()) {
         return HOOK_CONTINUE;
     }
 
@@ -298,7 +304,7 @@ static HookAction sprint_auto_jump_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
-    if (link == nullptr || link->checkHorseRide()) {
+    if (link == nullptr || sprint_ride_blocked(link)) {
         return HOOK_CONTINUE;
     }
     s_sprintJumpBoost = true;
