@@ -6,6 +6,7 @@
 #include "../z_button/z_button.hpp"
 #include "../z_button/z_mobile.hpp"
 #include "../controls/controls.hpp"
+#include "../general/human_warp.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_graphic.h"
@@ -2742,7 +2743,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     u8 windowStatus = dMeter2Info_getWindowStatus();
     bool isMenuOrPause = (windowStatus != 0) || dComIfGp_isPauseFlag() || dScnPly_c::isPause()
                          || dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag()
-                         || dMsgObject_isTalkNowCheck();
+                         || dMsgObject_isTalkNowCheck() || human_warp_blocks_menus();
 
     if (isMenuOrPause) {
         if (s_aimItem != QA_ITEM_NONE) {

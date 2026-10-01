@@ -16,3 +16,4 @@ void human_warp_cinematic_end();
 
 void human_warp_arm_arrival_replay();
 bool human_warp_cinematic_active();
+bool human_warp_blocks_menus();

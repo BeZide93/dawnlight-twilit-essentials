@@ -6,6 +6,7 @@
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
+#include "d/d_menu_window.h"
 #include "d/d_particle_name.h"
 #include "JSystem/JParticle/JPAEmitter.h"
 #include "d/d_s_play.h"
@@ -29,6 +30,7 @@ DEFINE_HOOK(&daAlink_c::procCoMetamorphoseOnlyInit, HumanWarpMetamorphoseOnlyBlo
 DEFINE_HOOK(&daAlink_c::setArcName, HumanWarpSetArcNameHook);
 DEFINE_HOOK(&daAlink_c::procCoWarpInit, HumanWarpObjectArrivalHook);
 DEFINE_HOOK(&daAlink_c::procCoWarp, HumanWarpObjectArrivalProcHook);
+DEFINE_HOOK(&dMw_c::key_wait_proc, HumanWarpMenuKeyWaitHook);
 
 static bool s_objectWarpHumanHold = false;
 static bool s_objectWarpStarted = false;
@@ -238,6 +240,20 @@ static void human_warp_set_hit_enabled(bool i_enabled) {
     }
 
     s_humanWarpHitsDisabled = !i_enabled;
+}
+
+bool human_warp_blocks_menus() {
+    return s_humanWarpInFlight || s_humanWarpArrivalPending || s_cineDeparture ||
+           s_cineArrival || (s_objectWarpHumanHold && s_objectWarpStarted);
+}
+
+static HookAction on_human_warp_menu_key_wait_pre(ModContext*, void* args, void*, void*) {
+    if (!human_warp_blocks_menus()) return HOOK_CONTINUE;
+    dMw_c* mw = mods::arg<dMw_c*>(args, 0);
+    if (mw != nullptr) {
+        mw->field_0x14B = 0;
+    }
+    return HOOK_SKIP_ORIGINAL;
 }
 
 static void on_pad_read_post(ModContext*, void*, void*, void*) {
@@ -584,6 +600,7 @@ ModResult init_human_warp(const HookService* hook_svc, ModError*) {
                                                         on_human_warp_object_arrival_proc_pre);
     mods::hook::add_post<GeneralHumanWarpPadReadHook>(hook_svc, on_pad_read_post);
     mods::hook::add_post<GeneralHumanWarpCameraRunHook>(hook_svc, on_camera_run_post);
+    mods::hook::add_pre<HumanWarpMenuKeyWaitHook>(hook_svc, on_human_warp_menu_key_wait_pre);
     return MOD_OK;
 }
 
