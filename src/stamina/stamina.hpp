@@ -17,6 +17,7 @@ extern int  g_configStaminaRegen;
 extern int  g_configStaminaRegenDelay;
 extern int  g_configStaminaExhaustRecover;
 extern bool g_configStaminaSlowHangRegen;
+extern bool g_configStaminaRefillOnStageChange;
 
 extern float g_configStaminaBarX;
 extern float g_configStaminaBarY;
@@ -62,6 +63,7 @@ extern int g_configStaminaCostSprint;
 extern int g_configStaminaCostWolfSprint;
 extern int g_configStaminaCostSwimSprint;
 extern int g_configStaminaCostHiddenSkills;
+extern int g_configStaminaCostSpinCharge;
 
 ModResult init_stamina(const HookService* hook_svc, ModError* error);
 void update_stamina(const LogService* log_svc, ModContext* mod_ctx);

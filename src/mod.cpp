@@ -43,7 +43,7 @@
 #include "collection_menu/collection_menu.hpp"
 #include "collection_menu/collection_menu_shield.hpp"
 #include "controls/controls.hpp"
-#include "bug-report.hpp"
+#include "bug_report.hpp"
 #include "util.hpp"
 #include "compat/twilight_hd.hpp"
 
@@ -344,7 +344,7 @@ static void on_free_cam_pad_read_post(ModContext*, void*, void*, void*) {
     const u16 held = static_cast<u16>(pad.mButtonFlags);
     const u16 trig = static_cast<u16>(pad.mPressedButtonFlags);
     const bool combo = (held & PAD_TRIGGER_L) != 0 && (trig & PAD_BUTTON_A) != 0
-                       && !quick_access_bottles_hotkey_active()
+                       && !quick_access_owns_l()
                        && (s_freeCamToggleActive || !free_cam_combo_is_gameplay_input());
 
     if (combo) {
@@ -472,7 +472,6 @@ static ConfigVarHandle s_varCustomZButton = 0;
 static ConfigVarHandle s_varQuickAccess = 0;
 static ConfigVarHandle s_varQuickAccessAppearance = 0;
 static ConfigVarHandle s_varQuickAccessHideWheelItems = 0;
-static ConfigVarHandle s_varBottlesQuickAccess = 0;
 static ConfigVarHandle s_varSheathedSpin = 0;
 static ConfigVarHandle s_varFlurryRush = 0;
 static ConfigVarHandle s_varFlurryRushPerfectFrames = 0;
@@ -484,6 +483,7 @@ static ConfigVarHandle s_varStaminaRegen = 0;
 static ConfigVarHandle s_varStaminaRegenDelay = 0;
 static ConfigVarHandle s_varStaminaExhaustRecover = 0;
 static ConfigVarHandle s_varStaminaSlowHangRegen = 0;
+static ConfigVarHandle s_varStaminaRefillOnStageChange = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
 static ConfigVarHandle s_varStaminaSrcRolls = 0;
@@ -516,6 +516,7 @@ static ConfigVarHandle s_varStaminaCostSprint = 0;
 static ConfigVarHandle s_varStaminaCostWolfSprint = 0;
 static ConfigVarHandle s_varStaminaCostSwimSprint = 0;
 static ConfigVarHandle s_varStaminaCostHiddenSkills = 0;
+static ConfigVarHandle s_varStaminaCostSpinCharge = 0;
 static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
@@ -742,13 +743,6 @@ static void on_quick_access_hide_wheel_items_changed(ModContext* mod_ctx, Config
     quick_access_itemwheel_refresh();
 }
 
-static void on_bottles_quick_access_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
-    if (value) {
-        g_configBottlesQuickAccessEnabled = value->bool_value;
-    }
-    quick_access_itemwheel_refresh();
-}
-
 static void on_sheathed_spin_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configSheathedSpinEnabled = value->bool_value;
@@ -828,6 +822,12 @@ static void on_stamina_exhaust_recover_changed(ModContext*, ConfigVarHandle, con
 static void on_stamina_slow_hang_regen_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configStaminaSlowHangRegen = value->bool_value;
+    }
+}
+
+static void on_stamina_refill_on_stage_change_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configStaminaRefillOnStageChange = value->bool_value;
     }
 }
 
@@ -1122,6 +1122,38 @@ static bool is_quick_access_sub_disabled(ModContext*, void*) {
     return !g_configQuickAccessEnabled;
 }
 
+static void quick_access_button_get(ModContext*, void*, UiControlValue* out_value) {
+    if (out_value != nullptr) {
+        out_value->int_value = controls_quick_access_option();
+    }
+}
+
+static void quick_access_button_set(ModContext*, void*, const UiControlValue* value) {
+    if (value != nullptr) {
+        controls_set_quick_access_option(static_cast<int>(value->int_value));
+    }
+}
+
+static void sprint_button_get(ModContext*, void*, UiControlValue* out_value) {
+    if (out_value != nullptr) {
+        out_value->int_value = controls_sprint_option();
+    }
+}
+
+static void sprint_button_set(ModContext*, void*, const UiControlValue* value) {
+    if (value != nullptr) {
+        controls_set_sprint_option(static_cast<int>(value->int_value));
+    }
+}
+
+static bool is_sprint_button_modified(ModContext*, void*) {
+    return controls_sprint_option() != CTRL_SPRINT_A;
+}
+
+static bool is_quick_access_button_modified(ModContext*, void*) {
+    return controls_quick_access_option() != controls_quick_access_default_option();
+}
+
 static bool is_epona_sub_disabled(ModContext*, void*) {
     return !g_configEponaEnabled;
 }
@@ -1270,6 +1302,10 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
     stamina_dialog_number(ctx, pane, "Swim sprint",
         "<p>Swim sprint (hold the roll button) drain per frame (default: 0.85).</p>",
         s_varStaminaCostSwimSprint);
+    stamina_dialog_number(ctx, pane, "Spin attack charge",
+        "<p>Drain per frame while holding a spin attack charge. Running out while charging "
+        "drops the charge (default: 10%).</p>",
+        s_varStaminaCostSpinCharge);
     return MOD_OK;
 }
 
@@ -1508,8 +1544,9 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Exhaustion recovery";
         c.help_rml = "<p>When stamina runs out, Link is exhausted: no attacks, rolls or "
-            "sprinting until stamina has refilled to this percentage of the main (center) "
-            "stamina wheel (default: 35%).</p>";
+            "sprinting until stamina has refilled to this percentage of the stamina bar. "
+            "With the BotW Wheel style it is a percentage of the main (center) wheel "
+            "(default: 35%).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varStaminaExhaustRecover;
         c.is_disabled = is_stamina_sub_disabled;
@@ -1523,6 +1560,10 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         "<p>While hanging still on ivy or on a ledge, stamina recovers very slowly "
         "(about a seventh of the normal rate) instead of staying frozen. Moving or "
         "climbing on the wall still drains stamina.</p>", is_stamina_sub_disabled);
+    ui_add_toggle(left, "Restore stamina on stage change", s_varStaminaRefillOnStageChange,
+        "<p>Refills stamina whenever you go through a loading zone, door to another area or "
+        "warp. When off, stamina carries over to the next area as it is.</p>",
+        is_stamina_sub_disabled);
     svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
     ui_add_toggle(left, "Sprint (hold roll button)", s_varStaminaSprint,
         "<p>Hold the roll button while running to sprint.</p>");
@@ -1698,16 +1739,9 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "customize its items.</p>",
         kQuickAccessAppearances, 2, is_quick_access_sub_disabled);
     ui_add_toggle(left, "Hide items from item wheel", s_varQuickAccessHideWheelItems,
-        "<p>Hides your quick items from the normal item wheel. While Bottle Quick Access "
-        "is on, your bottles (and their contents) are hidden from the wheel as well. "
-        "Disabling Quick Access restores them.</p>",
+        "<p>Hides your quick items from the normal item wheel. Disabling Quick Access "
+        "restores them.</p>",
         is_quick_access_sub_disabled);
-
-    svc_ui->pane_add_section(mod_ctx, left, "Bottle Quick Access");
-    ui_add_toggle(left, "Bottle quick access", s_varBottlesQuickAccess,
-        "<p>Your four bottles in their own menu. Tap the bottle button to use the selected "
-        "bottle, hold it to open the menu. Note: while bound to L, L no longer triggers "
-        "targeting/shield. The button can be changed in the Controls tab.</p>");
 
     return MOD_OK;
 }
@@ -1934,29 +1968,54 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     if (twilight_hd_dpad_shortcuts()) {
         svc_ui->pane_add_rml(mod_ctx, left,
             "<span style=\"color: #a8bcd4;\">Twilight HD's D-Pad Shortcuts use the D-Pad. "
-            "A binding on a D-Pad direction takes priority over Twilight HD's shortcut on "
-            "that direction.</span>", nullptr);
+            "While Quick Access is enabled, D-Pad Right shows or hides the minimap, D-Pad Left "
+            "opens Collection/Save and D-Pad Down is free for Quick Access. D-Pad Up stays "
+            "Twilight HD's map shortcut.</span>",
+            nullptr);
     }
 
     svc_ui->pane_add_section(mod_ctx, left, "Midna");
     ui_add_select(left, "Midna button", g_controlsMidnaVar,
-        "<p>Button that calls Midna while the Z-Button is enabled. <b>D-Pad Left</b> is the "
-        "default. <b>L</b> uses the left shoulder button (L1 / LB) of the controller; Midna is "
-        "then shown top left on a mirrored Z button and D-Pad Left does nothing.</p>",
+        "<p>Button that calls Midna while the Z-Button is enabled. <b>L</b> is the default and "
+        "uses the left shoulder button (L1 / LB) of the controller; Midna is then shown top left "
+        "on a mirrored Z button and D-Pad Left toggles the minimap. <b>D-Pad Left</b> calls "
+        "Midna from the D-Pad instead. "
+        "<b>R + D-Pad Right</b> shows or hides the minimap in both modes.</p>",
         kControlsMidnaLabels, CTRL_MIDNA_COUNT, is_controls_midna_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
-    ui_add_select(left, "Quick Access button", g_controlsVars[CTRL_BIND_QUICK_ACCESS],
-        "<p>Tap to use your quick item, hold to open the Quick Access menu.</p>",
-        kControlsButtonLabels, CTRL_BTN_COUNT, is_quick_access_sub_disabled);
+    {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_SELECT;
+        c.label = "Quick Access button";
+        c.help_rml = "<p>Tap to use your quick item, hold to open the Quick Access menu. "
+                     "L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>";
+        c.binding = UI_BINDING_CALLBACKS;
+        c.get = quick_access_button_get;
+        c.set = quick_access_button_set;
+        c.is_modified = is_quick_access_button_modified;
+        c.options = kControlsQuickAccessLabels;
+        c.option_count = CTRL_QA_OPTION_COUNT;
+        c.is_disabled = is_quick_access_sub_disabled;
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina");
-    ui_add_select(left, "Sprint button", g_controlsVars[CTRL_BIND_SPRINT],
-        "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while swimming. "
-        "Note: L3/R3 are the stick clicks, L2/R2 the analog triggers. <b>L1 / LB</b> and "
-        "<b>R1 / RB</b> read the shoulder buttons directly, so they also work when that button "
-        "is unbound in Dusklight's controller settings.</p>",
-        kControlsButtonLabels, CTRL_BTN_COUNT, is_controls_sprint_disabled);
+    {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_SELECT;
+        c.label = "Sprint button";
+        c.help_rml = "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while "
+                     "swimming. L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>";
+        c.binding = UI_BINDING_CALLBACKS;
+        c.get = sprint_button_get;
+        c.set = sprint_button_set;
+        c.is_modified = is_sprint_button_modified;
+        c.options = kControlsSprintLabels;
+        c.option_count = CTRL_SPRINT_OPTION_COUNT;
+        c.is_disabled = is_controls_sprint_disabled;
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
 
     return MOD_OK;
 }
@@ -2614,15 +2673,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varQuickAccessHideWheelItems, on_quick_access_hide_wheel_items_changed, nullptr, nullptr);
         }
 
-        ConfigVarDesc descBottlesQuickAccess = CONFIG_VAR_DESC_INIT;
-        descBottlesQuickAccess.name = "bottlesQuickAccessEnabled";
-        descBottlesQuickAccess.type = CONFIG_VAR_BOOL;
-        descBottlesQuickAccess.default_bool = false;
-        if (svc_config->register_var(mod_ctx, &descBottlesQuickAccess, &s_varBottlesQuickAccess) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varBottlesQuickAccess, &g_configBottlesQuickAccessEnabled);
-            svc_config->subscribe(mod_ctx, s_varBottlesQuickAccess, on_bottles_quick_access_changed, nullptr, nullptr);
-        }
-
         ConfigVarDesc descSpin = CONFIG_VAR_DESC_INIT;
         descSpin.name = "sheathedSpinEnabled";
         descSpin.type = CONFIG_VAR_BOOL;
@@ -2734,6 +2784,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descStaminaSlowHangRegen, &s_varStaminaSlowHangRegen) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaSlowHangRegen, &g_configStaminaSlowHangRegen);
             svc_config->subscribe(mod_ctx, s_varStaminaSlowHangRegen, on_stamina_slow_hang_regen_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaRefillOnStageChange = CONFIG_VAR_DESC_INIT;
+        descStaminaRefillOnStageChange.name = "staminaRefillOnStageChange";
+        descStaminaRefillOnStageChange.type = CONFIG_VAR_BOOL;
+        descStaminaRefillOnStageChange.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descStaminaRefillOnStageChange, &s_varStaminaRefillOnStageChange) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaRefillOnStageChange, &g_configStaminaRefillOnStageChange);
+            svc_config->subscribe(mod_ctx, s_varStaminaRefillOnStageChange, on_stamina_refill_on_stage_change_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStaminaSprint = CONFIG_VAR_DESC_INIT;
@@ -2851,6 +2910,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostWolfSprint", &s_varStaminaCostWolfSprint, &g_configStaminaCostWolfSprint,  10 },
             { "staminaCostSwimSprint", &s_varStaminaCostSwimSprint, &g_configStaminaCostSwimSprint,  10 },
             { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills, 100 },
+            { "staminaCostSpinCharge", &s_varStaminaCostSpinCharge, &g_configStaminaCostSpinCharge, 10 },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -3135,6 +3195,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     if (s_bossRushPortalInitialized) update_boss_rush_portal(svc_log, mod_ctx);
     if (s_visibleEquipmentInitialized) update_visible_equipment(svc_log, mod_ctx);
     if (s_zButtonInitialized) update_z_button(svc_log, mod_ctx);
+    update_controls();
     if (s_quickAccessInitialized) update_quick_access(svc_log, mod_ctx);
     if (s_sheathedSpinInitialized) update_sheathed_spin(svc_log, mod_ctx);
     if (s_flurryRushInitialized) update_flurry_rush(svc_log, mod_ctx);

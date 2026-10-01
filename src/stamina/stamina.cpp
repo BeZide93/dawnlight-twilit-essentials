@@ -4,6 +4,7 @@
 #include "sprint_human.hpp"
 #include "sprint_wolf.hpp"
 #include "sprint_swim.hpp"
+#include "sprint_wind.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -29,6 +30,7 @@ int  g_configStaminaRegen   = 100;
 int  g_configStaminaRegenDelay = 2;
 int  g_configStaminaExhaustRecover = 35;
 bool g_configStaminaSlowHangRegen = true;
+bool g_configStaminaRefillOnStageChange = true;
 
 bool g_configStaminaSrcAttacks  = true;
 bool g_configStaminaSrcJumpSpin  = true;
@@ -55,6 +57,7 @@ int g_configStaminaCostSprint     = 100;
 int g_configStaminaCostWolfSprint = 100;
 int g_configStaminaCostSwimSprint = 100;
 int g_configStaminaCostHiddenSkills = 100;
+int g_configStaminaCostSpinCharge = 10;
 
 enum StamCat {
     STAM_ATTACKS = 1,
@@ -90,6 +93,8 @@ DEFINE_HOOK(&daAlink_c::checkRestHPAnime, StaminaTiredCheck);
 DEFINE_HOOK(&daAlink_c::changeHangEndProc, StamHangEnd);
 DEFINE_HOOK(&daAlink_c::procHangWallCatch, StamHangWallCatch);
 DEFINE_HOOK(&daAlink_c::checkLadderFall, StamLadderFall);
+DEFINE_HOOK(&daAlink_c::procCutTurnCharge, StamSpinCharge);
+DEFINE_HOOK(&daAlink_c::procCutTurnMove, StamSpinChargeMove);
 
 static f32 s_stamina    = 100.0f;
 static int s_regenDelay = 0;
@@ -182,6 +187,18 @@ static f32 drain_rate(u16 proc) {
     }
 }
 
+static constexpr f32 kSpinChargeDrain = 0.5f;
+
+static bool is_spin_charge(const daAlink_c* link) {
+    if (link->mProcID == daAlink_c::PROC_CUT_TURN_CHARGE) return true;
+    return link->mProcID == daAlink_c::PROC_CUT_TURN_MOVE && link->mProcVar2.field_0x300c == 0;
+}
+
+static f32 spin_charge_drain(const daAlink_c* link) {
+    if (!g_configStaminaSrcJumpSpin || !is_spin_charge(link)) return 0.0f;
+    return stamina_impl::cost_scaled(kSpinChargeDrain, g_configStaminaCostSpinCharge);
+}
+
 static bool empty() { return s_exhausted; }
 static bool drained() { return s_stamina <= 0.5f; }
 
@@ -260,6 +277,21 @@ static void deny() {
     }
 }
 
+static HookAction spin_charge_pre(ModContext*, void* args, void* retval, void*) {
+    if (!g_configStaminaEnabled || !g_configStaminaSrcJumpSpin) return HOOK_CONTINUE;
+    if (!empty() || !in_gameplay()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || !is_spin_charge(link)) return HOOK_CONTINUE;
+    link->mComboCutCount = 0;
+    link->mRunCutComboCount = 0;
+    link->offNoResetFlg0(daPy_py_c::FLG0_UNK_8000);
+    link->checkNextAction(0);
+    if (is_spin_charge(link)) link->procWaitInit();
+    deny();
+    if (retval) *static_cast<int*>(retval) = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 static f32 s_otherSpend = 0.0f;
 
 static int  s_hiddenSkillLock = 0;
@@ -285,6 +317,7 @@ static void spend(f32 cost) {
     spend_raw(cost);
     s_otherSpend += cost;
 }
+
 
 static f32 cost_for_id(int id);
 
@@ -459,7 +492,7 @@ void update_stamina(const LogService*, ModContext*) {
     const f32 kMax = stamina_max();
     if (s_stamina > kMax) s_stamina = kMax;
 
-    if (dComIfGp_isEnableNextStage()) refill_stamina();
+    if (g_configStaminaRefillOnStageChange && dComIfGp_isEnableNextStage()) refill_stamina();
 
     if (!in_gameplay()) {
         s_extraDrain = 0.0f;
@@ -477,7 +510,7 @@ void update_stamina(const LogService*, ModContext*) {
 
     const f32 extra = s_extraDrain;
     s_extraDrain = 0.0f;
-    f32 rate = (link ? drain_rate(link->mProcID) : 0.0f) + extra;
+    f32 rate = (link ? drain_rate(link->mProcID) + spin_charge_drain(link) : 0.0f) + extra;
 
     if (rate > 0.0f) {
         s_stamina -= rate;
@@ -495,8 +528,8 @@ void update_stamina(const LogService*, ModContext*) {
             f32 pct = static_cast<f32>(g_configStaminaRegen);
             if (pct < 10.0f) pct = 10.0f;
             f32 base = 1.3f;
-            if (g_configStaminaSlowHangRegen && is_hang_rest_proc(link)) {
-                base = 1.3f * kHangRestRegenFactor;
+            if (is_hang_rest_proc(link)) {
+                base = g_configStaminaSlowHangRegen ? 1.3f * kHangRestRegenFactor : 0.0f;
             } else if (link != nullptr && !link->checkWolf() && link->checkPlayerGuard()) {
                 base = 1.3f * kGuardRegenFactor;
             }
@@ -509,7 +542,8 @@ void update_stamina(const LogService*, ModContext*) {
     f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
     if (recoverFrac < 0.05f) recoverFrac = 0.05f;
     if (recoverFrac > 1.0f) recoverFrac = 1.0f;
-    f32 recoverAt = stamina_impl::main_ring_capacity(kMax) * recoverFrac;
+    const f32 recoverBase = stamina_hud_radial_style() ? stamina_impl::main_ring_capacity(kMax) : kMax;
+    f32 recoverAt = recoverBase * recoverFrac;
     if (recoverAt > kMax) recoverAt = kMax;
     if (s_exhausted && s_stamina >= recoverAt - 0.01f) {
         s_exhausted = false;
@@ -544,6 +578,7 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     init_sprint_human(hook_svc);
     init_sprint_wolf(hook_svc);
     init_sprint_swim(hook_svc);
+    init_sprint_wind(hook_svc);
 
     init_stamina_hud(hook_svc, s_stamina);
 
@@ -551,6 +586,8 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<StamHangEnd>(hook_svc, hang_drop_pre);
     mods::hook::add_pre<StamHangWallCatch>(hook_svc, hang_drop_pre);
     mods::hook::add_pre<StamLadderFall>(hook_svc, hang_drop_pre);
+    mods::hook::add_pre<StamSpinCharge>(hook_svc, spin_charge_pre);
+    mods::hook::add_pre<StamSpinChargeMove>(hook_svc, spin_charge_pre);
 
     mods::hook::add_post<StamSwordSwing>(hook_svc, sword_swing_post);
 
@@ -575,6 +612,7 @@ void shutdown_stamina() {
     shutdown_sprint_human();
     shutdown_sprint_wolf();
     shutdown_sprint_swim();
+    shutdown_sprint_wind();
     s_stamina = stamina_max();
     shutdown_stamina_hud(s_stamina);
     s_regenDelay = 0;

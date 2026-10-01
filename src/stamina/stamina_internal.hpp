@@ -28,4 +28,7 @@ void report_drain(float amount);
 
 float cost_scaled(float base_cost, int pct);
 
+bool sprint_wind_allowed();
+void sprint_wind_report(unsigned int emitterId);
+
 }

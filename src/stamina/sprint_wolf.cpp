@@ -78,6 +78,11 @@ static void stop_sprint_wind_effect() {
 }
 
 static void update_sprint_wind_effect(daAlink_c* link) {
+    if (!stamina_impl::sprint_wind_allowed()) {
+        stop_sprint_wind_effect();
+        return;
+    }
+
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
     if (camera == nullptr) {
         stop_sprint_wind_effect();
@@ -110,6 +115,7 @@ static void update_sprint_wind_effect(daAlink_c* link) {
     s_sprintWindEmitter = dComIfGp_particle_set(s_sprintWindEmitter, 0x8657, &pos, &link->tevStr,
                                                 &angle, nullptr, alpha, nullptr, -1,
                                                 nullptr, nullptr, nullptr);
+    stamina_impl::sprint_wind_report(s_sprintWindEmitter);
 }
 
 static HookAction tongue_face_pre(ModContext*, void* args, void*, void*) {

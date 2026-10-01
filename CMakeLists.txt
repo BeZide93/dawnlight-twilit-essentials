@@ -33,6 +33,7 @@ add_mod(twilit_essentials
         SOURCES
             src/mod.cpp
             src/util.cpp
+            src/bug_report.cpp
             src/compat/twilight_hd.cpp
             src/compat/dawnlight.cpp
             src/compat/extra_buttons.cpp
@@ -97,6 +98,7 @@ add_mod(twilit_essentials
             src/stamina/stamina_radial.cpp
             src/stamina/sprint_human.cpp
             src/stamina/sprint_wolf.cpp
+            src/stamina/sprint_wind.cpp
             src/stamina/sprint_swim.cpp
             src/collection_menu/collection_menu.cpp
             src/collection_menu/collection_menu_shield.cpp
