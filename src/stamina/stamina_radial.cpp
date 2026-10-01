@@ -1,7 +1,11 @@
 #include "stamina_radial.hpp"
 #include "stamina_internal.hpp"
+#include "../interp.hpp"
+
+#include "mods/svc/hook.hpp"
 
 #include "d/d_com_inf_game.h"
+#include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
@@ -13,7 +17,7 @@
 void qa_hud_scale_begin(f32 anchorX, f32 anchorY);
 void qa_hud_scale_end();
 
-extern ModContext* mod_ctx;
+DEFINE_HOOK(&daAlink_c::execute, StaminaWheelAlinkExecute);
 
 static constexpr f32 kWheelAnchorHumanY = 150.0f;
 static constexpr f32 kWheelAnchorWolfY = 90.0f;
@@ -31,13 +35,7 @@ static constexpr f32 kWheelScreenMargin = 6.0f;
 static constexpr f32 kWheelTeleportDist = 250.0f;
 static constexpr f32 kTwoPi = 6.2831853f;
 
-static cXyz s_wheelPrevAnchor(0.0f, 0.0f, 0.0f);
-static bool s_wheelPrevAnchorValid = false;
-
-static const HookService* s_staminaHookSvc = nullptr;
-static f32 (*s_interpStepFn)() = nullptr;
-static bool (*s_interpEnabledFn)() = nullptr;
-static bool s_interpResolved = false;
+static char s_wheelAnchorKey = 0;
 
 static bool wheel_anchor_world(cXyz& out) {
     daPy_py_c* player = daPy_getLinkPlayerActorClass();
@@ -47,25 +45,9 @@ static bool wheel_anchor_world(cXyz& out) {
     return true;
 }
 
-static f32 wheel_interp_step() {
-    if (!s_interpResolved && s_staminaHookSvc != nullptr && mod_ctx != nullptr) {
-        s_interpResolved = true;
-        void* addr = nullptr;
-        if (s_staminaHookSvc->resolve(mod_ctx, "dusk::interp::get_interpolation_step", &addr,
-                                      nullptr) == MOD_OK && addr != nullptr) {
-            s_interpStepFn = reinterpret_cast<f32 (*)()>(addr);
-        }
-        addr = nullptr;
-        if (s_staminaHookSvc->resolve(mod_ctx, "dusk::interp::is_enabled", &addr, nullptr) == MOD_OK &&
-            addr != nullptr) {
-            s_interpEnabledFn = reinterpret_cast<bool (*)()>(addr);
-        }
-    }
-    if (s_interpStepFn == nullptr || s_interpEnabledFn == nullptr || !s_interpEnabledFn()) return 1.0f;
-    f32 t = s_interpStepFn();
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-    return t;
+static void on_wheel_alink_execute_post(ModContext*, void*, void*, void*) {
+    cXyz anchor;
+    if (wheel_anchor_world(anchor)) interp_record_pos(&s_wheelAnchorKey, anchor);
 }
 
 struct WheelRing {
@@ -140,16 +122,10 @@ static bool wheel_link_screen_pos(f32& sx, f32& sy, f32& side) {
     view_class* view = dComIfGd_getView();
     if (!wheel_anchor_world(live) || view == nullptr) return false;
     cXyz pos = live;
-    if (s_wheelPrevAnchorValid) {
-        const f32 dx = live.x - s_wheelPrevAnchor.x;
-        const f32 dy = live.y - s_wheelPrevAnchor.y;
-        const f32 dz = live.z - s_wheelPrevAnchor.z;
-        if (dx * dx + dy * dy + dz * dz < kWheelTeleportDist * kWheelTeleportDist) {
-            const f32 t = wheel_interp_step();
-            pos.x = s_wheelPrevAnchor.x + dx * t;
-            pos.y = s_wheelPrevAnchor.y + dy * t;
-            pos.z = s_wheelPrevAnchor.z + dz * t;
-        }
+    cXyz smooth;
+    if (interp_lookup_pos(&s_wheelAnchorKey, smooth) &&
+        smooth.abs2(live) < kWheelTeleportDist * kWheelTeleportDist) {
+        pos = smooth;
     }
     Vec cam;
     mDoLib_pos2camera(&pos, &cam);
@@ -239,13 +215,10 @@ void stamina_radial_draw(const StaminaHudFrame& frame) {
 }
 
 void stamina_radial_init(const HookService* hook_svc) {
-    s_staminaHookSvc = hook_svc;
-}
-
-void stamina_radial_capture_anchor() {
-    s_wheelPrevAnchorValid = wheel_anchor_world(s_wheelPrevAnchor);
+    if (hook_svc == nullptr) return;
+    mods::hook::add_post<StaminaWheelAlinkExecute>(hook_svc, on_wheel_alink_execute_post);
 }
 
 void stamina_radial_shutdown() {
-    s_wheelPrevAnchorValid = false;
+    interp_forget(&s_wheelAnchorKey);
 }

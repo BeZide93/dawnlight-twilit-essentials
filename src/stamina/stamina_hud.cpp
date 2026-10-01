@@ -155,7 +155,6 @@ void stamina_hud_idle_tick() {
 
 void stamina_hud_begin_tick() {
     if (s_staminaBarPreviewFrames > 0) s_staminaBarPreviewFrames--;
-    stamina_radial_capture_anchor();
 }
 
 void stamina_hud_refill(f32 maxValue) {

@@ -1,5 +1,6 @@
 #include "hp_bars.hpp"
 
+#include <list>
 #include <unordered_map>
 #include <vector>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include "mods/svc/log.h"
 
 #include "../boss_bar/boss_bar.hpp"
+#include "../interp.hpp"
 
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
@@ -21,6 +23,7 @@
 #include "d/d_s_play.h"
 #include "d/d_bg_s_lin_chk.h"
 #include "d/d_camera.h"
+#include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_actor_iter.h"
@@ -40,6 +43,7 @@ bool g_configHpBarsShowNumbers = false;
 bool g_configDamageNumbersEnabled = false;
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawHook);
+DEFINE_HOOK(&daAlink_c::execute, HpPopupAlinkExecuteHook);
 
 static std::unordered_map<fpc_ProcID, s16> g_maxHealthMap;
 static std::unordered_map<fpc_ProcID, f32> g_enemyAlphaMap;
@@ -50,7 +54,6 @@ struct DamagePopup {
     fpc_ProcID enemyId;
     s16 damageAmount;
     cXyz worldPos;
-    cXyz prevPos;
     f32 velY;
     f32 velX;
     f32 velZ;
@@ -59,26 +62,13 @@ struct DamagePopup {
     bool isCritical;
 };
 
-static float (*s_interpStepFn)() = nullptr;
-static bool s_interpStepResolved = false;
-static const HookService* s_hpHookSvc = nullptr;
-static ModContext* s_hpModCtx = nullptr;
-
-static f32 popup_interp_step() {
-    if (!s_interpStepResolved && s_hpHookSvc != nullptr && s_hpModCtx != nullptr) {
-        s_interpStepResolved = true;
-        void* addr = nullptr;
-        if (s_hpHookSvc->resolve(s_hpModCtx, "_ZN4dusk5interp21get_interpolation_stepEv", &addr,
-                                 nullptr) == MOD_OK &&
-            addr != nullptr) {
-            s_interpStepFn = reinterpret_cast<float (*)()>(addr);
-        }
-    }
-    return s_interpStepFn ? s_interpStepFn() : 1.0f;
-}
-
 static std::unordered_map<fpc_ProcID, s16> s_lastHealthMap;
-static std::vector<DamagePopup> s_damagePopups;
+static std::list<DamagePopup> s_damagePopups;
+
+static void clear_damage_popups() {
+    for (const auto& popup : s_damagePopups) interp_forget(&popup);
+    s_damagePopups.clear();
+}
 
 static void draw_damage_number(const char* text, f32 x, f32 y, f32 charW, f32 charH,
                                JUtility::TColor top, JUtility::TColor bottom, u8 alpha,
@@ -417,7 +407,6 @@ static void* trackEnemyDamageCallback(void* pActor, void*) {
                 popup.damageAmount = damage;
 
                 popup.worldPos = enemy_hp_anchor(actor, id);
-                popup.prevPos = popup.worldPos;
 
                 f32 randX = (static_cast<f32>(std::rand() % 20) - 10.0f);
                 f32 randZ = (static_cast<f32>(std::rand() % 20) - 10.0f);
@@ -443,7 +432,7 @@ static void* trackEnemyDamageCallback(void* pActor, void*) {
 void update_hp_bars(const LogService*, ModContext*) {
     if (!g_configDamageNumbersEnabled) {
         s_lastHealthMap.clear();
-        s_damagePopups.clear();
+        clear_damage_popups();
         return;
     }
 
@@ -454,7 +443,6 @@ void update_hp_bars(const LogService*, ModContext*) {
     fopAcIt_Judge(trackEnemyDamageCallback, nullptr);
 
     for (auto it = s_damagePopups.begin(); it != s_damagePopups.end();) {
-        it->prevPos = it->worldPos;
         it->currentFrame++;
         it->worldPos.y += it->velY;
         it->worldPos.x += it->velX;
@@ -462,6 +450,7 @@ void update_hp_bars(const LogService*, ModContext*) {
         it->velY *= 0.90f;
 
         if (it->currentFrame >= it->maxFrames) {
+            interp_forget(&*it);
             it = s_damagePopups.erase(it);
         } else {
             ++it;
@@ -469,20 +458,20 @@ void update_hp_bars(const LogService*, ModContext*) {
     }
 }
 
+static void on_popup_alink_execute_post(ModContext*, void*, void*, void*) {
+    for (const auto& popup : s_damagePopups) interp_record_pos(&popup, popup.worldPos);
+}
+
 static void draw_damage_popups() {
     if (!g_configDamageNumbersEnabled || s_damagePopups.empty()) {
         return;
     }
 
-    const f32 step = popup_interp_step();
-
     J2DFillBox(0.0f, 0.0f, 0.0f, 0.0f, JUtility::TColor(0, 0, 0, 0));
 
     for (const auto& popup : s_damagePopups) {
-        cXyz pos;
-        pos.x = popup.prevPos.x + (popup.worldPos.x - popup.prevPos.x) * step;
-        pos.y = popup.prevPos.y + (popup.worldPos.y - popup.prevPos.y) * step;
-        pos.z = popup.prevPos.z + (popup.worldPos.z - popup.prevPos.z) * step;
+        cXyz pos = popup.worldPos;
+        interp_lookup_pos(&popup, pos);
         Vec screenPos;
         mDoLib_project(&pos, &screenPos);
 
@@ -526,14 +515,10 @@ static void draw_damage_popups() {
     }
 }
 
-static void on_meter2_draw_post(ModContext* mod_ctx, void*, void*, void*) {
+static void on_meter2_draw_post(ModContext*, void*, void*, void*) {
     if (!g_configHpBarsEnabled && !g_configDamageNumbersEnabled) {
-        s_damagePopups.clear();
+        clear_damage_popups();
         return;
-    }
-
-    if (s_hpModCtx == nullptr) {
-        s_hpModCtx = mod_ctx;
     }
 
     if (dComIfGp_isPauseFlag()) {
@@ -558,16 +543,17 @@ static void on_meter2_draw_post(ModContext* mod_ctx, void*, void*, void*) {
     if (g_configDamageNumbersEnabled) {
         draw_damage_popups();
     } else {
-        s_damagePopups.clear();
+        clear_damage_popups();
     }
 }
 
 ModResult init_hp_bars(const HookService* hook_svc, ModError*) {
-    s_hpHookSvc = hook_svc;
     if (!hook_svc) {
         return MOD_OK;
     }
-    return mods::hook::add_post<Meter2DrawHook>(hook_svc, on_meter2_draw_post);
+    ModResult res = mods::hook::add_post<Meter2DrawHook>(hook_svc, on_meter2_draw_post);
+    if (res != MOD_OK) return res;
+    return mods::hook::add_post<HpPopupAlinkExecuteHook>(hook_svc, on_popup_alink_execute_post);
 }
 
 void shutdown_hp_bars() {
@@ -576,5 +562,5 @@ void shutdown_hp_bars() {
     g_enemyAnchorH.clear();
     g_enemyChipMap.clear();
     s_lastHealthMap.clear();
-    s_damagePopups.clear();
+    clear_damage_popups();
 }

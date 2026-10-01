@@ -67,6 +67,7 @@
 #include "mods/svc/http.h"
 #include "mods/svc/http.hpp"
 #include "mods/svc/game_mode.h"
+#include "interp.hpp"
 
 #include "d/actor/d_a_title.h"
 #include "d/actor/d_a_alink.h"
@@ -236,6 +237,7 @@ IMPORT_OPTIONAL_SERVICE(StageService, svc_stage);
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 IMPORT_OPTIONAL_SERVICE(HttpService, svc_http);
 IMPORT_OPTIONAL_SERVICE(GameModeService, svc_game_mode);
+IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
 
 extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_header_record,
@@ -255,6 +257,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_gfx,
     &mod_meta_import_svc_http,
     &mod_meta_import_svc_game_mode,
+    &mod_meta_import_svc_interp,
 };
 
 static constexpr const char* kTitleLogoLinklePath = "res/title_logo/linkle/tex1_608x100_0c1c70378fb8cb46_6.png";
