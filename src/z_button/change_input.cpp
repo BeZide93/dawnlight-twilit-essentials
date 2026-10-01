@@ -36,11 +36,13 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
         return;
     }
 
-    if (!g_configCustomZButtonEnabled) {
+    if (!te_midna_button_active()) {
         return;
     }
 
-    check_iron_boots_unequip_on_overwrite();
+    if (g_configCustomZButtonEnabled) {
+        check_iron_boots_unequip_on_overwrite();
+    }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
     const u32 midnaBit = PAD_BUTTON_LEFT;
@@ -91,6 +93,10 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
             pad.mButtonFlags &= ~lMask;
             pad.mPressedButtonFlags &= ~lMask;
         }
+    }
+
+    if (!g_configCustomZButtonEnabled) {
+        return;
     }
 
     JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);
@@ -232,6 +238,11 @@ HookAction on_midna_talk_trigger_pre(ModContext*, void* args, void* ret, void*) 
     const bool touchMidna = z_mobile_consume_midna_touch() && !quick_access_is_active();
     if (g_configCustomZButtonEnabled) {
         *reinterpret_cast<BOOL*>(ret) = (g_dpadLeftTrig || touchMidna) ? 1 : 0;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (g_dpadLeftTrig && te_midna_button_active()) {
+        *reinterpret_cast<BOOL*>(ret) = 1;
         return HOOK_SKIP_ORIGINAL;
     }
 

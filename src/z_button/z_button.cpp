@@ -1,4 +1,5 @@
 #include "z_button.hpp"
+#include "../compat/lazy_tweaks.hpp"
 #include "../compat/twilight_hd.hpp"
 
 #include "z_common.cpp"
@@ -12,19 +13,46 @@
 #include "f_pc/f_pc_profile_lst.h"
 
 bool isNativeZButtonEngine() {
+    return lazy_tweaks_build();
+}
 
-    const u32 actualSize = g_profile_ALINK.base.base.process_size;
-    const size_t linkSize = sizeof(daAlink_c);
-    const size_t animHeapSize = sizeof(daPy_anmHeap_c);
-
-    if (static_cast<const int>(actualSize) == static_cast<const int>(linkSize) + static_cast<const int>(animHeapSize)) {
+bool te_midna_button_active() {
+    if (g_configCustomZButtonEnabled) {
         return true;
     }
-    return false;
+    return isNativeZButtonEngine() && !twilight_hd_third_item_slot();
 }
 
 static bool s_midnaScaleSaved = false;
 static f32 s_origMidnaIconScale = 1.1f;
+static bool s_lazyTweaksMidnaActive = false;
+
+static void shutdown_midna_button() {
+    if (s_midnaScaleSaved) {
+        g_drawHIO.mMidnaIconScale = s_origMidnaIconScale;
+    }
+    midna_l_overlay_shutdown();
+    g_dpadLeftHeld = false;
+    g_dpadLeftTrig = false;
+}
+
+static void update_lazy_tweaks_midna_button() {
+    if (!te_midna_button_active() || isTitleOrMainMenu()) {
+        if (s_lazyTweaksMidnaActive) {
+            shutdown_midna_button();
+            reset_midna_pane();
+            s_lazyTweaksMidnaActive = false;
+        }
+        return;
+    }
+    s_lazyTweaksMidnaActive = true;
+
+    if (!s_midnaScaleSaved) {
+        s_midnaScaleSaved = true;
+        s_origMidnaIconScale = g_drawHIO.mMidnaIconScale;
+    }
+    g_drawHIO.mMidnaIconScale = 0.85f;
+}
 
 ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, ModContext* mod_ctx, ModError*) {
     g_zModCtx = mod_ctx;
@@ -33,6 +61,27 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
         return MOD_OK;
 
     if (isNativeZButtonEngine()) {
+        mods::hook::add_post<PadReadHook>(hook_svc, on_pad_read_post);
+        mods::hook::add_post<MinimapComboActionTrigHook>(hook_svc, on_minimap_combo_action_trig_post);
+        const HookOptions midnaBeforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore - 1);
+        mods::hook::add_pre<MidnaTalkTriggerHook>(hook_svc, on_midna_talk_trigger_pre, &midnaBeforeTwilightHd);
+        mods::hook::add_post<Meter2ExecuteHook>(hook_svc, on_meter2_execute_post);
+        mods::hook::add_pre<Meter2DrawDrawHook>(hook_svc, on_meter2_draw_draw_pre);
+        mods::hook::add_post<Meter2DrawDrawHook>(hook_svc, on_meter2_draw_draw_post);
+        mods::hook::add_pre<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_pre);
+        mods::hook::add_post<MeterButtonExecuteHook>(hook_svc, on_meter_button_execute_post);
+        mods::hook::add_pre<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_pre);
+        mods::hook::add_post<MeterButtonDrawHook>(hook_svc, on_meter_button_draw_post);
+        const HookOptions qaBeforeTwilightHd = twilight_hd_hook_order(kTwilightHdRunBefore);
+        mods::hook::add_pre<CheckItemSetButtonHook>(hook_svc, on_check_item_set_button_pre, &qaBeforeTwilightHd);
+        mods::hook::add_pre<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_pre,
+                                                           &qaBeforeTwilightHd);
+        mods::hook::add_post<CheckItemChangeFromButtonHook>(hook_svc, on_check_item_change_from_button_post,
+                                                            &qaBeforeTwilightHd);
+        mods::hook::add_pre<QaAllUnequipHook>(hook_svc, on_qa_all_unequip_pre);
+        if (log_svc != nullptr) {
+            log_svc->info(mod_ctx, "[ZButton] Lazy Tweaks build detected - native Z slot, TE Midna button only");
+        }
         return MOD_OK;
     }
 
@@ -103,6 +152,8 @@ ModResult init_z_button(const HookService* hook_svc, const LogService* log_svc, 
 
 void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
     if (isNativeZButtonEngine()) {
+        g_zModCtx = mod_ctx;
+        update_lazy_tweaks_midna_button();
         return;
     }
 
@@ -147,6 +198,15 @@ void update_z_button(const LogService* log_svc, ModContext* mod_ctx) {
 }
 
 void shutdown_z_button() {
+    if (isNativeZButtonEngine()) {
+        if (s_lazyTweaksMidnaActive) {
+            shutdown_midna_button();
+            reset_midna_pane();
+            s_lazyTweaksMidnaActive = false;
+        }
+        return;
+    }
+
     if (s_midnaScaleSaved) {
         g_drawHIO.mMidnaIconScale = s_origMidnaIconScale;
     }

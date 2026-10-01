@@ -51,6 +51,7 @@ static const int kSprintButtons[CTRL_SPRINT_OPTION_COUNT] = {
 };
 
 extern bool g_configCustomZButtonEnabled;
+bool te_midna_button_active();
 
 static const ConfigService* s_cfg = nullptr;
 static ModContext* s_cfgCtx = nullptr;
@@ -194,7 +195,7 @@ int controls_quick_access_default_option() {
 }
 
 bool controls_hd_collection_on_left() {
-    return controls_hd_minimap_on_right() && !(g_configCustomZButtonEnabled && !controls_midna_on_l());
+    return controls_hd_minimap_on_right() && !(te_midna_button_active() && !controls_midna_on_l());
 }
 
 static void write_quick_access_button(int button) {

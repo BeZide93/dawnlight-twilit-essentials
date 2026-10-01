@@ -27,6 +27,8 @@ void renderModelAtMtx(J3DModel* model, MtxP mtx, mDoExt_bckAnm* bck = nullptr);
 
 void ensure_system_heap_capacity();
 
+bool host_config_var_exists(std::string_view name);
+bool host_config_bool(std::string_view name, bool fallback);
 bool is_mod_enabled(std::string_view id);
 bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback);
 s64 mod_config_int(std::string_view modId, std::string_view name, s64 fallback);

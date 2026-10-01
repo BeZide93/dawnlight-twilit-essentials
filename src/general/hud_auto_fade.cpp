@@ -1,5 +1,7 @@
 #include "hud_auto_fade.hpp"
 
+#include "../compat/lazy_tweaks.hpp"
+
 #include "mods/svc/hook.hpp"
 
 #include "d/d_com_inf_game.h"
@@ -33,6 +35,8 @@ constexpr f32 kTickHz = 30.0f;
 
 std::vector<FadedAlpha> s_scaled;
 dMeter2Draw_c* s_rateMeter = nullptr;
+f32 s_rate0 = 0.0f;
+bool s_rate0Saved = false;
 f32 s_rate1 = 0.0f;
 f32 s_rate2 = 0.0f;
 
@@ -92,10 +96,14 @@ void hud_fade_restore() {
     }
     s_scaled.clear();
     if (s_rateMeter != nullptr) {
+        if (s_rate0Saved) {
+            s_rateMeter->mMeterAlphaRate[0] = s_rate0;
+        }
         s_rateMeter->mMeterAlphaRate[1] = s_rate1;
         s_rateMeter->mMeterAlphaRate[2] = s_rate2;
         s_rateMeter = nullptr;
     }
+    s_rate0Saved = false;
 }
 
 void hud_fade_apply(dMeter2_c* meter) {
@@ -109,19 +117,36 @@ void hud_fade_apply(dMeter2_c* meter) {
     if (draw == nullptr) return;
 
     collect_tree(draw->mpScreen);
-    for (int i = 0; i < 2; i++) {
+    const bool lazyTweaks = lazy_tweaks_build();
+    for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 3; j++) {
-            collect_pane(draw->mpItemNumTex[i][j]);
+            if (lazyTweaks) {
+                collect_pane(lazy_tweaks_item_num_tex(draw, i, j));
+            } else if (i < 2) {
+                collect_pane(draw->mpItemNumTex[i][j]);
+            }
         }
-        if (draw->mpKanteraMeter[i] != nullptr && draw->mpKanteraMeter[i]->mpKanteraIcon != nullptr) {
-            collect_tree(draw->mpKanteraMeter[i]->mpKanteraIcon->getScreen());
+        dKantera_icon_c* kantera = nullptr;
+        if (i < 2) {
+            kantera = draw->mpKanteraMeter[i];
+        } else if (lazyTweaks) {
+            kantera = lazy_tweaks_z_kantera_meter(draw);
+        }
+        if (kantera != nullptr && kantera->mpKanteraIcon != nullptr) {
+            collect_tree(kantera->mpKanteraIcon->getScreen());
         }
     }
 
-    if (draw->mMeterAlphaRate[1] != 0.0f || draw->mMeterAlphaRate[2] != 0.0f) {
+    const f32 rate0 = lazyTweaks ? draw->mMeterAlphaRate[0] : 0.0f;
+    if (rate0 != 0.0f || draw->mMeterAlphaRate[1] != 0.0f || draw->mMeterAlphaRate[2] != 0.0f) {
         s_rateMeter = draw;
+        s_rate0Saved = lazyTweaks;
+        s_rate0 = rate0;
         s_rate1 = draw->mMeterAlphaRate[1];
         s_rate2 = draw->mMeterAlphaRate[2];
+        if (s_rate0Saved) {
+            draw->mMeterAlphaRate[0] = s_rate0 * eff;
+        }
         draw->mMeterAlphaRate[1] = s_rate1 * eff;
         draw->mMeterAlphaRate[2] = s_rate2 * eff;
     }
@@ -174,6 +199,7 @@ static void on_present_map_post(ModContext*, void* args, void*, void*) {
 static void on_meter_delete_post(ModContext*, void*, void*, void*) {
     s_scaled.clear();
     s_rateMeter = nullptr;
+    s_rate0Saved = false;
     s_fade = 1.0f;
     s_target = 1.0f;
     s_idleTicks = 0;

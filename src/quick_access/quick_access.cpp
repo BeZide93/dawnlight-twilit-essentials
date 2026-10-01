@@ -21,6 +21,7 @@
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
+#include "d/d_meter2.h"
 #include "d/d_meter2_info.h"
 #include "d/d_meter_map.h"
 #include "d/d_menu_window.h"
@@ -264,7 +265,7 @@ static void sync_ooccoo_assignment() {
 }
 
 static void sync_wheel_down_assignment() {
-    if (g_configCustomZButtonEnabled || twilight_hd_third_item_slot()) {
+    if (g_configCustomZButtonEnabled || twilight_hd_third_item_slot() || isNativeZButtonEngine()) {
         return;
     }
     const u8 slot = dComIfGs_getSelectItemIndex(SELECT_ITEM_DOWN);
@@ -1725,6 +1726,7 @@ static void reset_repeat_state() {
 }
 
 static u8 s_aimItem = QA_ITEM_NONE;
+static bool s_aimSlotDirty = false;
 
 static bool qa_item_has_aim_mode(u8 itemNo) {
     switch (itemNo) {
@@ -1820,7 +1822,12 @@ static void on_set_stick_data_qa_post(ModContext*, void* args, void*, void*) {
             g_dComIfG_gameInfo.play.setSelectItem(2, s_aimItem);
             link->mSelectItemId = 2;
             link->mItemButton |= 0x04;
+            s_aimSlotDirty = isNativeZButtonEngine();
         }
+    }
+    if (s_aimItem == QA_ITEM_NONE && s_aimSlotDirty) {
+        s_aimSlotDirty = false;
+        dComIfGp_setSelectItem(2);
     }
 
     if (s_deferredUseItem != QA_ITEM_NONE) {
@@ -1949,6 +1956,27 @@ static void swallow_l_trigger(interface_of_controller_pad& pad) {
     pad.mButtonFlags &= ~PAD_TRIGGER_L;
 }
 
+static bool s_zOwnedLatch = false;
+
+static void swallow_native_z(bool owning) {
+    if (!isNativeZButtonEngine()) {
+        s_zOwnedLatch = false;
+        return;
+    }
+    JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
+    const bool zHeld = gamePad != nullptr && (gamePad->getButton() & PAD_TRIGGER_Z) != 0;
+    if (owning) {
+        s_zOwnedLatch = true;
+    } else if (!zHeld) {
+        s_zOwnedLatch = false;
+    }
+    if (s_zOwnedLatch) {
+        interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
+        pad.mButtonFlags &= ~PAD_TRIGGER_Z;
+        pad.mPressedButtonFlags &= ~PAD_TRIGGER_Z;
+    }
+}
+
 static void on_pad_read_qa_l_owner_post(ModContext*, void*, void*, void*) {
     const bool owning = s_menuOpen || s_editMode;
     if (owning) {
@@ -1959,6 +1987,7 @@ static void on_pad_read_qa_l_owner_post(ModContext*, void*, void*, void*) {
     if (s_lOwnedLatch) {
         swallow_l_trigger(mDoCPd_c::getCpadInfo(PAD_1));
     }
+    swallow_native_z(owning);
 }
 
 static bool s_bottleRequest = false;
@@ -3223,19 +3252,80 @@ static HookAction on_qa_midna_talk_trigger_pre(ModContext*, void*, void* retval,
     return HOOK_SKIP_ORIGINAL;
 }
 
+bool quick_access_z_scratch_active() {
+    return g_configQuickAccessEnabled &&
+           (g_qaSelectOverrideDepth[2] > 0 || s_aimItem != QA_ITEM_NONE ||
+            s_qaOoccooActive != QA_ITEM_NONE || s_qaBombSlotHeld);
+}
+
+struct QaZSlotStash {
+    bool active = false;
+    u8 play = 0;
+    u8 index = 0xFF;
+    u8 mix = 0xFF;
+};
+
+static QaZSlotStash s_meterZStash;
+
 static HookAction on_qa_get_select_item_pre(ModContext*, void* args, void* retval, void*) {
     const int index = mods::arg<int>(args, 0);
-    if (retval == nullptr || (index != 2 && index != 3) || !twilight_hd_third_item_slot()) {
+    if (retval == nullptr || (index != 2 && index != 3) ||
+        !(twilight_hd_third_item_slot() || isNativeZButtonEngine()))
+    {
         return HOOK_CONTINUE;
     }
     const bool owned = g_qaSelectOverrideDepth[index] > 0 ||
                        (index == 2 && (s_aimItem != QA_ITEM_NONE ||
                                        s_qaOoccooActive != QA_ITEM_NONE || s_qaBombSlotHeld));
-    if (!owned) {
+    if (!owned || (index == 2 && s_meterZStash.active)) {
         return HOOK_CONTINUE;
     }
     *static_cast<u8*>(retval) = g_dComIfG_gameInfo.play.getSelectItem(index);
     return HOOK_SKIP_ORIGINAL;
+}
+
+DEFINE_HOOK(&dMeter2_c::_execute, QaMeterExecuteHook);
+
+static HookAction on_qa_meter_execute_pre(ModContext*, void*, void*, void*) {
+    s_meterZStash = QaZSlotStash{};
+    if (!isNativeZButtonEngine() || !g_configQuickAccessEnabled) {
+        return HOOK_CONTINUE;
+    }
+    const bool ooccoo = s_qaOoccooActive != QA_ITEM_NONE;
+    if (s_aimItem == QA_ITEM_NONE && !ooccoo && !s_qaBombSlotHeld) {
+        return HOOK_CONTINUE;
+    }
+    s_meterZStash.active = true;
+    s_meterZStash.play = g_dComIfG_gameInfo.play.getSelectItem(2);
+    s_meterZStash.index = dComIfGs_getSelectItemIndex(2);
+    s_meterZStash.mix = dComIfGs_getMixItemIndex(2);
+    if (s_qaBombSlotHeld) {
+        dComIfGs_setMixItemIndex(2, s_qaBombPrevMix);
+        dComIfGs_setSelectItemIndex(2, s_qaBombPrevIdx);
+        g_dComIfG_gameInfo.play.setSelectItem(2, s_qaBombPrevPlay);
+    } else if (ooccoo) {
+        g_dComIfG_gameInfo.play.setSelectItem(2, s_qaOoccooPrevSelect);
+    } else {
+        dComIfGp_setSelectItem(2);
+    }
+    return HOOK_CONTINUE;
+}
+
+static void on_qa_meter_execute_post(ModContext*, void*, void*, void*) {
+    if (!s_meterZStash.active) {
+        return;
+    }
+    if (s_qaBombSlotHeld) {
+        s_qaBombPrevMix = dComIfGs_getMixItemIndex(2);
+        s_qaBombPrevIdx = dComIfGs_getSelectItemIndex(2);
+        s_qaBombPrevPlay = g_dComIfG_gameInfo.play.getSelectItem(2);
+    } else if (s_qaOoccooActive != QA_ITEM_NONE) {
+        s_qaOoccooPrevSelect = g_dComIfG_gameInfo.play.getSelectItem(2);
+    }
+    dComIfGs_setMixItemIndex(2, s_meterZStash.mix);
+    dComIfGs_setSelectItemIndex(2, s_meterZStash.index);
+    g_dComIfG_gameInfo.play.setSelectItem(2, s_meterZStash.play);
+    s_meterZStash.active = false;
 }
 
 ModResult init_quick_access(const HookService* hook_svc, const SaveService* save_svc,
@@ -3254,6 +3344,8 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
         mods::hook::add_post<Meter2DrawRadialMenuHook>(hook_svc, on_meter2_draw_quick_access_post);
         mods::hook::add_post<QaSetStickDataHook>(hook_svc, on_set_stick_data_qa_post, &afterTwilightHd);
         mods::hook::add_pre<QaGetSelectItemHook>(hook_svc, on_qa_get_select_item_pre, &beforeTwilightHd);
+        mods::hook::add_pre<QaMeterExecuteHook>(hook_svc, on_qa_meter_execute_pre, &beforeTwilightHd);
+        mods::hook::add_post<QaMeterExecuteHook>(hook_svc, on_qa_meter_execute_post, &afterTwilightHd);
         mods::hook::add_post<QaCheckReadyItemHook>(hook_svc, on_check_ready_item_qa_post);
         mods::hook::add_pre<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_pre);
         mods::hook::add_post<QaAlinkExecuteHook>(hook_svc, on_qa_alink_execute_post);

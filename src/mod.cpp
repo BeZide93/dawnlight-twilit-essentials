@@ -1118,7 +1118,7 @@ static bool is_fast_forward_speed_disabled(ModContext*, void*) {
 }
 
 static bool is_controls_midna_disabled(ModContext*, void*) {
-    return !g_configCustomZButtonEnabled;
+    return !te_midna_button_active();
 }
 
 static bool is_controls_sprint_disabled(ModContext*, void*) {
@@ -1980,7 +1980,8 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
 
     svc_ui->pane_add_section(mod_ctx, left, "Midna");
     ui_add_select(left, "Midna button", g_controlsMidnaVar,
-        "<p>Button that calls Midna while the Z-Button is enabled. <b>L</b> is the default and "
+        "<p>Button that calls Midna while the Z-Button (on Lazy Tweaks: the separate Midna "
+        "button) is enabled. <b>L</b> is the default and "
         "uses the left shoulder button (L1 / LB) of the controller; Midna is then shown top left "
         "on a mirrored Z button and D-Pad Left toggles the minimap. <b>D-Pad Left</b> calls "
         "Midna from the D-Pad instead. "

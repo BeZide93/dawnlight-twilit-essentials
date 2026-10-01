@@ -33,6 +33,7 @@ const char* const kStaminaBarStyleLabels[] = {"Default", "BotW Wheel"};
 const size_t kStaminaBarStyleCount = sizeof(kStaminaBarStyleLabels) / sizeof(kStaminaBarStyleLabels[0]);
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, StaminaMeterDrawHook);
+DEFINE_HOOK(&dMeter2Draw_c::drawKanteraScreen, StaminaKanteraScreenHook);
 
 static f32 s_display = 100.0f;
 static int s_showTimer = 0;
@@ -235,10 +236,16 @@ static void on_stamina_meter_draw_post(ModContext*, void* args, void*, void*) {
     draw_style(draw, a, s_display, s_trail, maxValue, false);
 }
 
+static void on_stamina_kantera_screen_post(ModContext*, void* args, void*, void*) {
+    if (args == nullptr) return;
+    stamina_kantera_screen_post(mods::arg<dMeter2Draw_c*>(args, 0), mods::arg<u8>(args, 1));
+}
+
 void init_stamina_hud(const HookService* hook_svc, f32 maxValue) {
     stamina_hud_refill(maxValue);
     stamina_radial_init(hook_svc);
     mods::hook::add_post<StaminaMeterDrawHook>(hook_svc, on_stamina_meter_draw_post);
+    mods::hook::add_post<StaminaKanteraScreenHook>(hook_svc, on_stamina_kantera_screen_post);
 }
 
 void shutdown_stamina_hud(f32 maxValue) {

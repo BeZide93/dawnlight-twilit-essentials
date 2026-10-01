@@ -17,6 +17,9 @@ static JUtility::TColor s_origWhite(40, 90, 160, 255);
 static bool s_hasOrigProps = false;
 static bool s_buttonPromptDirty = false;
 
+static J2DPane* s_midnaBoundsPane = nullptr;
+static JGeometry::TBox2<f32> s_midnaOrigBounds;
+
 static const u64 kMidnaPictureTags[2] = {MULTI_CHAR('midona_s'), MULTI_CHAR('midona')};
 static JGeometry::TBox2<f32> s_midnaLayoutBounds[2];
 static bool s_midnaLayoutValid[2] = {false, false};
@@ -48,7 +51,7 @@ static void load_midna_layout_bounds() {
 }
 
 void restore_midna_pictures_for_draw(dMeter2Draw_c* draw) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || draw == nullptr) return;
+    if (!te_midna_button_active() || draw == nullptr) return;
     if (!tp_classic_buttons_enabled()) return;
     J2DScreen* screen = draw->getMainScreenPtr();
     if (screen == nullptr) return;
@@ -68,7 +71,7 @@ void restore_midna_pictures_for_draw(dMeter2Draw_c* draw) {
 }
 
 void update_midna_pane(dMeter2Draw_c* draw) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || draw == nullptr) return;
+    if (!te_midna_button_active() || draw == nullptr) return;
     J2DScreen* screen = draw->getMainScreenPtr();
     if (screen == nullptr) return;
 
@@ -110,6 +113,8 @@ void update_midna_pane(dMeter2Draw_c* draw) {
         J2DPane* juji = screen->search(MULTI_CHAR('juji_n'));
         if (midnaPane != nullptr && juji != nullptr) {
             if (midnaPane->getParentPane() != juji) {
+                s_midnaBoundsPane = midnaPane;
+                s_midnaOrigBounds = midnaPane->getBounds();
                 J2DPane* oldParent = midnaPane->getParentPane();
                 if (oldParent != nullptr) {
                     oldParent->mPaneTree.removeChild(&midnaPane->mPaneTree);
@@ -152,6 +157,10 @@ void reset_midna_pane() {
                         oldParent->mPaneTree.removeChild(&midnaPane->mPaneTree);
                     }
                     contPane->appendChild(midnaPane);
+                    if (midnaPane == s_midnaBoundsPane) {
+                        midnaPane->move(s_midnaOrigBounds.i.x, s_midnaOrigBounds.i.y);
+                    }
+                    s_midnaBoundsPane = nullptr;
                 }
                 midnaPane->translate(-88.0f, -24.5f);
                 midnaPane->show();
@@ -263,7 +272,7 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
     J2DPicture* z_btnl = static_cast<J2DPicture*>(buttonScreen->search(MULTI_CHAR('z_btnl')));
 
     if (zbtnPic) {
-        if (g_configCustomZButtonEnabled && !isNativeZButtonEngine()) {
+        if (te_midna_button_active()) {
             s_buttonPromptDirty = true;
             if (controls_midna_on_l()) {
                 const ResTIMG* zTex = get_orig_z_button_texture();
@@ -322,14 +331,14 @@ static void update_custom_z_button_prompt(dMeterButton_c* meterButton) {
 }
 
 HookAction on_meter_button_execute_pre(ModContext*, void* args, void*, void*) {
-    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
+    if (isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
     return HOOK_CONTINUE;
 }
 
 void on_meter_button_execute_post(ModContext*, void* args, void*, void*) {
-    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return;
+    if (isTitleOrMainMenu() || !args) return;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
 }
@@ -346,7 +355,7 @@ static f32 pane_chain_alpha(J2DPane* pane) {
 }
 
 static void draw_prompt_l_letter(dMeterButton_c* meterButton) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !controls_midna_on_l()) return;
+    if (!te_midna_button_active() || !controls_midna_on_l()) return;
     if (meterButton == nullptr || meterButton->mpButtonScreen == nullptr) return;
     J2DPicture* zbtnPic = static_cast<J2DPicture*>(meterButton->mpButtonScreen->search('zbtn'));
     if (zbtnPic == nullptr) return;
@@ -398,12 +407,12 @@ static void draw_prompt_l_letter(dMeterButton_c* meterButton) {
 }
 
 void on_meter_button_draw_post(ModContext*, void* args, void*, void*) {
-    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return;
+    if (isTitleOrMainMenu() || !args) return;
     draw_prompt_l_letter(mods::arg<dMeterButton_c*>(args, 0));
 }
 
 HookAction on_meter_button_draw_pre(ModContext*, void* args, void*, void*) {
-    if (isNativeZButtonEngine() || isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
+    if (isTitleOrMainMenu() || !args) return HOOK_CONTINUE;
     dMeterButton_c* meterButton = mods::arg<dMeterButton_c*>(args, 0);
     update_custom_z_button_prompt(meterButton);
     return HOOK_CONTINUE;

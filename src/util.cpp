@@ -50,15 +50,24 @@ GetConfigVarFn host_get_config_var() {
 
 }
 
+bool host_config_var_exists(std::string_view name) {
+    const auto getVar = host_get_config_var();
+    return getVar != nullptr && getVar(name) != nullptr;
+}
+
+bool host_config_bool(std::string_view name, bool fallback) {
+    const auto getVar = host_get_config_var();
+    if (getVar == nullptr) return fallback;
+    const auto* var = getVar(name);
+    return var != nullptr ? static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue() : fallback;
+}
+
 bool is_mod_enabled(std::string_view id) {
     return mod_config_bool(id, "enabled", false);
 }
 
 bool mod_config_bool(std::string_view modId, std::string_view name, bool fallback) {
-    const auto getVar = host_get_config_var();
-    if (getVar == nullptr) return fallback;
-    const auto* var = getVar(mod_cvar_name(modId, name));
-    return var != nullptr ? static_cast<const dusk::config::ConfigVar<bool>*>(var)->getValue() : fallback;
+    return host_config_bool(mod_cvar_name(modId, name), fallback);
 }
 
 s64 mod_config_int(std::string_view modId, std::string_view name, s64 fallback) {

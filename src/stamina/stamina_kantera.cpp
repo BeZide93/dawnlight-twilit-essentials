@@ -1,4 +1,5 @@
 #include "stamina_kantera.hpp"
+#include "../compat/lazy_tweaks.hpp"
 #include "../compat/twilight_hd.hpp"
 
 #include "d/d_com_inf_game.h"
@@ -29,6 +30,17 @@ static bool s_lanternGaugeValid = false;
 static f32 s_lanternGaugeBottom = 0.0f;
 static bool s_staminaGaugeValid = false;
 static f32 s_staminaGaugeBottom = 0.0f;
+
+static bool s_screenHookSeen = false;
+static bool s_screenSkillValid = false;
+static f32 s_screenSkillBottom = 0.0f;
+static bool s_screenLanternValid = false;
+static f32 s_screenLanternBottom = 0.0f;
+static bool s_screenOxygenValid = false;
+static f32 s_screenOxygenTX = 0.0f;
+static f32 s_screenOxygenTY = 0.0f;
+static f32 s_screenOxygenSX = 1.0f;
+static f32 s_screenOxygenSY = 1.0f;
 
 f32 stamina_twilight_hd_bottom() {
     return s_hdBottom;
@@ -80,12 +92,44 @@ bool stamina_hud_gauges_bottom(dMeter2Draw_c* draw, f32& bottom) {
         if (!any || s_staminaGaugeBottom > bottom) bottom = s_staminaGaugeBottom;
         any = true;
     }
+    if (lazy_tweaks_build() && s_screenSkillValid) {
+        if (!any || s_screenSkillBottom > bottom) bottom = s_screenSkillBottom;
+        any = true;
+    }
     return any;
+}
+
+void stamina_kantera_screen_post(dMeter2Draw_c* draw, u8 meterType) {
+    if (draw == nullptr || !lazy_tweaks_build()) {
+        return;
+    }
+    s_screenHookSeen = true;
+    if (meterType == 0) {
+        s_screenSkillValid = !twilight_hd_enabled() && draw->mMeterAlphaRate[0] > 0.02f &&
+                             kantera_gauge_bottom(draw, s_screenSkillBottom);
+    } else if (meterType == 1) {
+        s_screenLanternValid = !twilight_hd_enabled() && draw->getMeterGaugeAlphaRate(1) > 0.02f &&
+                               kantera_gauge_bottom(draw, s_screenLanternBottom);
+    } else if (meterType == 2) {
+        J2DPane* parentPane = draw->mpMagicParent != nullptr ? draw->mpMagicParent->getPanePtr() : nullptr;
+        s_screenOxygenValid = parentPane != nullptr;
+        if (s_screenOxygenValid) {
+            s_screenOxygenTX = parentPane->getTranslateX();
+            s_screenOxygenTY = parentPane->getTranslateY();
+            s_screenOxygenSX = parentPane->getScaleX();
+            s_screenOxygenSY = parentPane->getScaleY();
+        }
+    }
 }
 
 void stamina_kantera_begin_draw(dMeter2Draw_c* draw) {
     s_hdBottom = 0.0f;
-    if (!twilight_hd_enabled() && draw->getMeterGaugeAlphaRate(1) > 0.02f &&
+    if (lazy_tweaks_build() && s_screenHookSeen) {
+        if (s_screenLanternValid) {
+            s_lanternGaugeBottom = s_screenLanternBottom;
+            s_lanternGaugeValid = true;
+        }
+    } else if (!twilight_hd_enabled() && draw->getMeterGaugeAlphaRate(1) > 0.02f &&
         kantera_gauge_bottom(draw, s_lanternGaugeBottom)) {
         s_lanternGaugeValid = true;
     }
@@ -128,6 +172,17 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, const StaminaHudFrame& frame
     meter->setAlphaRate(a * g_drawHIO.mLanternMeterAlpha);
     frameL->setAlphaRate(a * g_drawHIO.mLanternMeterFrameAlpha);
     frameR->setAlphaRate(a * g_drawHIO.mLanternMeterFrameAlpha);
+
+    J2DPane* basePane = parent->getPanePtr();
+    const bool oxygenBase = lazy_tweaks_build() && s_screenOxygenValid && basePane != nullptr;
+    const f32 engineTX = oxygenBase ? basePane->getTranslateX() : 0.0f;
+    const f32 engineTY = oxygenBase ? basePane->getTranslateY() : 0.0f;
+    const f32 engineSX = oxygenBase ? basePane->getScaleX() : 1.0f;
+    const f32 engineSY = oxygenBase ? basePane->getScaleY() : 1.0f;
+    if (oxygenBase) {
+        basePane->scale(s_screenOxygenSX, s_screenOxygenSY);
+        basePane->translate(s_screenOxygenTX, s_screenOxygenTY);
+    }
 
     const f32 origTX = parent->getTranslateX();
     const f32 origTY = parent->getTranslateY();
@@ -180,6 +235,10 @@ static void draw_stamina_meter(dMeter2Draw_c* draw, const StaminaHudFrame& frame
     }
 
     parent->translate(origTX, origTY);
+    if (oxygenBase) {
+        basePane->scale(engineSX, engineSY);
+        basePane->translate(engineTX, engineTY);
+    }
 }
 
 void stamina_kantera_draw(dMeter2Draw_c* draw, const StaminaHudFrame& frame) {

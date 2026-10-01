@@ -29,6 +29,7 @@ DEFINE_HOOK(&daAlink_c::notTalk, BossRushNotTalkHook);
 
 extern bool g_dpadLeftTrig;
 extern bool g_configCustomZButtonEnabled;
+bool te_midna_button_active();
 
 static int s_talkHoldTicks = 0;
 
@@ -911,9 +912,9 @@ static HookAction on_order_z_talk_pre(ModContext*, void* args, void* ret, void*)
 
     dMeter2Info_onUseButton(METER2_USEBUTTON_Z);
 
-    bool triggered = link->midnaTalkTrigger() || (g_configCustomZButtonEnabled && g_dpadLeftTrig);
+    bool triggered = link->midnaTalkTrigger() || (te_midna_button_active() && g_dpadLeftTrig);
 
-    if (g_configCustomZButtonEnabled && !controls_midna_on_l()) {
+    if (te_midna_button_active() && !controls_midna_on_l()) {
         triggered = triggered ||
             (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & PAD_BUTTON_LEFT) != 0;
     }

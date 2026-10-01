@@ -19,6 +19,7 @@ void shutdown_quick_access();
 
 bool quick_access_is_active();
 bool quick_access_owns_l();
+bool quick_access_z_scratch_active();
 void quick_access_request_bottle_page();
 bool quick_access_boots_on_quick_access();
 bool quick_access_keep_boots_equipped(daAlink_c* link);

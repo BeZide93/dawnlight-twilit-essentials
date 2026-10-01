@@ -2,6 +2,7 @@
 #include "quick_access.hpp"
 #include "quick_access_internal.hpp"
 #include "../boss_rush/boss_rush.hpp"
+#include "../z_button/z_button.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_menu_window.h"
@@ -78,7 +79,8 @@ static int itemwheel_build_full(const dSv_player_item_c& item, u8 out[MAX_ITEM_S
 }
 
 static bool itemwheel_slot_on_button(u8 slot) {
-    for (int b = SELECT_ITEM_X; b <= SELECT_ITEM_Y; b++) {
+    const int lastButton = isNativeZButtonEngine() ? SELECT_ITEM_Y + 1 : SELECT_ITEM_Y;
+    for (int b = SELECT_ITEM_X; b <= lastButton; b++) {
         if (dComIfGs_getSelectItemIndex(b) == slot || dComIfGs_getMixItemIndex(b) == slot) {
             return true;
         }

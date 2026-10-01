@@ -4,6 +4,7 @@
 
 class dMeter2Draw_c;
 
+void stamina_kantera_screen_post(dMeter2Draw_c* draw, u8 meterType);
 void stamina_kantera_begin_draw(dMeter2Draw_c* draw);
 void stamina_kantera_draw(dMeter2Draw_c* draw, const StaminaHudFrame& frame);
 void stamina_kantera_shutdown();

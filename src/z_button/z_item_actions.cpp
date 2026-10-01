@@ -270,32 +270,34 @@ HookAction on_check_item_button_change_pre(ModContext*, void* args, void*, void*
 HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     const int itemNo = mods::arg<int>(args, 1);
+    const int notSet = isNativeZButtonEngine() ? 3 : 2;
+    const int keepSet = notSet + 1;
     if (itemNo == dItemNo_DUNGEON_EXIT_e) {
         *static_cast<int*>(retval) =
-            dComIfGs_getItem(SLOT_18, false) == dItemNo_DUNGEON_EXIT_e ? 3 : 2;
+            dComIfGs_getItem(SLOT_18, false) == dItemNo_DUNGEON_EXIT_e ? keepSet : notSet;
         return HOOK_SKIP_ORIGINAL;
     }
     if (!g_configCustomZButtonEnabled || link == nullptr) {
         if (link != nullptr && quick_access_keep_boots_equipped(link) &&
             link->checkGroupItem(itemNo, dItemNo_HVY_BOOTS_e))
         {
-            *static_cast<int*>(retval) = 3;
+            *static_cast<int*>(retval) = keepSet;
             return HOOK_SKIP_ORIGINAL;
         }
         if (link != nullptr && quick_access_keep_bomb_equipped(link) &&
             link->checkGroupItem(itemNo, link->mEquipItem))
         {
-            *static_cast<int*>(retval) = 3;
+            *static_cast<int*>(retval) = keepSet;
             return HOOK_SKIP_ORIGINAL;
         }
         if (link != nullptr && quick_access_keep_lantern_equipped(link) &&
             (itemNo == dItemNo_KANTERA_e || itemNo == dItemNo_KANTERA2_e))
         {
-            *static_cast<int*>(retval) = 3;
+            *static_cast<int*>(retval) = keepSet;
             return HOOK_SKIP_ORIGINAL;
         }
         if (link != nullptr && qa_is_held_item(itemNo)) {
-            *static_cast<int*>(retval) = 3;
+            *static_cast<int*>(retval) = keepSet;
             return HOOK_SKIP_ORIGINAL;
         }
         return HOOK_CONTINUE;

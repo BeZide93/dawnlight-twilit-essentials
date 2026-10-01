@@ -7,12 +7,23 @@
 #include "../controls/controls.hpp"
 #include "../stamina/stamina.hpp"
 #include "../compat/tp_classic_buttons.hpp"
+#include "../compat/lazy_tweaks.hpp"
+#include "../quick_access/quick_access.hpp"
 #include "m_Do/m_Do_graphic.h"
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 
 #include <algorithm>
 
 f32 qa_user_hud_scale();
+
+static u8 s_zDisplayItem = dItemNo_NONE_e;
+
+static u8 z_display_item() {
+    if (!quick_access_z_scratch_active()) {
+        s_zDisplayItem = resolved_select_item(2);
+    }
+    return s_zDisplayItem;
+}
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, Meter2DrawDrawHook);
 DEFINE_HOOK(&dMeter2Draw_c::drawButtonZ, DrawButtonZHook);
@@ -76,9 +87,9 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
     ensure_z_buffers();
     ensure_z_slot_initialized();
 
-    u8 zItem = dComIfGp_getSelectItem(2);
+    u8 zItem = z_display_item();
     if (zItem == 0xFF || zItem == 0x00 || zItem == dItemNo_NONE_e) {
-        if (g_zInventorySlot != 0xFF && g_zInventorySlot < 24) {
+        if (!quick_access_z_scratch_active() && g_zInventorySlot != 0xFF && g_zInventorySlot < 24) {
             zItem = dComIfGs_getItem(g_zInventorySlot, false);
         }
     }
@@ -369,11 +380,11 @@ static bool s_midnaLPikariHeld = false;
 static f32 s_midnaLPikariFrame = 0.0f;
 
 bool midna_l_overlay_hides_pane() {
-    return s_midnaLDrawWindow && g_configCustomZButtonEnabled && controls_midna_on_l();
+    return s_midnaLDrawWindow && te_midna_button_active() && controls_midna_on_l();
 }
 
 static bool midna_l_overlay_wanted(dMeter2Draw_c* draw) {
-    if (!g_configCustomZButtonEnabled || isNativeZButtonEngine() || !controls_midna_on_l() ||
+    if (!te_midna_button_active() || lazy_tweaks_hide_midna_icon() || !controls_midna_on_l() ||
         isCanoeRiding() || draw == nullptr || draw->getMainScreenPtr() == nullptr || isTitleOrMainMenu())
     {
         return false;
@@ -392,8 +403,10 @@ HookAction on_meter2_draw_draw_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
-    if (g_configCustomZButtonEnabled && !isNativeZButtonEngine() && !isTitleOrMainMenu()) {
-        restore_z_item_draw_state();
+    if (te_midna_button_active() && !isTitleOrMainMenu()) {
+        if (g_configCustomZButtonEnabled) {
+            restore_z_item_draw_state();
+        }
         restore_midna_pictures_for_draw(draw);
     }
     if (!midna_l_overlay_wanted(draw)) {
@@ -676,9 +689,9 @@ void draw_z_ammo_digits(dMeter2Draw_c* draw, f32 baseX, f32 baseY, f32 iconW, f3
     }
 
     ensure_z_slot_initialized();
-    u8 zItem = resolved_select_item(2);
+    u8 zItem = z_display_item();
     if (zItem == 0xFF || zItem == 0x00 || zItem == dItemNo_NONE_e) {
-        if (g_zInventorySlot != 0xFF && g_zInventorySlot < 24) {
+        if (!quick_access_z_scratch_active() && g_zInventorySlot != 0xFF && g_zInventorySlot < 24) {
             zItem = dComIfGs_getItem(g_zInventorySlot, false);
         }
     }
@@ -765,9 +778,9 @@ void on_draw_button_z_post(ModContext*, void* args, void*, void*) {
     }
 
     ensure_z_slot_initialized();
-    u8 zItem = dComIfGp_getSelectItem(2);
+    u8 zItem = z_display_item();
     if (zItem == 0xFF || zItem == 0x00 || zItem == dItemNo_NONE_e) {
-        if (g_zInventorySlot != 0xFF) {
+        if (!quick_access_z_scratch_active() && g_zInventorySlot != 0xFF) {
             zItem = dComIfGs_getItem(g_zInventorySlot, false);
         }
     }
@@ -862,9 +875,9 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
                 rbtn->setAlpha(zBaseAlpha);
             }
 
-            u8 zItem = dComIfGp_getSelectItem(2);
+            u8 zItem = z_display_item();
             if (zItem == 0xFF || zItem == 0x00 || zItem == dItemNo_NONE_e) {
-                if (g_zInventorySlot != 0xFF) {
+                if (!quick_access_z_scratch_active() && g_zInventorySlot != 0xFF) {
                     zItem = dComIfGs_getItem(g_zInventorySlot, false);
                 }
             }
@@ -1044,7 +1057,7 @@ void on_move_button_xy_post(ModContext*, void* args, void*, void*) {
 }
 
 void on_meter2_execute_post(ModContext*, void* args, void*, void*) {
-    if (!g_configCustomZButtonEnabled || !args || isTitleOrMainMenu()) {
+    if (!te_midna_button_active() || !args || isTitleOrMainMenu()) {
         return;
     }
 
@@ -1056,6 +1069,9 @@ void on_meter2_execute_post(ModContext*, void* args, void*, void*) {
     dMeter2Draw_c* draw = meter2->getMeterDrawPtr();
     if (draw) {
         update_midna_pane(draw);
+        if (!g_configCustomZButtonEnabled) {
+            return;
+        }
         if (!isWolfPlayer() && !is_pause_menu_open(draw)) {
             update_z_item_texture(draw);
         }
