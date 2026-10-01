@@ -158,6 +158,7 @@ void qa_invalidate_msg_window();
 
 void quick_access_wolf_draw(f32 screenW, f32 screenH, u8 alpha, f32 glow);
 void quick_access_wolf_shutdown();
+void quick_access_wolf_sync_fmap_archive();
 ModContext* qa_mod_ctx();
 
 bool qa_hint_button_ready();

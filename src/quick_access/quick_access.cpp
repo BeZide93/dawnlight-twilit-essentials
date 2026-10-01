@@ -3385,6 +3385,7 @@ ModResult init_quick_access(const HookService* hook_svc, const SaveService* save
 void update_quick_access(const LogService*, ModContext* mod_ctx) {
     s_modCtx = mod_ctx;
     update_quick_access_itemwheel();
+    quick_access_wolf_sync_fmap_archive();
     quick_access_edit_pointer_update();
 }
 

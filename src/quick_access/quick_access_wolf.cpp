@@ -2,6 +2,7 @@
 
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/d_menu_fmap.h"
 #include "d/d_select_cursor.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/J2DGraph/J2DScreen.h"
@@ -24,6 +25,24 @@ static bool s_wolfTexTried = false;
 
 static dSelect_cursor_c* s_portalCursor = nullptr;
 static f32 s_portalCursorNativeW = 0.0f;
+static bool s_fmapArchiveInUse = false;
+
+static void release_portal_cursor() {
+    delete s_portalCursor;
+    s_portalCursor = nullptr;
+    s_portalCursorNativeW = 0.0f;
+}
+
+void quick_access_wolf_sync_fmap_archive() {
+    if (dMenu_Fmap_c::MyClass != nullptr) {
+        s_fmapArchiveInUse = true;
+        return;
+    }
+    if (s_fmapArchiveInUse) {
+        s_fmapArchiveInUse = false;
+        release_portal_cursor();
+    }
+}
 
 void quick_access_wolf_shutdown() {
     JKR_DELETE(s_wolfDayPic);
@@ -32,9 +51,8 @@ void quick_access_wolf_shutdown() {
     s_wolfNightPic = nullptr;
     s_wolfTexTried = false;
 
-    delete s_portalCursor;
-    s_portalCursor = nullptr;
-    s_portalCursorNativeW = 0.0f;
+    release_portal_cursor();
+    s_fmapArchiveInUse = false;
 
     const ResourceService* res_svc = get_resource_service();
     ModContext* ctx = qa_mod_ctx();
@@ -140,6 +158,7 @@ static void draw_wolf_icon(f32 cx, f32 cy, f32 size, u8 alpha) {
 }
 
 static void draw_portal_icon(f32 cx, f32 cy, f32 size, u8 alpha) {
+    quick_access_wolf_sync_fmap_archive();
     create_portal_cursor();
 
     if (s_portalCursor == nullptr) {

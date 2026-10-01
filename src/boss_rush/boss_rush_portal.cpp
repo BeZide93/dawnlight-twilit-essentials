@@ -51,6 +51,8 @@ static f32        s_goldPortalW      = 0.0f;
 
 static dSelect_cursor_c* s_hoverBracket = nullptr;
 
+static bool s_fmapArchiveInUse = false;
+
 static const dusk::config::ConfigVar<bool>* s_mirrorModeVar = nullptr;
 
 static bool is_mirror_mode() {
@@ -100,6 +102,24 @@ static void tint_portal_pane_gold(J2DPane* pane) {
     for (J2DPane* child = pane->getFirstChildPane(); child != nullptr;
          child = child->getNextChildPane()) {
         tint_portal_pane_gold(child);
+    }
+}
+
+static void release_portal_screen() {
+    delete s_goldPortalScreen;
+    s_goldPortalScreen = nullptr;
+    s_goldPortalRoot   = nullptr;
+    s_goldPortalW      = 0.0f;
+}
+
+static void sync_fmap_archive() {
+    if (dMenu_Fmap_c::MyClass != nullptr) {
+        s_fmapArchiveInUse = true;
+        return;
+    }
+    if (s_fmapArchiveInUse) {
+        s_fmapArchiveInUse = false;
+        release_portal_screen();
     }
 }
 
@@ -276,6 +296,7 @@ static void fmap_draw_portal_post(ModContext*, void*, void*, void*) {
     f32 posX = 0.0f, posY = 0.0f;
     get_portal_screen_pos(back, &posX, &posY);
 
+    sync_fmap_archive();
     ensure_portal_screen();
 
     J2DGrafContext* ctx = dComIfGp_getCurrentGrafPort();
@@ -345,6 +366,8 @@ static HookAction dmap_map_mode_pre(ModContext*, void*, void*, void*) {
 }
 
 void update_boss_rush_portal(const LogService* log_svc, ModContext* mod_ctx) {
+    sync_fmap_archive();
+
     if (!s_warpPending) {
         s_warpDelay = 0;
         return;
@@ -391,9 +414,7 @@ void shutdown_boss_rush_portal() {
     s_requestDmapClose = false;
     s_portalHovered    = false;
     s_warpDelay        = 0;
+    s_fmapArchiveInUse = false;
 
-    delete s_goldPortalScreen;
-    s_goldPortalScreen = nullptr;
-    s_goldPortalRoot   = nullptr;
-    s_goldPortalW      = 0.0f;
+    release_portal_screen();
 }
