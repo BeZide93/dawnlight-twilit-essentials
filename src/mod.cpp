@@ -90,6 +90,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -2083,6 +2084,149 @@ static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "Controls",  tab_controls,  nullptr, nullptr },
     { sizeof(UiTabDesc), "Customization", tab_customization, customization_tab_update, nullptr },
 };
+
+static std::string* s_snapshotOut = nullptr;
+static int s_snapshotDepth = 0;
+
+static constexpr UiElementHandle kSnapshotLeft = 1;
+static constexpr UiElementHandle kSnapshotRight = 2;
+static constexpr UiElementHandle kSnapshotDialog = 3;
+
+static void snapshot_line(const std::string& text) {
+    s_snapshotOut->append(static_cast<size_t>(s_snapshotDepth) * 2, ' ');
+    *s_snapshotOut += text;
+    *s_snapshotOut += '\n';
+}
+
+static std::string snapshot_value(ModContext* ctx, const UiControlDesc* c) {
+    UiControlValue v = UI_CONTROL_VALUE_INIT;
+    bool have = false;
+    bool isFloat = false;
+    double floatValue = 0.0;
+    if (c->binding == UI_BINDING_CONFIG_VAR) {
+        if (svc_config == nullptr || c->config_var == 0) return "?";
+        if (c->kind == UI_CONTROL_TOGGLE) {
+            have = svc_config->get_bool(ctx, c->config_var, &v.bool_value) == MOD_OK;
+        } else {
+            have = svc_config->get_int(ctx, c->config_var, &v.int_value) == MOD_OK;
+            if (!have && svc_config->get_float(ctx, c->config_var, &floatValue) == MOD_OK) {
+                have = true;
+                isFloat = true;
+            }
+        }
+    } else if (c->get != nullptr) {
+        c->get(ctx, c->user_data, &v);
+        have = true;
+    }
+    if (!have) return "?";
+
+    switch (c->kind) {
+    case UI_CONTROL_TOGGLE:
+        return v.bool_value ? "On" : "Off";
+    case UI_CONTROL_SELECT:
+    case UI_CONTROL_DROPDOWN:
+        if (c->options != nullptr && v.int_value >= 0 &&
+            static_cast<size_t>(v.int_value) < c->option_count) {
+            return c->options[v.int_value];
+        }
+        return std::to_string(v.int_value);
+    case UI_CONTROL_NUMBER: {
+        std::string text = c->prefix != nullptr ? c->prefix : "";
+        if (isFloat) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%g", floatValue);
+            text += buf;
+        } else {
+            text += std::to_string(v.int_value);
+        }
+        if (c->suffix != nullptr) text += c->suffix;
+        return text;
+    }
+    case UI_CONTROL_STRING:
+    case UI_CONTROL_COLOR:
+        return v.string_value != nullptr ? v.string_value : "";
+    default:
+        return "?";
+    }
+}
+
+static bool snapshot_opens_dialog(UiPressedFn fn) {
+    return fn == on_open_stamina_dialog || fn == on_open_stamina_costs_dialog ||
+           fn == on_open_visible_equip_dialog;
+}
+
+static ModResult snapshot_add_control(ModContext* ctx, UiElementHandle pane, const UiControlDesc* c,
+                                      UiElementHandle* out_elem) {
+    if (out_elem != nullptr) *out_elem = 0;
+    if (pane == kSnapshotRight || c == nullptr || c->label == nullptr) return MOD_OK;
+
+    if (c->kind == UI_CONTROL_BUTTON) {
+        if (!snapshot_opens_dialog(c->on_pressed)) return MOD_OK;
+        std::string label = c->label;
+        while (!label.empty() && (label.back() == '.'|| label.back() == ' ')) label.pop_back();
+        snapshot_line(label + ":");
+        ++s_snapshotDepth;
+        c->on_pressed(ctx, c->user_data);
+        --s_snapshotDepth;
+        return MOD_OK;
+    }
+    if (c->kind == UI_CONTROL_GROUP || c->kind == UI_CONTROL_ICON_BUTTON ||
+        c->kind == UI_CONTROL_FILE_PICKER) {
+        return MOD_OK;
+    }
+
+    std::string line = std::string(c->label) + ": [" + snapshot_value(ctx, c) + "]";
+    if (c->is_disabled != nullptr && c->is_disabled(ctx, c->user_data)) line += " (inactive)";
+    snapshot_line(line);
+    return MOD_OK;
+}
+
+static ModResult snapshot_add_section(ModContext*, UiElementHandle pane, const char* title) {
+    if (pane != kSnapshotRight && title != nullptr) snapshot_line(std::string("-- ") + title + " --");
+    return MOD_OK;
+}
+
+static ModResult snapshot_add_text(ModContext*, UiElementHandle, const char*, UiElementHandle* out_elem) {
+    if (out_elem != nullptr) *out_elem = 0;
+    return MOD_OK;
+}
+
+static ModResult snapshot_dialog_push(ModContext* ctx, const UiDialogDesc* desc, UiDialogHandle* out_dialog) {
+    if (out_dialog != nullptr) *out_dialog = 0;
+    if (desc != nullptr && desc->build != nullptr) {
+        desc->build(ctx, kSnapshotDialog, desc->user_data, nullptr);
+    }
+    return MOD_OK;
+}
+
+std::string mod_settings_snapshot() {
+    if (svc_ui == nullptr || mod_ctx == nullptr) return {};
+
+    UiService recorder{};
+    const size_t hostSize = svc_ui->header.struct_size;
+    std::memcpy(&recorder, svc_ui, hostSize < sizeof(recorder) ? hostSize : sizeof(recorder));
+    recorder.pane_add_control = snapshot_add_control;
+    recorder.pane_add_section = snapshot_add_section;
+    recorder.pane_add_text = snapshot_add_text;
+    recorder.pane_add_rml = snapshot_add_text;
+    recorder.dialog_push = snapshot_dialog_push;
+
+    std::string out;
+    const UiService* realUi = svc_ui;
+    svc_ui = &recorder;
+    s_snapshotOut = &out;
+    s_snapshotDepth = 0;
+    for (const UiTabDesc& tab : s_modSettingsTabs) {
+        if (tab.build == nullptr) continue;
+        if (!out.empty()) out += '\n';
+        out += tab.title;
+        out += ":\n";
+        tab.build(mod_ctx, 0, kSnapshotLeft, kSnapshotRight, tab.user_data, nullptr);
+    }
+    s_snapshotOut = nullptr;
+    svc_ui = realUi;
+    return out;
+}
 
 static void on_open_mod_settings(ModContext*, void*) {
     if (!svc_ui) return;

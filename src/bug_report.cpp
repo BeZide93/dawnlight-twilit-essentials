@@ -24,6 +24,8 @@ extern const HttpService* svc_http;
 extern const LogService* svc_log;
 extern const UiService* svc_ui;
 
+std::string mod_settings_snapshot();
+
 namespace bug_report {
 namespace {
 
@@ -686,6 +688,15 @@ bool collect_save(const std::filesystem::path& root, Attachment* out) {
     return false;
 }
 
+bool collect_mod_settings(Attachment* out) {
+    const std::string settings = mod_settings_snapshot();
+    if (settings.empty()) return false;
+    out->filename = "mod_settings.txt";
+    out->mime = "text/plain";
+    out->data.assign(settings.begin(), settings.end());
+    return true;
+}
+
 std::string json_escape(std::string_view text);
 
 void build_report(Report* report, const std::string& id) {
@@ -718,6 +729,8 @@ void build_report(Report* report, const std::string& id) {
     }
     attachment = Attachment{};
     if (collect_save(root, &attachment)) report->attachments.push_back(std::move(attachment));
+    attachment = Attachment{};
+    if (collect_mod_settings(&attachment)) report->attachments.push_back(std::move(attachment));
 
     std::string logValue;
     for (size_t i = 0; i < logNames.size(); ++i) {
