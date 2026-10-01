@@ -396,6 +396,9 @@ bool compute_sprint_wind_allowed(int* outType) {
 
     const u32 stageType = dStage_stagInfo_GetSTType(stagInfo);
     *outType = static_cast<int>(stageType);
+    if (stageType == ST_ROOM) {
+        return false;
+    }
     if (stageType != ST_DUNGEON && stageType != ST_BOSS_ROOM) {
         return true;
     }
