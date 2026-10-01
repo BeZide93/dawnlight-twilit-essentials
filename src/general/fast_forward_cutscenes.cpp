@@ -26,7 +26,7 @@ int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
 
 float g_configGeneralFastForwardSpeed = 8.0f;
 
-#define ENABLE_FF_LOG 0
+#define ENABLE_FF_LOG 1
 
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
@@ -396,8 +396,20 @@ bool is_item_get_event(dEvt_control_c* evt) {
            std::strcmp(data->getName(), "DEFAULT_GETITEM") == 0;
 }
 
+bool is_warp_place_title() {
+    dMsgObject_c* msg = dMsgObject_getMsgObjectClass();
+    if (msg == nullptr || msg->getFukiKind() != 12) return false;
+    if (human_warp_cinematic_active()) return true;
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    return link != nullptr && link->mProcID == daAlink_c::PROC_WARP;
+}
+
+bool is_talk_message_active() {
+    return dMsgObject_isTalkNowCheck() && !is_warp_place_title();
+}
+
 bool is_dialogue_active(dEvt_control_c* evt) {
-    if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) return true;
+    if (is_talk_message_active() || dMeter2Info_isShopTalkFlag()) return true;
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     if (link != nullptr && link->mProcID == daAlink_c::PROC_TALK) return true;
     if (evt == nullptr || evt->mEventStatus != 1 || evt->mEventId < 0) return false;
@@ -460,7 +472,7 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
         }
     }
 
-    if (dMsgObject_isTalkNowCheck() || dMeter2Info_isShopTalkFlag()) return false;
+    if (is_talk_message_active() || dMeter2Info_isShopTalkFlag()) return false;
 
     if (!allowDoors && is_door_event(evt)) return false;
 
