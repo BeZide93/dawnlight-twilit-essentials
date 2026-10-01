@@ -459,6 +459,7 @@ static ConfigVarHandle s_varFreeCamDistanceZTarget = 0;
 static ConfigVarHandle s_varGeneralHumanWarp = 0;
 static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
+static ConfigVarHandle s_varGeneralFastDoorAnimations = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralNoBattleMusic = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
@@ -1003,6 +1004,12 @@ static void on_general_scene_transitions_changed(ModContext*, ConfigVarHandle, c
     }
 }
 
+static void on_general_fast_door_animations_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configGeneralFastDoorAnimations = value->bool_value;
+    }
+}
+
 static void on_boss_bar_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configBossBarEnabled = value->bool_value;
@@ -1114,7 +1121,16 @@ static bool is_swim_sprint_speed_disabled(ModContext*, void*) {
 }
 
 static bool is_fast_forward_speed_disabled(ModContext*, void*) {
-    return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_OFF;
+    return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_OFF &&
+           !g_configGeneralFastDoorAnimations;
+}
+
+static bool is_fast_door_animations_disabled(ModContext*, void*) {
+    return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_VERY_FAST;
+}
+
+static bool is_skip_cutscenes_disabled(ModContext*, void*) {
+    return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_VERY_FAST;
 }
 
 static bool is_controls_midna_disabled(ModContext*, void*) {
@@ -1631,19 +1647,23 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_rml(mod_ctx, right,
         "<p>General options.</p>", nullptr);
     ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
-        "<p>Skips skippable cutscenes automatically.</p>");
+        "<p>Skips skippable cutscenes automatically. Always active when "
+        "<b>Fast-forward unskippable cutscenes</b> is set to <b>Skip even more</b>.</p>",
+        is_skip_cutscenes_disabled);
     static const char* const kFastForwardCutscenesModes[] = {"Off", "On", "Skip even more"};
     ui_add_select(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
         "<p><b>On</b> plays cutscenes that can't be skipped at increased speed. Dialogue text "
-        "still runs at normal speed. <b>Skip even more</b> also speeds up doors opening and "
-        "other waits that normally stay at normal speed.</p>",
+        "still runs at normal speed. <b>Skip even more</b> also skips all skippable cutscenes "
+        "(even if <b>Skip all cutscenes</b> is off), speeds up doors opening and other waits "
+        "that normally stay at normal speed, and shows all dialogue text instantly and "
+        "advances it automatically. Choices still wait for your input.</p>",
         kFastForwardCutscenesModes, 3);
     if (s_varGeneralFastForwardSpeed != 0) {
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Fast-forward speed";
-        c.help_rml = "<p>Speed multiplier for fast-forwarded cutscenes (default: 8x, "
-                     "max 15x).</p>";
+        c.help_rml = "<p>Speed multiplier for fast-forwarded cutscenes and fast door "
+                     "animations (default: 8x, max 15x).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varGeneralFastForwardSpeed;
         c.is_disabled = is_fast_forward_speed_disabled;
@@ -1653,11 +1673,17 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = "x";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_toggle(left, "Fast door animations", s_varGeneralFastDoorAnimations,
+        "<p>Speeds up only Link opening and walking through doors, cutscenes keep their normal "
+        "speed. Works independently of the fast-forward setting. Already included in "
+        "<b>Skip even more</b>.</p>",
+        is_fast_door_animations_disabled);
     static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
     ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
         "<p><b>Fast</b> speeds up room, door and map transitions. "
         "<b>Vanilla</b> keeps the normal speed.</p>",
         kSceneTransitionModes, 2);
+    svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
 
     ui_add_toggle(left, "Horse camera: no auto-recenter", s_varHorseCamNoRecenter,
         "<p>On Epona, the camera stays where you point it with the C-Stick.</p>");
@@ -2698,6 +2724,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varGeneralSceneTransitions, &mode);
             g_configFasterTransitions = mode == 0;
             svc_config->subscribe(mod_ctx, s_varGeneralSceneTransitions, on_general_scene_transitions_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descGeneralFastDoors = CONFIG_VAR_DESC_INIT;
+        descGeneralFastDoors.name = "generalFastDoorAnimations";
+        descGeneralFastDoors.type = CONFIG_VAR_BOOL;
+        descGeneralFastDoors.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descGeneralFastDoors, &s_varGeneralFastDoorAnimations) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralFastDoorAnimations, &g_configGeneralFastDoorAnimations);
+            svc_config->subscribe(mod_ctx, s_varGeneralFastDoorAnimations, on_general_fast_door_animations_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descHp = CONFIG_VAR_DESC_INIT;

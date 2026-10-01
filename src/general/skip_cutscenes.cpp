@@ -1,10 +1,17 @@
 #include "skip_cutscenes.hpp"
+#include "fast_forward_cutscenes.hpp"
 
 #include "d/d_event.h"
 
 bool g_configGeneralSkipCutscenes = false;
 
 bool is_boss_rush_active();
+
+bool skip_cutscenes_enabled() {
+    return g_configGeneralSkipCutscenes ||
+           g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_VERY_FAST ||
+           is_boss_rush_active();
+}
 
 DEFINE_HOOK(&dEvt_control_c::skipper, GeneralSkipperHook);
 
@@ -15,7 +22,7 @@ static int s_skipArm = 0;
 static int s_skipCooldown = 0;
 
 static HookAction on_skipper_pre(ModContext*, void* args, void*, void*) {
-    if ((!g_configGeneralSkipCutscenes && !is_boss_rush_active()) || !args) return HOOK_CONTINUE;
+    if (!skip_cutscenes_enabled() || !args) return HOOK_CONTINUE;
 
     dEvt_control_c* evt = mods::arg<dEvt_control_c*>(args, 0);
     if (!evt) return HOOK_CONTINUE;

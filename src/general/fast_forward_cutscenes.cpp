@@ -13,18 +13,24 @@
 #include "dusk/settings.h"
 #include "d/d_stage.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_op/f_op_overlap_mng.h"
 #include "f_pc/f_pc_name.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "d/actor/d_a_midna.h"
+#include "dusk/config_var.hpp"
 #include "human_warp.hpp"
+#include "m_Do/m_Do_controller_pad.h"
 
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
 int g_configGeneralFastForwardCutscenesMode = FF_CUTSCENES_OFF;
 
 float g_configGeneralFastForwardSpeed = 8.0f;
+
+bool g_configGeneralFastDoorAnimations = false;
 
 #define ENABLE_FF_LOG 1
 
@@ -53,6 +59,8 @@ using GetTimescaleFn = float (*)();
 using SetSimRateFn = void (*)(float);
 using GetSimRateFn = float (*)();
 using GetTransientSettingsFn = dusk::TransientSettings& (*)();
+using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
+using GameClockResetFn = void (*)();
 
 constexpr float kBaseSimHz = 30.0f;
 
@@ -71,6 +79,9 @@ GetTimescaleFn s_getClockScale = nullptr;
 SetSimRateFn s_setSimRate = nullptr;
 GetSimRateFn s_getSimRate = nullptr;
 GetTransientSettingsFn s_getTransientSettings = nullptr;
+GameClockResetFn s_gameClockReset = nullptr;
+dusk::config::ConfigVar<bool>* s_instantTextVar = nullptr;
+bool s_instantTextOverridden = false;
 
 bool s_active = false;
 float s_desiredScale = 1.0f;
@@ -95,6 +106,7 @@ bool update_game_mode_entry_hold() {
 
 DEFINE_HOOK_SYMBOL("aurora_get_timescale", float(), AuroraGetTimescaleHook);
 DEFINE_HOOK_SYMBOL("aurora_set_timescale", void(float), AuroraSetTimescaleHook);
+DEFINE_HOOK(&mDoCPd_c::read, FfDialoguePadReadHook);
 
 bool s_hiddenRun = false;
 float s_hostScale = 1.0f;
@@ -241,15 +253,25 @@ float resolved_desired_scale() {
     return sane_host_scale(s_desiredScale);
 }
 
+void drop_sim_backlog() {
+    if (s_gameClockReset != nullptr) {
+        s_gameClockReset();
+    } else if (s_setSimRate != nullptr && s_getSimRate != nullptr) {
+        s_setSimRate(s_getSimRate());
+    }
+}
+
 void stop_fast_forward() {
     if (!s_active) return;
     s_active = false;
     if (s_slowActive) {
         s_slowRestoreScale = resolved_desired_scale();
         if (!s_hiddenRun) force_set_timescale(s_slowScale);
+        drop_sim_backlog();
         return;
     }
     own_set_timescale(resolved_desired_scale());
+    drop_sim_backlog();
 }
 
 void update_turbo_release_watch() {
@@ -434,7 +456,7 @@ bool is_chest_open_event(dEvt_control_c* evt) {
            std::strncmp(data->getName(), "DEFAULT_TREASURE", 16) == 0;
 }
 
-bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
+bool is_gameplay_scene() {
     const char* stageName = dComIfGp_getStartStageName();
     if (stageName != nullptr &&
         (std::strcmp(stageName, "F_SP102") == 0 || std::strcmp(stageName, "title") == 0)) {
@@ -445,7 +467,71 @@ bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
 
     if (dComIfGp_isPauseFlag() || dScnPly_c::isPause()) return false;
 
-    if (dMeter2Info_getWindowStatus() != 0) return false;
+    return dMeter2Info_getWindowStatus() == 0;
+}
+
+bool is_door_start_event(const char* name) {
+    static constexpr const char* kDoorStartEvents[] = {
+        "SHUTTER_START",
+        "SHUTTER_START_STOP",
+        "BS_SHUTTER_START",
+        "BS_SHUTTER_START_B",
+        "KNOB_START",
+        "KNOB_START_B",
+    };
+    for (const char* doorEvent : kDoorStartEvents) {
+        if (std::strcmp(name, doorEvent) == 0) return true;
+    }
+    return false;
+}
+
+bool is_door_animation(dEvt_control_c* evt) {
+    if (evt == nullptr || evt->mEventStatus != 1) return false;
+
+    if (!is_gameplay_scene() || is_dialogue_active(evt)) return false;
+
+    if (dComIfGp_isEnableNextStage() || fopOvlpM_IsPeek()) return false;
+
+    const int idx = static_cast<int>(evt->mOrderIdx);
+    if (idx >= 0 && idx < 8 && evt->mOrder[idx].mEventType == dEvt_type_DOOR_e) return true;
+
+    if (is_door_event(evt)) return true;
+
+    if (evt->mEventId < 0) return false;
+    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+    return data != nullptr && data->getName() != nullptr && is_door_start_event(data->getName());
+}
+
+bool is_dialogue_fast_forward_wanted() {
+    if (g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_VERY_FAST) return false;
+
+    if (!is_gameplay_scene() || !is_talk_message_active()) return false;
+
+    return is_player_process_running();
+}
+
+void set_instant_text_override(bool on) {
+    if (s_instantTextVar == nullptr) return;
+    if (on) {
+        if (!s_instantTextOverridden && !s_instantTextVar->getValue()) {
+            s_instantTextVar->setOverrideValue(true);
+            s_instantTextOverridden = true;
+        }
+    } else if (s_instantTextOverridden) {
+        s_instantTextVar->clearOverride();
+        s_instantTextOverridden = false;
+    }
+}
+
+void on_ff_dialogue_pad_read_post(ModContext*, void*, void*, void*) {
+    const bool wanted = is_dialogue_fast_forward_wanted();
+    set_instant_text_override(wanted);
+    if (!wanted || s_instantTextVar == nullptr || !s_instantTextVar->getValue()) return;
+    mDoCPd_c::getCpadInfo(PAD_1).mButtonFlags |= PAD_BUTTON_B;
+}
+
+bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
+    if (!is_gameplay_scene()) return false;
 
     if (is_dialogue_active(evt)) return false;
 
@@ -533,9 +619,19 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
         if (hook_svc->resolve(mod_ctx, "aurora_get_timescale", &addr, nullptr) == MOD_OK && addr) {
             s_getTimescale = reinterpret_cast<GetTimescaleFn>(addr);
         }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::game_clock::reset", &addr, nullptr) == MOD_OK && addr) {
+            s_gameClockReset = reinterpret_cast<GameClockResetFn>(addr);
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK && addr) {
+            s_instantTextVar = static_cast<dusk::config::ConfigVar<bool>*>(
+                reinterpret_cast<GetConfigVarFn>(addr)("game.instantText"));
+        }
     }
     mods::hook::add_post<AuroraGetTimescaleHook>(hook_svc, on_aurora_get_timescale_post);
     mods::hook::add_pre<AuroraSetTimescaleHook>(hook_svc, on_aurora_set_timescale_pre);
+    mods::hook::add_post<FfDialoguePadReadHook>(hook_svc, on_ff_dialogue_pad_read_post);
     return MOD_OK;
 }
 
@@ -631,7 +727,8 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* ff_ctx
 
     const bool veryFast = g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_VERY_FAST;
     dEvt_control_c* evt = dComIfGp_getEvent();
-    const bool genuine = is_genuine_cutscene(evt, veryFast);
+    const bool fastDoor = g_configGeneralFastDoorAnimations && !veryFast && is_door_animation(evt);
+    const bool genuine = fastDoor || is_genuine_cutscene(evt, veryFast);
 
     if (!genuine) {
         stop_fast_forward();
@@ -644,10 +741,9 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* ff_ctx
         ++s_confirmFrames;
     }
 
-    const bool skipWillHandle = evt->mSkipFunc != nullptr &&
-                                (g_configGeneralSkipCutscenes || is_boss_rush_active());
+    const bool skipWillHandle = evt->mSkipFunc != nullptr && skip_cutscenes_enabled();
 
-    const bool shouldFastForward = g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_OFF &&
+    const bool shouldFastForward = (fastDoor || g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_OFF) &&
                                    !skipWillHandle &&
                                    s_confirmFrames >= kLeadFrames;
 
@@ -672,6 +768,8 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* ff_ctx
 void fast_forward_set_hidden_run(bool on);
 
 void shutdown_fast_forward_cutscenes() {
+    set_instant_text_override(false);
+    s_instantTextVar = nullptr;
     fast_forward_set_hidden_run(false);
     stop_fast_forward();
     s_confirmFrames = 0;

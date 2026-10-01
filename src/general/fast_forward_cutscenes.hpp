@@ -12,6 +12,7 @@ enum FastForwardCutscenesMode {
 
 extern int g_configGeneralFastForwardCutscenesMode;
 extern float g_configGeneralFastForwardSpeed;
+extern bool g_configGeneralFastDoorAnimations;
 
 float clamp_fast_forward_speed(float speed);
 

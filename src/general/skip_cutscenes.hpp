@@ -6,5 +6,7 @@
 
 extern bool g_configGeneralSkipCutscenes;
 
+bool skip_cutscenes_enabled();
+
 ModResult init_skip_cutscenes(const HookService* hook_svc, ModError* error);
 void shutdown_skip_cutscenes();

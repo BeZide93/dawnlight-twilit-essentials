@@ -25,7 +25,6 @@ static bool s_hooksInstalled = false;
 static int64_t s_mapFrames = 10;
 static int64_t s_specialFrames = 10;
 static int64_t s_doorFrames = 10;
-static int64_t s_wipeFrames = 0;
 static int64_t s_pauseMenuFrames = 8;
 static int64_t s_whiteHoldFrames = 6;
 
@@ -84,9 +83,8 @@ static void on_exec_first_snap3_replace(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    if (self->field_0x11f > (u8)s_wipeFrames) {
-        self->field_0x11f = (u8)s_wipeFrames;
-        self->mTimer = (s_wipeFrames > 0 ? 2 : 0);
+    if (self->field_0x11f > (u8)s_mapFrames) {
+        self->field_0x11f = (u8)s_mapFrames;
     }
 
     if (cLib_calcTimer(&self->field_0x11f) == 0 && self->field_0x11c != 0) {
@@ -135,7 +133,7 @@ static void on_exec_fade_out3_replace(ModContext*, void* args, void*, void*) {
                 fader->setStatus(JUTFader::Wait, 0);
                 mDoGph_gInf_c::startFadeOut((int)s_mapFrames);
             }
-            int64_t waitFrames = s_mapFrames + s_whiteHoldFrames;
+            int64_t waitFrames = needsRestart ? s_mapFrames + s_whiteHoldFrames : s_whiteHoldFrames;
             if (waitFrames > 120) {
                 waitFrames = 120;
             }
