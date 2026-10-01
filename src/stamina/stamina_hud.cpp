@@ -22,7 +22,7 @@ float g_configStaminaBarY = 0.0f;
 
 ConfigVarHandle g_staminaBarVars[2] = {};
 ConfigVarHandle g_staminaBarStyleVar = 0;
-int g_configStaminaBarStyle = 0;
+int g_configStaminaBarStyle = 1;
 
 enum StaminaBarStyle {
     kStaminaBarStyleDefault = 0,
@@ -105,9 +105,9 @@ ModResult init_stamina_bar_config(const ConfigService* cfg, ModContext* ctx) {
     ConfigVarDesc styleDesc = CONFIG_VAR_DESC_INIT;
     styleDesc.name = "staminaBarStyle";
     styleDesc.type = CONFIG_VAR_INT;
-    styleDesc.default_int = kStaminaBarStyleDefault;
+    styleDesc.default_int = kStaminaBarStyleWheel;
     if (cfg->register_var(ctx, &styleDesc, &g_staminaBarStyleVar) == MOD_OK) {
-        int64_t style = 0;
+        int64_t style = kStaminaBarStyleWheel;
         cfg->get_int(ctx, g_staminaBarStyleVar, &style);
         g_configStaminaBarStyle = static_cast<int>(style);
         cfg->subscribe(ctx, g_staminaBarStyleVar, on_stamina_bar_style_changed, nullptr, nullptr);

@@ -63,7 +63,7 @@ void boss_bar_preview_cancel() { s_bossBarPreviewFrames = 0; }
 
 ConfigVarHandle g_bossBarVars[2] = {};
 ConfigVarHandle g_bossBarStyleVar = 0;
-int g_configBossBarStyle = 0;
+int g_configBossBarStyle = 1;
 
 enum BossBarStyle {
     kBossBarStyleDefault = 0,
@@ -122,9 +122,9 @@ ModResult init_boss_bar_config(const ConfigService* cfg, ModContext* ctx) {
     ConfigVarDesc styleDesc = CONFIG_VAR_DESC_INIT;
     styleDesc.name = "bossBarStyle";
     styleDesc.type = CONFIG_VAR_INT;
-    styleDesc.default_int = kBossBarStyleDefault;
+    styleDesc.default_int = kBossBarStyleThinner;
     if (cfg->register_var(ctx, &styleDesc, &g_bossBarStyleVar) == MOD_OK) {
-        int64_t style = 0;
+        int64_t style = kBossBarStyleThinner;
         cfg->get_int(ctx, g_bossBarStyleVar, &style);
         g_configBossBarStyle = static_cast<int>(style);
         cfg->subscribe(ctx, g_bossBarStyleVar, on_boss_bar_style_changed, nullptr, nullptr);
