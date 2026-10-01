@@ -552,7 +552,7 @@ void store_saved_props() {
 }
 
 bool common_wanted() {
-    return !isTitleOrMainMenu() && !is_pause_menu_open() && !is_boss_rush_active();
+    return !isTitleOrMainMenu() && !is_pause_menu_open();
 }
 
 bool qa_wanted() {

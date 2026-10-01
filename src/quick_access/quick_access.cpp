@@ -2698,7 +2698,7 @@ static void consume_quick_access_button(interface_of_controller_pad& pad) {
 }
 
 static void take_hd_minimap_right(interface_of_controller_pad& pad) {
-    if (!controls_hd_minimap_on_right() || s_menuOpen || s_editMode) {
+    if (!controls_hd_minimap_on_right() || s_menuOpen || s_editMode || boss_rush_is_fight_engaged()) {
         return;
     }
     if ((pad.mPressedButtonFlags & PAD_BUTTON_RIGHT) != 0) {
@@ -2759,7 +2759,7 @@ static HookAction on_qa_ctrl_show_map_pre(ModContext*, void* args, void*, void*)
 static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     s_hdMinimapToggleTrig = false;
     s_hdCollectionRouted = false;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
         close_menu();
         s_menuAlpha = 0.0f;
         return;
@@ -2799,7 +2799,7 @@ static u32 s_keyWaitHiddenHeld = 0;
 static HookAction on_qa_mw_key_wait_pre(ModContext*, void*, void*, void*) {
     s_keyWaitHiddenPressed = 0;
     s_keyWaitHiddenHeld = 0;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active()) {
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu()) {
         return HOOK_CONTINUE;
     }
     u32 ringBits = controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & (PAD_BUTTON_UP | PAD_BUTTON_DOWN);
@@ -2825,7 +2825,7 @@ static u32 s_mwExecuteHiddenHeld = 0;
 static HookAction on_qa_mw_execute_pre(ModContext*, void*, void*, void*) {
     s_mwExecuteHiddenPressed = 0;
     s_mwExecuteHiddenHeld = 0;
-    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() || is_boss_rush_active() ||
+    if (!g_configQuickAccessEnabled || isTitleOrMainMenu() ||
         !controls_hd_collection_on_left() || s_hdCollectionRouted ||
         dMeter2Info_getWindowStatus() != 0 ||
         (controls_binding_bit(CTRL_BIND_QUICK_ACCESS) & PAD_BUTTON_DOWN) == 0)
@@ -3045,7 +3045,7 @@ static void on_meter2_draw_quick_access_post(ModContext*, void* args, void*, voi
         quick_access_strip_reset();
     }
 
-    if (!isWolfPlayer() && !is_boss_rush_active()) {
+    if (!isWolfPlayer()) {
         J2DGrafContext* hudCtx = dComIfGp_getCurrentGrafPort();
         if (hudCtx) hudCtx->setup2D();
         draw_strip_hud_icon(screen);
