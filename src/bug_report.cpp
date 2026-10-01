@@ -554,68 +554,93 @@ bool collect_mod_list(const std::filesystem::path& root, Attachment* out) {
     return true;
 }
 
-void scan_gci_candidates(const std::filesystem::path& base,
-    std::vector<std::filesystem::path>* gciDirs, std::vector<std::filesystem::path>* rawFiles) {
+bool has_suffix_ci(const std::string& name, std::string_view suffix) {
+    if (name.size() < suffix.size()) return false;
+    return to_lower(name.substr(name.size() - suffix.size())) == suffix;
+}
+
+void scan_card_root(const std::filesystem::path& dir, std::vector<std::filesystem::path>* gciFiles,
+    std::vector<std::filesystem::path>* rawFiles) {
     std::error_code ec;
-    const std::filesystem::path gcDir = base / "GC";
-    if (std::filesystem::is_directory(gcDir, ec)) {
-        std::filesystem::directory_iterator region(gcDir,
-            std::filesystem::directory_options::skip_permission_denied, ec);
-        if (!ec) {
-            std::filesystem::directory_iterator regionsEnd;
-            for (; region != regionsEnd; region.increment(ec)) {
-                if (ec) break;
-                const std::filesystem::directory_entry& regionEntry = *region;
-                std::error_code regionEc;
-                if (!regionEntry.is_directory(regionEc) || regionEc) continue;
-                for (const char* card : {"Card A", "Card B"}) {
-                    std::error_code cardEc;
-                    if (std::filesystem::is_directory(regionEntry.path() / card, cardEc)) {
-                        gciDirs->push_back(regionEntry.path() / card);
-                    }
-                }
-                std::filesystem::directory_iterator files(regionEntry.path(),
-                    std::filesystem::directory_options::skip_permission_denied, regionEc);
-                if (!regionEc) {
-                    std::filesystem::directory_iterator filesEnd;
-                    for (; files != filesEnd; files.increment(regionEc)) {
-                        if (regionEc) break;
-                        const std::filesystem::directory_entry& file = *files;
-                        std::error_code fileEc;
-                        if (file.is_regular_file(fileEc) && !fileEc &&
-                            file.path().extension().string() == ".raw") {
-                            rawFiles->push_back(file.path());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    std::filesystem::directory_iterator loose(base,
+    if (!std::filesystem::is_directory(dir, ec)) return;
+    std::filesystem::directory_iterator it(dir,
         std::filesystem::directory_options::skip_permission_denied, ec);
-    if (!ec) {
-        std::filesystem::directory_iterator looseEnd;
-        for (; loose != looseEnd; loose.increment(ec)) {
-            if (ec) break;
-            const std::filesystem::directory_entry& entry = *loose;
-            std::error_code entryEc;
-            if (!entry.is_regular_file(entryEc) || entryEc) continue;
-            const std::string name = entry.path().filename().string();
-            if (name.size() >= 4 && name.rfind(".gci") == name.size() - 4) {
-                gciDirs->push_back(entry.path());
-            } else if (name.rfind("MemoryCard", 0) == 0 &&
-                       name.rfind(".raw") == name.size() - 4) {
-                rawFiles->push_back(entry.path());
+    if (ec) return;
+    std::filesystem::directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec) break;
+        const std::filesystem::directory_entry& entry = *it;
+        std::error_code entryEc;
+        if (entry.is_directory(entryEc) && !entryEc) {
+            for (const char* card : {"Card A", "Card B"}) {
+                std::filesystem::path candidate;
+                if (newest_matching_file(entry.path() / card, ".gci", nullptr, &candidate)) {
+                    gciFiles->push_back(candidate);
+                }
             }
+            continue;
+        }
+        if (!entry.is_regular_file(entryEc) || entryEc) continue;
+        const std::string name = entry.path().filename().string();
+        if (has_suffix_ci(name, ".gci")) {
+            gciFiles->push_back(entry.path());
+        } else if (to_lower(name).rfind("memorycard", 0) == 0 && has_suffix_ci(name, ".raw")) {
+            rawFiles->push_back(entry.path());
         }
     }
 }
 
+bool pick_newest(const std::vector<std::filesystem::path>& files, bool preferGz2,
+    std::filesystem::path* out) {
+    bool bestPreferred = false;
+    auto bestTime = std::filesystem::file_time_type::min();
+    out->clear();
+    for (const std::filesystem::path& file : files) {
+        std::error_code fileEc;
+        auto modified = std::filesystem::last_write_time(file, fileEc);
+        if (fileEc) continue;
+        const bool preferred =
+            preferGz2 && to_lower(file.filename().string()).find("gz2") != std::string::npos;
+        if (out->empty() || (preferred && !bestPreferred) ||
+            (preferred == bestPreferred && modified > bestTime)) {
+            *out = file;
+            bestPreferred = preferred;
+            bestTime = modified;
+        }
+    }
+    return !out->empty();
+}
+
+bool collect_save_from(const std::filesystem::path& base, Attachment* out) {
+    std::vector<std::filesystem::path> gciFiles;
+    std::vector<std::filesystem::path> rawFiles;
+    scan_card_root(base, &gciFiles, &rawFiles);
+    scan_card_root(base / "GC", &gciFiles, &rawFiles);
+
+    std::filesystem::path best;
+    if (pick_newest(gciFiles, true, &best)) {
+        out->filename = best.filename().string();
+        out->mime = "application/octet-stream";
+        if (read_file_bytes(best, kMaxSaveBytes, false, out)) return true;
+        out->data.clear();
+    }
+
+    if (pick_newest(rawFiles, false, &best)) {
+        if (extract_gci_from_raw(best, out)) {
+            out->filename = "save_from_raw.gci";
+            out->mime = "application/octet-stream";
+            return true;
+        }
+        out->data.clear();
+        out->filename = best.filename().string();
+        out->mime = "application/octet-stream";
+        return read_file_bytes(best, kMaxSaveBytes, false, out);
+    }
+    return false;
+}
+
 bool collect_save(const std::filesystem::path& root, Attachment* out) {
     std::error_code ec;
-    std::vector<std::filesystem::path> gciDirs;
-    std::vector<std::filesystem::path> rawFiles;
-
     std::vector<std::filesystem::path> bases{root};
     auto cwd = std::filesystem::current_path(ec);
     if (!ec) bases.push_back(cwd);
@@ -640,52 +665,8 @@ bool collect_save(const std::filesystem::path& root, Attachment* out) {
 
     for (const std::filesystem::path& base : bases) {
         if (base.empty()) continue;
-        scan_gci_candidates(base, &gciDirs, &rawFiles);
-    }
-
-    std::filesystem::path best;
-    bool bestPreferred = false;
-    auto bestTime = std::filesystem::file_time_type::min();
-    for (const std::filesystem::path& dir : gciDirs) {
-        std::filesystem::path candidate;
-        if (!newest_matching_file(dir, ".gci", nullptr, &candidate)) continue;
-        const bool preferred = to_lower(candidate.filename().string())
-                                   .find("gz2") != std::string::npos;
-        std::error_code fileEc;
-        auto modified = std::filesystem::last_write_time(candidate, fileEc);
-        if (fileEc) continue;
-        if (best.empty() || (preferred && !bestPreferred) ||
-            (preferred == bestPreferred && modified > bestTime)) {
-            best = candidate;
-            bestPreferred = preferred;
-            bestTime = modified;
-        }
-    }
-    if (!best.empty()) {
-        out->filename = best.filename().string();
-        out->mime = "application/octet-stream";
-        return read_file_bytes(best, kMaxSaveBytes, false, out);
-    }
-
-    std::filesystem::path newestRaw;
-    for (const std::filesystem::path& raw : rawFiles) {
-        std::error_code fileEc;
-        auto modified = std::filesystem::last_write_time(raw, fileEc);
-        if (fileEc) continue;
-        if (newestRaw.empty() || modified > bestTime) {
-            newestRaw = raw;
-            bestTime = modified;
-        }
-    }
-    if (!newestRaw.empty()) {
-        if (extract_gci_from_raw(newestRaw, out)) {
-            out->filename = "save_from_raw.gci";
-            out->mime = "application/octet-stream";
-            return true;
-        }
-        out->filename = newestRaw.filename().string();
-        out->mime = "application/octet-stream";
-        return read_file_bytes(newestRaw, kMaxSaveBytes, false, out);
+        if (collect_save_from(base, out)) return true;
+        *out = Attachment{};
     }
     return false;
 }
