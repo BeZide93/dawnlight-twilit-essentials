@@ -1,4 +1,5 @@
 #include "bug_report.hpp"
+#include "settings_transfer.hpp"
 
 #include "mods/svc/host.h"
 #include "mods/svc/http.h"
@@ -23,8 +24,6 @@ extern const HostService* svc_host;
 extern const HttpService* svc_http;
 extern const LogService* svc_log;
 extern const UiService* svc_ui;
-
-std::string mod_settings_snapshot();
 
 namespace bug_report {
 namespace {
@@ -51,6 +50,8 @@ constexpr size_t kMaxConfigBytes = 1024u * 1024u;
 constexpr size_t kMaxModListBytes = 256u * 1024u;
 constexpr size_t kMaxSaveBytes = 8u * 1024u * 1024u;
 constexpr size_t kMaxLogCount = 3;
+constexpr int32_t kMaxDiscordNameLength = 32;
+constexpr int32_t kMaxDescriptionLength = 1500;
 
 constexpr size_t kCardBlockSize = 0x2000;
 constexpr size_t kMaxCardBlocks = 0x800;
@@ -65,13 +66,14 @@ struct Attachment {
 
 struct Report {
     std::string content;
-    std::string embed;
     std::vector<Attachment> attachments;
 };
 
 std::string g_pendingId;
 std::string g_sentId;
 bool g_sendInFlight = false;
+std::string g_discordName;
+std::string g_description;
 
 std::string decode_webhook_url() {
     std::string url;
@@ -116,6 +118,14 @@ std::string to_lower(std::string text) {
         return static_cast<char>(std::tolower(c));
     });
     return text;
+}
+
+std::string trim(std::string_view text) {
+    size_t begin = 0;
+    size_t end = text.size();
+    while (begin < end && std::isspace(static_cast<unsigned char>(text[begin]))) ++begin;
+    while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+    return std::string(text.substr(begin, end - begin));
 }
 
 std::string normalize_for_match(std::string_view text) {
@@ -338,8 +348,7 @@ bool extract_gci_from_raw(const std::filesystem::path& rawPath, Attachment* out)
     return true;
 }
 
-void collect_logs(
-    const std::filesystem::path& root, Report* report, std::vector<std::string>* names) {
+void collect_logs(const std::filesystem::path& root, Report* report) {
     const std::filesystem::path logsDir = root / "logs";
     std::error_code ec;
     if (!std::filesystem::is_directory(logsDir, ec)) return;
@@ -376,15 +385,8 @@ void collect_logs(
         if (!read_file_bytes(log.path, kMaxLogBytes, true, &attachment)) continue;
         attachment.filename = log.path.filename().string();
         attachment.mime = "text/plain";
-        names->push_back(attachment.filename);
         report->attachments.push_back(std::move(attachment));
     }
-}
-
-bool collect_config(const std::filesystem::path& root, Attachment* out) {
-    out->filename = "config.json";
-    out->mime = "application/json";
-    return read_file_bytes(root / "config.json", kMaxConfigBytes, true, out);
 }
 
 bool extract_json_string(std::string_view json, std::string_view key, std::string* out) {
@@ -688,16 +690,13 @@ bool collect_save(const std::filesystem::path& root, Attachment* out) {
     return false;
 }
 
-bool collect_mod_settings(Attachment* out) {
-    const std::string settings = mod_settings_snapshot();
-    if (settings.empty()) return false;
-    out->filename = "mod_settings.txt";
-    out->mime = "text/plain";
-    out->data.assign(settings.begin(), settings.end());
+bool collect_settings_export(const std::string& id, Attachment* out) {
+    const std::string json = settings_transfer::export_json();
+    out->filename = "te_settings_" + id + ".json";
+    out->mime = "application/json";
+    out->data.assign(json.begin(), json.end());
     return true;
 }
-
-std::string json_escape(std::string_view text);
 
 void build_report(Report* report, const std::string& id) {
     const std::filesystem::path root = resolve_data_root();
@@ -711,39 +710,25 @@ void build_report(Report* report, const std::string& id) {
     }
     lines += std::string("Platform: ") + platform_name() + "\n";
     lines += "Time: " + utc_timestamp() + "\n";
+    const std::string discordName = trim(g_discordName);
+    lines += "Discord: " + (discordName.empty() ? std::string("not provided") : discordName) + "\n";
     if (root.empty()) {
         lines += "Data folder: could not be resolved\n";
     }
+    const std::string description = trim(g_description);
+    lines += "\n" + (description.empty() ? std::string("No description provided.") : description);
 
     report->content = std::move(lines);
 
-    std::vector<std::string> logNames;
-    collect_logs(root, report, &logNames);
+    collect_logs(root, report);
     Attachment attachment;
-    if (collect_config(root, &attachment)) {
-        report->attachments.push_back(std::move(attachment));
-    }
-    attachment = Attachment{};
     if (collect_mod_list(root, &attachment)) {
         report->attachments.push_back(std::move(attachment));
     }
     attachment = Attachment{};
     if (collect_save(root, &attachment)) report->attachments.push_back(std::move(attachment));
     attachment = Attachment{};
-    if (collect_mod_settings(&attachment)) report->attachments.push_back(std::move(attachment));
-
-    std::string logValue;
-    for (size_t i = 0; i < logNames.size(); ++i) {
-        if (i != 0) logValue += "\\n";
-        logValue += json_escape(logNames[i]);
-    }
-    const std::string logField =
-        logValue.empty() ? std::string("none found") : logValue;
-
-    std::string fields;
-    fields += "{\"name\":\"Logs (newest first)\",\"value\":\"" + logField + "\"}";
-    report->embed = "{\"title\":\"" + json_escape("Bug report " + id) +
-                    "\",\"color\":15158332,\"fields\":[" + fields + "]}";
+    if (collect_settings_export(id, &attachment)) report->attachments.push_back(std::move(attachment));
 }
 
 std::string json_escape(std::string_view text) {
@@ -787,9 +772,7 @@ std::string build_multipart(const std::string& id, const Report& report) {
     body += "Content-Disposition: form-data; name=\"payload_json\"\r\n";
     body += "Content-Type: application/json\r\n\r\n";
     body += "{\"content\":\"" + json_escape(report.content) + "\"";
-    if (!report.embed.empty()) {
-        body += ",\"embeds\":[" + report.embed + "]";
-    }
+    body += ",\"allowed_mentions\":{\"parse\":[]}";
     body += "}";
 
     int index = 0;
@@ -983,6 +966,36 @@ void on_consent_confirmed(ModContext*, UiDialogHandle, void*) {
     }
 }
 
+void get_report_text(ModContext*, void* user_data, UiControlValue* out_value) {
+    out_value->string_value = static_cast<std::string*>(user_data)->c_str();
+}
+
+void set_report_text(ModContext*, void* user_data, const UiControlValue* value) {
+    *static_cast<std::string*>(user_data) = value->string_value != nullptr ? value->string_value : "";
+}
+
+void add_report_text_input(ModContext* ctx, UiElementHandle pane, const char* label, int32_t maxLength,
+    std::string* target) {
+    UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
+    ctrl.kind = UI_CONTROL_STRING;
+    ctrl.label = label;
+    ctrl.binding = UI_BINDING_CALLBACKS;
+    ctrl.get = get_report_text;
+    ctrl.set = set_report_text;
+    ctrl.user_data = target;
+    ctrl.max_length = maxLength;
+    ctrl.string_set_mode = UI_STRING_SET_ON_CHANGE;
+    svc_ui->pane_add_control(ctx, pane, &ctrl, nullptr);
+}
+
+ModResult build_consent_dialog(ModContext* ctx, UiElementHandle pane, void*, ModError*) {
+    if (svc_ui == nullptr) return MOD_OK;
+    add_report_text_input(ctx, pane, "Discord username (optional)", kMaxDiscordNameLength,
+        &g_discordName);
+    add_report_text_input(ctx, pane, "Describe the bug", kMaxDescriptionLength, &g_description);
+    return MOD_OK;
+}
+
 }
 
 void on_create_bug_report_pressed(ModContext* ctx, void*) {
@@ -1011,7 +1024,7 @@ void on_create_bug_report_pressed(ModContext* ctx, void*) {
         "<p>Do you agree to send a bug report to Fimmel? "
         "It will include:</p>"
         "<p>\xe2\x80\x93 The last three log files<br/>"
-        "\xe2\x80\x93 config.json (your settings)<br/>"
+        "\xe2\x80\x93 Your Twilit Essentials settings<br/>"
         "\xe2\x80\x93 Your current save file<br/>"
         "\xe2\x80\x93 The list of installed mods<br/>"
         "</p>"
@@ -1020,6 +1033,9 @@ void on_create_bug_report_pressed(ModContext* ctx, void*) {
     desc.variant = UI_DIALOG_WARNING;
     desc.actions = actions;
     desc.action_count = 2;
+    desc.build = build_consent_dialog;
+
+    g_description.clear();
 
     UiDialogHandle handle = 0;
     svc_ui->dialog_push(ctx, &desc, &handle);

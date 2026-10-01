@@ -44,6 +44,7 @@
 #include "collection_menu/collection_menu_shield.hpp"
 #include "controls/controls.hpp"
 #include "bug_report.hpp"
+#include "settings_transfer.hpp"
 #include "util.hpp"
 #include "compat/twilight_hd.hpp"
 
@@ -239,6 +240,7 @@ IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 IMPORT_OPTIONAL_SERVICE(HttpService, svc_http);
 IMPORT_OPTIONAL_SERVICE(GameModeService, svc_game_mode);
 IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+IMPORT_OPTIONAL_SERVICE(FileService, svc_file);
 
 extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_header_record,
@@ -259,6 +261,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_http,
     &mod_meta_import_svc_game_mode,
     &mod_meta_import_svc_interp,
+    &mod_meta_import_svc_file,
 };
 
 static constexpr const char* kTitleLogoLinklePath = "res/title_logo/linkle/tex1_608x100_0c1c70378fb8cb46_6.png";
@@ -2514,6 +2517,8 @@ static ModResult build_mod_ui_panel(ModContext*, UiElementHandle panel, void*, M
         svc_ui->pane_add_control(mod_ctx, panel, &ctrlBugReport, nullptr);
     }
 
+    settings_transfer::add_transfer_button(mod_ctx, panel);
+
     svc_ui->pane_add_section(mod_ctx, panel, "Known Issues");
     svc_ui->pane_add_rml(mod_ctx, panel, known_issues::s_rml.c_str(), &known_issues::s_listElem);
     known_issues::fetch();
@@ -2535,6 +2540,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     ensure_system_heap_capacity();
+    settings_transfer::install_tracking(&svc_config);
     if (svc_config) {
         ConfigVarDesc descGeneralSkipCut = CONFIG_VAR_DESC_INIT;
         descGeneralSkipCut.name = "generalSkipCutscenes";
@@ -3409,6 +3415,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("collection_menu", shutdown_collection_menu);
     run_shutdown_step("collection_menu_chest", shutdown_collection_menu_chest);
     run_shutdown_step("epona", shutdown_epona);
+    settings_transfer::uninstall_tracking(&svc_config);
     return MOD_OK;
 }
 
