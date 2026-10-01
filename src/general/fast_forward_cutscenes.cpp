@@ -32,7 +32,7 @@ float g_configGeneralFastForwardSpeed = 8.0f;
 
 bool g_configGeneralFastDoorAnimations = false;
 
-#define ENABLE_FF_LOG 1
+#define ENABLE_FF_LOG 0
 
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
