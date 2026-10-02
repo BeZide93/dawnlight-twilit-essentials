@@ -17,7 +17,7 @@
 
 extern const LogService* svc_log;
 
-bool g_configQuickAccessHideWheelItems = false;
+int g_configQuickAccessHideWheelMode = QA_HIDE_WHEEL_OFF;
 
 static ModContext* s_wheelCtx = nullptr;
 static const SaveService* s_wheelSaveSvc = nullptr;
@@ -45,7 +45,7 @@ bool itemwheel_filter_active() {
     if (s_restoring || is_boss_rush_active()) {
         return false;
     }
-    return g_configQuickAccessEnabled && g_configQuickAccessHideWheelItems;
+    return g_configQuickAccessEnabled && g_configQuickAccessHideWheelMode != QA_HIDE_WHEEL_OFF;
 }
 
 static dSv_player_item_c& itemwheel_inventory() {
@@ -96,10 +96,11 @@ static void itemwheel_hidden_slots(const dSv_player_item_c& item, bool hidden[MA
     if (!itemwheel_filter_active()) {
         return;
     }
+    const bool hideBottles = g_configQuickAccessHideWheelMode == QA_HIDE_WHEEL_INCLUDING_BOTTLES;
     for (u8 slot = SLOT_11; slot <= SLOT_14; slot++) {
         if (item.mItems[slot] != dItemNo_NONE_e) {
             claimed[slot] = true;
-            hidden[slot] = !itemwheel_slot_on_button(slot);
+            hidden[slot] = hideBottles && !itemwheel_slot_on_button(slot);
         }
     }
     for (int q = 0; q < QA_QUICK_SLOTS; q++) {

@@ -290,7 +290,8 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
             *static_cast<int*>(retval) = keepSet;
             return HOOK_SKIP_ORIGINAL;
         }
-        if (link != nullptr && quick_access_keep_lantern_equipped(link) &&
+        if (link != nullptr &&
+            (quick_access_keep_lantern_equipped(link) || quick_access_oil_pour_check_active()) &&
             (itemNo == dItemNo_KANTERA_e || itemNo == dItemNo_KANTERA2_e))
         {
             *static_cast<int*>(retval) = keepSet;
@@ -330,7 +331,7 @@ HookAction on_check_item_set_button_pre(ModContext*, void* args, void* retval, v
         return HOOK_SKIP_ORIGINAL;
     }
 
-    if (quick_access_keep_lantern_equipped(link) &&
+    if ((quick_access_keep_lantern_equipped(link) || quick_access_oil_pour_check_active()) &&
         (itemNo == dItemNo_KANTERA_e || itemNo == dItemNo_KANTERA2_e))
     {
         *static_cast<int*>(retval) = 3;

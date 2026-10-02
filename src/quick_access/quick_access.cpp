@@ -1088,7 +1088,7 @@ HookAction on_qa_boots_equip_init_pre(ModContext*, void* args, void* retval, voi
             s_qaBootsEquipAllowed = false;
             return HOOK_CONTINUE;
         }
-        if (!g_configQuickAccessHideWheelItems) {
+        if (g_configQuickAccessHideWheelMode == QA_HIDE_WHEEL_OFF) {
             s_qaBootsDesired = !alink->checkEquipHeavyBoots();
             s_qaBootsGraceFrames = 45;
             return HOOK_CONTINUE;
@@ -2143,6 +2143,16 @@ static void edit_step_y(int dir) {
     quick_access_edit_move(0, dir);
 }
 
+static bool edit_shoulder_left_held(const interface_of_controller_pad& pad) {
+    return (pad.mButtonFlags & PAD_TRIGGER_L) != 0 || controls_l_shoulder_raw_held();
+}
+
+static bool edit_shoulder_right_held(const interface_of_controller_pad& pad) {
+    JUTGamePad* gamePad = JUTGamePad::getGamePad(PAD_1);
+    return (pad.mButtonFlags & PAD_TRIGGER_R) != 0 ||
+           (gamePad != nullptr && (gamePad->getButton() & PAD_TRIGGER_Z) != 0);
+}
+
 static void edit_rotate_step(int dir) {
     quick_access_edit_rotate_slot(dir);
 }
@@ -2381,8 +2391,8 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
 
         update_stick_repeat(stickX, quick_access_edit_cycle);
 
-        const int shoulderDir = (pad.mButtonFlags & PAD_TRIGGER_R) ? 1
-                              : (pad.mButtonFlags & PAD_TRIGGER_L) ? -1 : 0;
+        const int shoulderDir = edit_shoulder_right_held(pad) ? 1
+                              : edit_shoulder_left_held(pad) ? -1 : 0;
         update_axis_repeat(shoulderDir, s_shoulderRepeat.dir, s_shoulderRepeat.timer,
                            s_shoulderRepeat.count, edit_rotate_step);
 
