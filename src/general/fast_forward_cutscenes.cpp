@@ -32,7 +32,7 @@ float g_configGeneralFastForwardSpeed = 8.0f;
 
 bool g_configGeneralFastDoorAnimations = false;
 
-#define ENABLE_FF_LOG 0
+#define ENABLE_FF_LOG 1
 
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
@@ -61,6 +61,8 @@ using GetSimRateFn = float (*)();
 using GetTransientSettingsFn = dusk::TransientSettings& (*)();
 using GetConfigVarFn = dusk::config::ConfigVarBase* (*)(std::string_view);
 using GameClockResetFn = void (*)();
+using BeginSimTickFn = void (*)();
+using IsSimFrameFn = bool (*)();
 
 constexpr float kBaseSimHz = 30.0f;
 
@@ -80,6 +82,8 @@ SetSimRateFn s_setSimRate = nullptr;
 GetSimRateFn s_getSimRate = nullptr;
 GetTransientSettingsFn s_getTransientSettings = nullptr;
 GameClockResetFn s_gameClockReset = nullptr;
+BeginSimTickFn s_beginSimTick = nullptr;
+IsSimFrameFn s_isSimFrame = nullptr;
 dusk::config::ConfigVar<bool>* s_instantTextVar = nullptr;
 bool s_instantTextOverridden = false;
 
@@ -155,6 +159,14 @@ HookAction on_aurora_set_timescale_pre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
+bool in_sim_tick() {
+    return s_isSimFrame != nullptr && s_isSimFrame();
+}
+
+void reopen_sim_tick(bool wasInSimTick) {
+    if (wasInSimTick && s_beginSimTick != nullptr) s_beginSimTick();
+}
+
 enum ClockBackend { kBackendC = 0, kBackendSimRate, kBackendCpp, kBackendCount };
 bool s_backendBad[kBackendCount] = {};
 int s_backend = -1;
@@ -196,9 +208,12 @@ void backend_set(int backend, float scale) {
             s_setTimescale(scale);
         }
         break;
-    case kBackendSimRate:
+    case kBackendSimRate: {
+        const bool inSimTick = in_sim_tick();
         s_setSimRate(scale * kBaseSimHz);
+        reopen_sim_tick(inSimTick);
         break;
+    }
     case kBackendCpp:
         s_setClockScale(scale);
         break;
@@ -254,11 +269,15 @@ float resolved_desired_scale() {
 }
 
 void drop_sim_backlog() {
+    const bool inSimTick = in_sim_tick();
     if (s_gameClockReset != nullptr) {
         s_gameClockReset();
     } else if (s_setSimRate != nullptr && s_getSimRate != nullptr) {
         s_setSimRate(s_getSimRate());
+    } else {
+        return;
     }
+    reopen_sim_tick(inSimTick);
 }
 
 void stop_fast_forward() {
@@ -622,6 +641,14 @@ ModResult init_fast_forward_cutscenes(const HookService* hook_svc, ModError*) {
         addr = nullptr;
         if (hook_svc->resolve(mod_ctx, "dusk::game_clock::reset", &addr, nullptr) == MOD_OK && addr) {
             s_gameClockReset = reinterpret_cast<GameClockResetFn>(addr);
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::game_clock::begin_sim_tick", &addr, nullptr) == MOD_OK && addr) {
+            s_beginSimTick = reinterpret_cast<BeginSimTickFn>(addr);
+        }
+        addr = nullptr;
+        if (hook_svc->resolve(mod_ctx, "dusk::game_clock::is_sim_frame", &addr, nullptr) == MOD_OK && addr) {
+            s_isSimFrame = reinterpret_cast<IsSimFrameFn>(addr);
         }
         addr = nullptr;
         if (hook_svc->resolve(mod_ctx, "dusk::config::GetConfigVar", &addr, nullptr) == MOD_OK && addr) {
