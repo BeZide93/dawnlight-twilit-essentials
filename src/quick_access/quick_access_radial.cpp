@@ -108,9 +108,7 @@ void quick_access_radial_select(f32 stickX, f32 stickY, f32 stickMag) {
     }
 
     if (newSlot != s_selectedSlot && newSlot != SLOT_NONE) {
-        u8 active[QA_QUICK_SLOTS];
-        int count = qa_get_active_items(active);
-        if (newSlot < count) {
+        if (qa_slot_selectable(newSlot)) {
             s_selectedSlot = newSlot;
             Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_ITEM, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
@@ -221,9 +219,6 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     const f32 slotCenterX = centerX + qa_page_anim_offset();
     alpha = static_cast<u8>(alpha * pageAlphaRate);
 
-    u8 active[QA_QUICK_SLOTS];
-    const int activeCount = qa_get_active_items(active);
-
     const f32 slotCoords[QA_QUICK_SLOTS][2] = {
         { slotCenterX, centerY - radius },
         { slotCenterX, centerY + radius },
@@ -236,12 +231,13 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
         f32 sx = slotCoords[i][0];
         f32 sy = slotCoords[i][1];
 
-        if (i >= activeCount) {
+        const u8 itemNo = qa_custom_item(i);
+        if (itemNo == QA_ITEM_NONE) {
             qa_draw_collection_slot(sx, sy, 40.0f, static_cast<u8>(alpha * 0.35f), false, false);
             continue;
         }
-
-        u8 itemNo = active[i];
+        const bool available = qa_is_item_available(itemNo);
+        const u8 iconAlpha = available ? alpha : static_cast<u8>(alpha * 0.30f);
 
         s_slotScale[i] += ((isSelected ? 1.22f : 1.0f) - s_slotScale[i]) * 0.28f;
         const f32 currentScale = s_slotScale[i];
@@ -257,7 +253,12 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
             f32 iconY = 0.0f;
             f32 iconW = 0.0f;
             f32 iconH = 0.0f;
-            draw_icon(pic, img, sx, sy, currentScale, alpha, pic2, &iconX, &iconY, &iconW, &iconH);
+            draw_icon(pic, img, sx, sy, currentScale, iconAlpha, pic2, &iconX, &iconY, &iconW,
+                      &iconH);
+
+            if (!available) {
+                continue;
+            }
 
             qa_draw_item_ammo(itemNo, iconX, iconY, iconW, iconH, alpha);
 
@@ -269,7 +270,8 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
     }
 
     dSelect_cursor_c* cursor = qa_sel_cursor(0);
-    if (s_selectedSlot != SLOT_NONE && s_selectedSlot < activeCount && cursor != nullptr) {
+    const bool selectionValid = s_selectedSlot != SLOT_NONE && qa_slot_selectable(s_selectedSlot);
+    if (selectionValid && cursor != nullptr) {
         cursor->setParam(1.0f, 1.0f, 0.1f, 0.6f, 0.5f);
         cursor->setPos(slotCoords[s_selectedSlot][0], slotCoords[s_selectedSlot][1]);
         cursor->setAlphaRate(s_menuAlpha * pageAlphaRate);
@@ -281,9 +283,9 @@ void quick_access_radial_draw(f32 centerX, f32 centerY, u8 alpha, f32 glow) {
         }
     }
 
-    if (s_selectedSlot != SLOT_NONE && s_selectedSlot < activeCount) {
+    if (selectionValid) {
         char labelBuf[64] = "";
-        qa_item_label(active[s_selectedSlot], labelBuf, sizeof(labelBuf));
+        qa_item_label(qa_custom_item(s_selectedSlot), labelBuf, sizeof(labelBuf));
 
         if (labelBuf[0] != '\0') {
             const f32 fontW = 9.0f;

@@ -60,7 +60,7 @@ u8 qa_strip_assigned_item();
 void qa_custom_store();
 
 bool qa_is_item_available(u8 itemNo);
-int qa_get_active_items(u8 outItems[QA_QUICK_SLOTS]);
+bool qa_slot_selectable(int slot);
 void qa_execute_item(u8 itemNo);
 bool qa_is_lantern_active();
 bool qa_load_boots_worn();

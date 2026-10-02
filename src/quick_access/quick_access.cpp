@@ -268,6 +268,49 @@ static void sync_ooccoo_assignment() {
     }
 }
 
+static bool is_bomb_item(u8 itemNo) {
+    return itemNo == dItemNo_NORMAL_BOMB_e || itemNo == dItemNo_WATER_BOMB_e ||
+           itemNo == dItemNo_POKE_BOMB_e;
+}
+
+static bool bomb_in_any_bag(u8 itemNo) {
+    for (int b = 0; b < 3; b++) {
+        if (dComIfGs_getItem((u8)(SLOT_15 + b), false) == itemNo) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void sync_bomb_assignment() {
+    bool changed = false;
+    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
+        const u8 stale = s_customItems[i];
+        if (!is_bomb_item(stale) || bomb_in_any_bag(stale)) {
+            continue;
+        }
+        for (int b = 0; b < 3; b++) {
+            const u8 bag = dComIfGs_getItem((u8)(SLOT_15 + b), false);
+            if (is_bomb_item(bag) && !qa_custom_contains(bag)) {
+                s_customItems[i] = bag;
+                if (s_assignedItem == stale) {
+                    s_assignedItem = bag;
+                }
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (changed) {
+        qa_custom_store();
+    }
+}
+
+bool qa_slot_selectable(int slot) {
+    const u8 itemNo = qa_custom_item(slot);
+    return itemNo != QA_ITEM_NONE && qa_is_item_available(itemNo);
+}
+
 static void sync_wheel_down_assignment() {
     if (g_configCustomZButtonEnabled || twilight_hd_third_item_slot() || isNativeZButtonEngine()) {
         return;
@@ -518,17 +561,6 @@ bool qa_is_lantern_active() {
 bool qa_load_boots_worn() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
     return (link != nullptr && link->checkEquipHeavyBoots() != 0);
-}
-
-int qa_get_active_items(u8 outItems[QA_QUICK_SLOTS]) {
-    int count = 0;
-    for (int i = 0; i < QA_QUICK_SLOTS; i++) {
-        u8 itemNo = s_customItems[i];
-        if (itemNo != QA_ITEM_NONE && qa_is_item_available(itemNo)) {
-            outItems[count++] = itemNo;
-        }
-    }
-    return count;
 }
 
 bool quick_access_is_active() {
@@ -2059,9 +2091,7 @@ void qa_edit_pointer_close() {
 }
 
 void qa_pointer_hover_item_slot(int slot) {
-    u8 active[QA_QUICK_SLOTS];
-    const int count = qa_get_active_items(active);
-    if (!s_menuOpen || slot < 0 || slot >= count || slot == s_selectedSlot) {
+    if (!s_menuOpen || !qa_slot_selectable(slot) || slot == s_selectedSlot) {
         return;
     }
     s_selectedSlot = slot;
@@ -2069,15 +2099,13 @@ void qa_pointer_hover_item_slot(int slot) {
 }
 
 void qa_pointer_pick_item_slot(int slot) {
-    u8 active[QA_QUICK_SLOTS];
-    const int count = qa_get_active_items(active);
-    if (!s_menuOpen || slot < 0 || slot >= count) {
+    if (!s_menuOpen || !qa_slot_selectable(slot)) {
         return;
     }
     if (s_aimItem != QA_ITEM_NONE) {
         qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
     }
-    s_assignedItem = active[slot];
+    s_assignedItem = qa_custom_item(slot);
     qa_custom_store();
     play_ok_se();
     s_dpadCancelLatch = true;
@@ -2428,10 +2456,8 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
                     qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
                 }
                 if (s_selectedSlot != SLOT_NONE) {
-                    u8 active[QA_QUICK_SLOTS];
-                    const int count = qa_get_active_items(active);
-                    if (s_selectedSlot >= 0 && s_selectedSlot < count) {
-                        s_assignedItem = active[s_selectedSlot];
+                    if (qa_slot_selectable(s_selectedSlot)) {
+                        s_assignedItem = qa_custom_item(s_selectedSlot);
                         qa_custom_store();
                         play_ok_se();
                     }
@@ -2522,13 +2548,11 @@ static void quick_access_game_input(interface_of_controller_pad& pad) {
         if ((pad.mPressedButtonFlags & PAD_BUTTON_A) != 0) {
             pad.mPressedButtonFlags &= ~PAD_BUTTON_A;
             pad.mButtonFlags &= ~PAD_BUTTON_A;
-            u8 active[QA_QUICK_SLOTS];
-            const int count = qa_get_active_items(active);
-            if (s_selectedSlot != SLOT_NONE && s_selectedSlot >= 0 && s_selectedSlot < count) {
+            if (s_selectedSlot != SLOT_NONE && qa_slot_selectable(s_selectedSlot)) {
                 if (s_aimItem != QA_ITEM_NONE) {
                     qa_cancel_item_aim(static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass()));
                 }
-                s_assignedItem = active[s_selectedSlot];
+                s_assignedItem = qa_custom_item(s_selectedSlot);
                 qa_custom_store();
                 play_ok_se();
                 s_dpadCancelLatch = true;
@@ -2788,6 +2812,7 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
 
     sync_wheel_down_assignment();
     sync_ooccoo_assignment();
+    sync_bomb_assignment();
 
     qa_tick_bomb_tracking();
 
