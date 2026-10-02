@@ -6,6 +6,8 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_arrow.h"
 #include "d/d_camera.h"
+#include "d/d_cc_s.h"
+#include "d/d_cc_uty.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_drawlist.h"
 #include "f_op/f_op_actor_mng.h"
@@ -52,7 +54,6 @@ constexpr f32 kMaxSampleGap = 0.25f;
 constexpr f32 kMaxElevation = 1.55f;
 constexpr f32 kAngleToRad = 3.14159265f / 32768.0f;
 constexpr f32 kRadToAngle = 32768.0f / 3.14159265f;
-constexpr f32 kStatsLogInterval = 1.0f;
 constexpr f32 kGyroEmaAlphaMin = 0.05f;
 constexpr f32 kGyroEmaAlphaMax = 1.0f;
 constexpr f32 kGravityEmaAlpha = 0.1f;
@@ -77,8 +78,8 @@ f32 s_cameraAccumulator = 0.0f;
 bool s_inCameraExtra = false;
 bool s_presentationHooked = false;
 bool s_inSimTick = false;
+u32 s_simTickCount = 0;
 bool s_presentationSeen = false;
-bool s_subjectCameraOn = false;
 bool s_liveAimWarned = false;
 int s_activeTicks = 0;
 
@@ -142,8 +143,6 @@ constexpr int kMaxLinkModels = 24;
 constexpr s16 kBombArrowHoldSteps = 8;
 constexpr f32 kReloadAnimeSpeedUp = 2.0f;
 J3DModel* s_linkModels[kMaxLinkModels] = {};
-const char* s_linkModelNames[kMaxLinkModels] = {};
-int s_linkModelSwaps[kMaxLinkModels] = {};
 int s_linkModelCount = 0;
 constexpr int kMaxLinkEmitters = 12;
 JPABaseEmitter* s_linkEmitters[kMaxLinkEmitters] = {};
@@ -151,7 +150,6 @@ int s_linkEmitterCount = 0;
 JPAEmitterWorkData* s_emitterSwapWork = nullptr;
 Mtx s_savedEmitterPosCam;
 Mtx s_savedEmitterYBBCam;
-bool s_linkModelsLogged = false;
 Mtx s_baseViewMtx;
 Mtx s_liveViewMtx;
 bool s_viewSplit = false;
@@ -170,41 +168,6 @@ enum class ViewSwap {
 };
 ViewSwap s_viewSwap = ViewSwap::None;
 
-struct LiveStats {
-    int ticks = 0;
-    int linkSteps = 0;
-    int cameraRuns = 0;
-    int frames = 0;
-    int previews = 0;
-    int gyroReads = 0;
-    int appliedYaw = 0;
-    int appliedPitch = 0;
-    int cameraFirst = 0;
-    f32 camYawError = 0.0f;
-    f32 camPitchError = 0.0f;
-    f32 gyroYawTurn = 0.0f;
-    f32 gyroPitchTurn = 0.0f;
-    int arrowLaunches = 0;
-    int arrowBoosts = 0;
-    int linkPacketSwaps = 0;
-    int linkShapeSwaps = 0;
-    int packetDraws = 0;
-    int basePtrSwaps = 0;
-    int emitterSwaps = 0;
-    int shapeDraws = 0;
-    f32 stickTurn = 0.0f;
-    f32 maxPending = 0.0f;
-};
-LiveStats s_stats;
-
-struct NormalGyroStats {
-    int calls = 0;
-    f32 yawTurn = 0.0f;
-    f32 pitchTurn = 0.0f;
-};
-NormalGyroStats s_normalGyro;
-LiveClock::time_point s_lastStatsLog{};
-
 struct LinkMoveScale {
     bool active = false;
     bool ownGravity = false;
@@ -218,9 +181,19 @@ LinkMoveScale s_move;
 struct ArrowMoveScale {
     daArrow_c* arrow = nullptr;
     f32 boost = 1.0f;
-    f32 outLengthRate = 0.0f;
+    cXyz sweepStart;
 };
 ArrowMoveScale s_arrowMove;
+
+struct ArrowSweep {
+    fpc_ProcID id = fpcM_ERROR_PROCESS_ID_e;
+    u32 tick = 0;
+    u32 registeredTick = 0;
+    cXyz start;
+};
+constexpr int kArrowSweepSlots = 8;
+ArrowSweep s_arrowSweeps[kArrowSweepSlots];
+int s_arrowSweepNext = 0;
 
 void bt_log(const char* fmt, ...) {
     if (s_log == nullptr || s_log->info == nullptr) return;
@@ -366,11 +339,9 @@ void sync_gyro_keep_alive() {
     if (wanted && !s_gyroKeepAliveGet()) {
         s_gyroKeepAliveSet(true);
         s_ownsGyroKeepAlive = true;
-        bt_log("gyro keep-alive on");
     } else if (!wanted && s_ownsGyroKeepAlive) {
         s_gyroKeepAliveSet(false);
         s_ownsGyroKeepAlive = false;
-        bt_log("gyro keep-alive off");
     }
 }
 
@@ -432,7 +403,6 @@ void sample_stick(f32 dt, f32 zoom) {
     if (settings.invertY) pitchDir = -pitchDir;
     s_pendingYaw += amount * yawDir;
     s_pendingPitch += amount * pitchDir;
-    s_stats.stickTurn += amount;
 }
 
 f32 float_setting(void* var, f32 fallback) {
@@ -510,9 +480,6 @@ void sample_gyro(f32 dt, f32 zoom, bool aimActive) {
 
     s_pendingYaw += yaw * kRadToAngle * zoom;
     s_pendingPitch += pitch * kRadToAngle * zoom;
-    s_stats.gyroYawTurn += std::fabs(yaw * kRadToAngle * zoom);
-    s_stats.gyroPitchTurn += std::fabs(pitch * kRadToAngle * zoom);
-    ++s_stats.gyroReads;
 }
 
 void sample_live_aim() {
@@ -529,7 +496,6 @@ void sample_live_aim() {
     s_lastSample = now;
     if (dt <= 0.0f) return;
 
-    ++s_stats.frames;
     const f32 zoom = aim_zoom_scale(player_link());
     if (live_stick_ready()) sample_stick(dt, zoom);
     if (live_gyro_ready()) {
@@ -565,13 +531,11 @@ bool preview_live_aim(view_class& view) {
     view.lookat.center = cXyz(view.lookat.eye.x + horizontal * std::sin(yaw),
                               view.lookat.eye.y + std::sin(elevation) * length,
                               view.lookat.eye.z + horizontal * std::cos(yaw));
-    ++s_stats.previews;
     return true;
 }
 
-void add_link_model(J3DModel* model, const char* name) {
+void add_link_model(J3DModel* model) {
     if (model == nullptr || s_linkModelCount >= kMaxLinkModels) return;
-    s_linkModelNames[s_linkModelCount] = name;
     s_linkModels[s_linkModelCount++] = model;
 }
 
@@ -613,39 +577,30 @@ bool is_link_emitter(JPABaseEmitter* emitter) {
 void collect_link_models(daAlink_c* link) {
     s_linkModelCount = 0;
     s_linkEmitterCount = 0;
-    add_link_model(link->mpLinkModel, "body");
-    add_link_model(link->mpLinkFaceModel, "face");
-    add_link_model(link->mpLinkHatModel, "hat");
-    add_link_model(link->mpLinkHandModel, "hand");
-    add_link_model(link->mpLinkBootModels[0], "bootL");
-    add_link_model(link->mpLinkBootModels[1], "bootR");
-    add_link_model(link->mHeldItemModel, "heldItem");
-    add_link_model(link->mpHookTipModel, "hookTip");
-    add_link_model(link->field_0x0710, "item0710");
-    add_link_model(link->field_0x0714, "item0714");
-    add_link_model(link->mSwordModel, "sword");
-    add_link_model(link->mSheathModel, "sheath");
-    add_link_model(link->mShieldModel, "shield");
-    add_link_model(link->mpSwAModel, "swA");
-    add_link_model(link->mpSwASheathModel, "swASheath");
-    add_link_model(link->mpSwMModel, "swM");
-    add_link_model(link->mpSwMSheathModel, "swMSheath");
-    add_link_model(link->mWoodSwordModel, "woodSword");
-    add_link_model(link->mpKanteraModel, "lantern");
-    add_link_model(link->mpKanteraGlowModel, "lanternGlow");
+    add_link_model(link->mpLinkModel);
+    add_link_model(link->mpLinkFaceModel);
+    add_link_model(link->mpLinkHatModel);
+    add_link_model(link->mpLinkHandModel);
+    add_link_model(link->mpLinkBootModels[0]);
+    add_link_model(link->mpLinkBootModels[1]);
+    add_link_model(link->mHeldItemModel);
+    add_link_model(link->mpHookTipModel);
+    add_link_model(link->field_0x0710);
+    add_link_model(link->field_0x0714);
+    add_link_model(link->mSwordModel);
+    add_link_model(link->mSheathModel);
+    add_link_model(link->mShieldModel);
+    add_link_model(link->mpSwAModel);
+    add_link_model(link->mpSwASheathModel);
+    add_link_model(link->mpSwMModel);
+    add_link_model(link->mpSwMSheathModel);
+    add_link_model(link->mWoodSwordModel);
+    add_link_model(link->mpKanteraModel);
+    add_link_model(link->mpKanteraGlowModel);
     fopAc_ac_c* held = link->mItemAcKeep.getActor();
     if (held != nullptr && fopAcM_GetName(held) == fpcNm_ARROW_e) {
-        add_link_model(static_cast<daArrow_c*>(held)->mpModel, "arrow");
+        add_link_model(static_cast<daArrow_c*>(held)->mpModel);
         collect_arrow_emitters(static_cast<daArrow_c*>(held));
-    }
-    if (s_linkModelsLogged) return;
-    s_linkModelsLogged = true;
-    for (int i = 0; i < s_linkModelCount; i++) {
-        J3DModel* model = s_linkModels[i];
-        J3DModelData* data = model->getModelData();
-        bt_log("link model %s=%p calcMode=%u dataFlag10=%d cpuSkin=%d", s_linkModelNames[i],
-               static_cast<void*>(model), static_cast<unsigned>(model->getMtxCalcMode()),
-               data != nullptr && data->checkFlag(0x10) ? 1 : 0, model->isCpuSkinningOn() ? 1 : 0);
     }
 }
 
@@ -655,16 +610,6 @@ int link_model_index(J3DModel* model) {
         if (s_linkModels[i] == model) return i;
     }
     return -1;
-}
-
-void log_link_model_swaps() {
-    char line[320];
-    int used = std::snprintf(line, sizeof(line), "link model swaps:");
-    for (int i = 0; i < s_linkModelCount && used > 0 && used < static_cast<int>(sizeof(line)); i++) {
-        used += std::snprintf(line + used, sizeof(line) - used, " %s=%d", s_linkModelNames[i], s_linkModelSwaps[i]);
-        s_linkModelSwaps[i] = 0;
-    }
-    bt_log("%s", line);
 }
 
 void refresh_view_matrices(view_class& view) {
@@ -689,15 +634,10 @@ void turn_link_aim(daAlink_c* link, int yaw, int pitch) {
 
 void apply_live_aim(daAlink_c* link) {
     if (live_aim_active()) {
-        const f32 pending = std::fabs(s_pendingYaw) > std::fabs(s_pendingPitch) ? std::fabs(s_pendingYaw)
-                                                                                  : std::fabs(s_pendingPitch);
-        if (pending > s_stats.maxPending) s_stats.maxPending = pending;
         const int yawStep = static_cast<int>(s_pendingYaw);
         const int pitchStep = static_cast<int>(s_pendingPitch);
         s_pendingYaw -= static_cast<f32>(yawStep);
         s_pendingPitch -= static_cast<f32>(pitchStep);
-        s_stats.appliedYaw += yawStep < 0 ? -yawStep : yawStep;
-        s_stats.appliedPitch += pitchStep < 0 ? -pitchStep : pitchStep;
         s_appliedThisTick = true;
         turn_link_aim(link, yawStep, pitchStep);
         return;
@@ -726,48 +666,20 @@ void release_aim_status() {
     dComIfGp_clearPlayerStatus0(0, kBowAimStatus);
 }
 
-void reset_stats() {
-    s_stats = {};
-    s_lastStatsLog = LiveClock::now();
-}
-
-void log_stats() {
-    const LiveClock::time_point now = LiveClock::now();
-    if (std::chrono::duration<f32>(now - s_lastStatsLog).count() < kStatsLogInterval) return;
-    s_lastStatsLog = now;
-    bt_log("stats: ticks=%d linkSteps=%d camRuns=%d frames=%d previews=%d stickTurn=%.0f gyroReads=%d "
-           "appliedYaw=%d appliedPitch=%d maxPending=%.0f camFirst=%d camErr=%.1f/%.1f gyroTurn=%.0f/%.0f arrowLaunches=%d arrowBoosts=%d linkPacketSwaps=%d linkShapeSwaps=%d packetDraws=%d shapeDraws=%d basePtrSwaps=%d emitterSwaps=%d scale=%.2f live=%d subjectCam=%d",
-           s_stats.ticks, s_stats.linkSteps, s_stats.cameraRuns, s_stats.frames, s_stats.previews,
-           s_stats.stickTurn, s_stats.gyroReads, s_stats.appliedYaw, s_stats.appliedPitch,
-           s_stats.maxPending, s_stats.cameraFirst, s_stats.camYawError, s_stats.camPitchError,
-           s_stats.gyroYawTurn, s_stats.gyroPitchTurn, s_stats.arrowLaunches, s_stats.arrowBoosts, s_stats.linkPacketSwaps, s_stats.linkShapeSwaps, s_stats.packetDraws, s_stats.shapeDraws, s_stats.basePtrSwaps, s_stats.emitterSwaps, s_linkScale, live_aim_active() ? 1 : 0, s_subjectCameraOn ? 1 : 0);
-    log_link_model_swaps();
-    s_stats = {};
-}
-
 void start_bullet_time(daAlink_c* link) {
     s_active = true;
     s_activeTicks = 0;
     s_stepAccumulator = 0.0f;
     s_cameraAccumulator = 0.0f;
-    s_subjectCameraOn = false;
     s_liveAimWarned = false;
     s_presentationSeen = false;
-    s_linkModelsLogged = false;
     s_seenLinkModelCount = 0;
     clear_live_aim();
-    reset_stats();
     general_set_slow_motion(kTimeScale);
     override_frame_interp(true);
     s_linkScale = live_scale();
     sync_gyro_keep_alive();
-    bt_log("start: proc=%u item=%u scale=%.2f fp=%d staminaSrc=%d gyro=%d gyroSmoothing=%.2f gyroSens=%.2f/%.2f "
-           "gyroDeadband=%.3f",
-           static_cast<unsigned>(link->mProcID), static_cast<unsigned>(link->mEquipItem), s_linkScale,
-           g_configBulletTimeFirstPerson ? 1 : 0, g_configStaminaSrcBulletTime ? 1 : 0,
-           gyro_aim_enabled() ? 1 : 0, float_setting(s_settingVars.gyroSmoothing, -1.0f),
-           float_setting(s_settingVars.gyroSensX, -1.0f), float_setting(s_settingVars.gyroSensY, -1.0f),
-           float_setting(s_settingVars.gyroDeadband, -1.0f));
+    bt_log("start (proc=%u)", static_cast<unsigned>(link->mProcID));
 }
 
 void stop_bullet_time(const char* reason) {
@@ -779,7 +691,6 @@ void stop_bullet_time(const char* reason) {
     release_aim_status();
     sync_gyro_keep_alive();
     clear_live_aim();
-    s_subjectCameraOn = false;
     s_linkScale = 1.0f;
     s_stepAccumulator = 0.0f;
     s_cameraAccumulator = 0.0f;
@@ -801,6 +712,9 @@ DEFINE_HOOK(&daAlink_c::execute, BulletTimeExecuteHook);
 DEFINE_HOOK(&daAlink_c::posMove, BulletTimePosMoveHook);
 DEFINE_HOOK(&daArrow_c::procMove, BulletTimeArrowMoveHook);
 DEFINE_HOOK(&daArrow_c::procWait, BulletTimeArrowWaitHook);
+DEFINE_HOOK(&daArrow_c::atHitCallBack, BulletTimeArrowAtHitHook);
+DEFINE_HOOK(&cc_at_check, BulletTimeAtCheckHook);
+DEFINE_HOOK(&dCcS::Move, BulletTimeCcMoveHook);
 DEFINE_HOOK(&daAlink_c::setBodyAngleXReadyAnime, BulletTimeReadyBodyAngleHook);
 DEFINE_HOOK(&daAlink_c::checkAimContext, BulletTimeAimContextHook);
 DEFINE_HOOK(&daAlink_c::checkAimInputContext, BulletTimeAimInputContextHook);
@@ -827,6 +741,7 @@ int extra_steps_for_tick(f32& accumulator) {
 
 HookAction on_management_pre(ModContext*, void*, void*, void*) {
     s_inSimTick = true;
+    ++s_simTickCount;
     s_appliedThisTick = false;
     s_viewSplit = false;
     return HOOK_CONTINUE;
@@ -840,7 +755,6 @@ HookAction on_draw_iterater_pre(ModContext*, void*, void*, void*) {
     if (s_inSimTick) return HOOK_CONTINUE;
     if (!s_presentationSeen && live_aim_active()) {
         s_presentationSeen = true;
-        bt_log("live aim running on presentation frames");
     }
     sample_live_aim();
     s_viewSplit = false;
@@ -864,9 +778,7 @@ HookAction on_draw_iterater_pre(ModContext*, void*, void*, void*) {
 bool begin_link_view(J3DShapePacket* packet, ViewSwap owner) {
     if (!s_viewSplit || s_inSimTick || s_inShadowPass || s_viewSwap != ViewSwap::None) return false;
     if (packet == nullptr) return false;
-    const int index = link_model_index(packet->getModel());
-    if (index < 0) return false;
-    ++s_linkModelSwaps[index];
+    if (link_model_index(packet->getModel()) < 0) return false;
     note_link_model_seen(packet->getModel());
     s_viewSwap = owner;
     Mtx* base = packet->getBaseMtxPtr();
@@ -875,7 +787,6 @@ bool begin_link_view(J3DShapePacket* packet, ViewSwap owner) {
         s_basePtrPacket = packet;
         s_savedBasePtr = base;
         packet->setBaseMtxPtr(&s_correctedBaseMtx);
-        ++s_stats.basePtrSwaps;
     }
     return true;
 }
@@ -891,8 +802,7 @@ void end_link_view(ViewSwap owner) {
 }
 
 HookAction on_packet_draw_pre(ModContext*, void* args, void*, void*) {
-    if (s_viewSplit && !s_inSimTick) ++s_stats.packetDraws;
-    if (begin_link_view(mods::arg<J3DShapePacket*>(args, 0), ViewSwap::Packet)) ++s_stats.linkPacketSwaps;
+    begin_link_view(mods::arg<J3DShapePacket*>(args, 0), ViewSwap::Packet);
     return HOOK_CONTINUE;
 }
 
@@ -931,7 +841,6 @@ HookAction on_particle_draw_pre(ModContext*, void* args, void*, void*) {
     MTXConcat(s_viewCorrection, s_savedEmitterPosCam, work->mPosCamMtx);
     calc_ybb_cam(work);
     s_emitterSwapWork = work;
-    ++s_stats.emitterSwaps;
     return HOOK_CONTINUE;
 }
 
@@ -952,8 +861,7 @@ void on_shadow_image_post(ModContext*, void*, void*, void*) {
 }
 
 HookAction on_shape_draw_pre(ModContext*, void*, void*, void*) {
-    if (s_viewSplit && !s_inSimTick) ++s_stats.shapeDraws;
-    if (begin_link_view(j3dSys.getShapePacket(), ViewSwap::Shape)) ++s_stats.linkShapeSwaps;
+    begin_link_view(j3dSys.getShapePacket(), ViewSwap::Shape);
     return HOOK_CONTINUE;
 }
 
@@ -963,26 +871,10 @@ void on_shape_draw_post(ModContext*, void*, void*, void*) {
 
 void on_gyro_deltas_post(ModContext*, void* args, void*, void*) {
     if (s_ownGyroRead) return;
-    if (!s_active) {
-        ++s_normalGyro.calls;
-        s_normalGyro.yawTurn += std::fabs(mods::arg_ref<float>(args, 0) * kRadToAngle);
-        s_normalGyro.pitchTurn += std::fabs(mods::arg_ref<float>(args, 1) * kRadToAngle);
-        return;
-    }
+    if (!s_active) return;
     if (!first_person_wanted(player_link())) return;
     mods::arg_ref<float>(args, 0) = 0.0f;
     mods::arg_ref<float>(args, 1) = 0.0f;
-}
-
-void log_normal_gyro() {
-    const LiveClock::time_point now = LiveClock::now();
-    if (std::chrono::duration<f32>(now - s_lastStatsLog).count() < kStatsLogInterval) return;
-    s_lastStatsLog = now;
-    if (s_normalGyro.calls > 0 && (s_normalGyro.yawTurn > 0.0f || s_normalGyro.pitchTurn > 0.0f)) {
-        bt_log("normal gyro (outside bullet time): calls=%d yawTurn=%.0f pitchTurn=%.0f", s_normalGyro.calls,
-               s_normalGyro.yawTurn, s_normalGyro.pitchTurn);
-    }
-    s_normalGyro = {};
 }
 
 void on_mouse_camera_post(ModContext*, void* args, void*, void*) {
@@ -991,28 +883,11 @@ void on_mouse_camera_post(ModContext*, void* args, void*, void*) {
     mods::arg_ref<float>(args, 1) = 0.0f;
 }
 
-void track_camera_error(daAlink_c* link) {
-    if (!dComIfGp_checkCameraAttentionStatus(link->field_0x317c, kSubjectCameraStatus)) return;
-    const cXyz& dir = s_tickViewDir;
-    const f32 flat = std::sqrt(dir.x * dir.x + dir.z * dir.z);
-    if (flat < 0.001f && std::fabs(dir.y) < 0.001f) return;
-    constexpr f32 kRadToDeg = 57.2957795f;
-    f32 yawError = std::atan2(dir.x, dir.z) - static_cast<f32>(s_cameraYaw) * kAngleToRad;
-    while (yawError > 3.14159265f) yawError -= 6.2831853f;
-    while (yawError < -3.14159265f) yawError += 6.2831853f;
-    const f32 pitchError = std::atan2(dir.y, flat) + static_cast<f32>(s_cameraPitch) * kAngleToRad;
-    const f32 yawDeg = std::fabs(yawError) * kRadToDeg;
-    const f32 pitchDeg = std::fabs(pitchError) * kRadToDeg;
-    if (yawDeg > s_stats.camYawError) s_stats.camYawError = yawDeg;
-    if (pitchDeg > s_stats.camPitchError) s_stats.camPitchError = pitchDeg;
-}
-
 void on_camera_run_post(ModContext*, void* args, void*, void*) {
     if (s_inCameraExtra || !scaling_active()) return;
     dCamera_c* camera = mods::arg<dCamera_c*>(args, 0);
     if (camera == nullptr || camera->CameraID() != 0) return;
     const int extra = extra_steps_for_tick(s_cameraAccumulator);
-    s_stats.cameraRuns += 1 + (extra > 0 ? extra : 0);
     if (extra > 0) {
         interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
         const u16 pressed = pad.mPressedButtonFlags;
@@ -1030,19 +905,11 @@ void on_camera_run_post(ModContext*, void* args, void*, void*) {
     s_cameraYaw = link->field_0x310c;
     s_cameraPitch = link->field_0x310a;
     s_tickViewDirValid = true;
-    track_camera_error(link);
-    if (!s_appliedThisTick) ++s_stats.cameraFirst;
 }
 
 void on_aim_context_post(ModContext*, void* args, void* retval, void*) {
     if (retval == nullptr || s_inExtraStep || *static_cast<bool*>(retval)) return;
     if (first_person_wanted(mods::arg<daAlink_c*>(args, 0))) *static_cast<bool*>(retval) = true;
-}
-
-void track_subject_camera(bool cameraReady) {
-    if (cameraReady == s_subjectCameraOn) return;
-    s_subjectCameraOn = cameraReady;
-    bt_log("first-person camera %s after %d ticks", cameraReady ? "on" : "off", s_activeTicks);
 }
 
 HookAction on_ready_body_angle_pre(ModContext*, void* args, void*, void*) {
@@ -1059,7 +926,6 @@ HookAction on_ready_body_angle_pre(ModContext*, void* args, void*, void*) {
 
     if (!s_inExtraStep) {
         apply_live_aim(link);
-        track_subject_camera(cameraReady);
         if (!live_aim_active() && !s_liveAimWarned) {
             s_liveAimWarned = true;
             bt_log("live aim unavailable: presentation=%s padRead=%s scaling=%d", s_presentationHooked ? "ok" : "MISSING",
@@ -1074,10 +940,6 @@ HookAction on_ready_body_angle_pre(ModContext*, void* args, void*, void*) {
 enum class BowPhase { None, Charge, Shoot, Wait, Reload };
 
 BowPhase s_bowPhase = BowPhase::None;
-bool s_reloadTracking = false;
-int s_reloadSteps = 0;
-int s_reloadExtraSteps = 0;
-LiveClock::time_point s_reloadStart;
 
 BowPhase bow_phase(daAlink_c* link) {
     if (link->checkBowChargeWaitAnime()) return BowPhase::Charge;
@@ -1087,47 +949,19 @@ BowPhase bow_phase(daAlink_c* link) {
     return BowPhase::None;
 }
 
-const char* bow_phase_name(BowPhase phase) {
-    switch (phase) {
-    case BowPhase::Charge: return "charge";
-    case BowPhase::Shoot: return "shoot";
-    case BowPhase::Wait: return "wait";
-    case BowPhase::Reload: return "reload";
-    default: return "none";
-    }
-}
-
-void track_reload(daAlink_c* link, bool extraStep) {
+void track_reload(daAlink_c* link) {
     const BowPhase phase = link->checkWolf() || !is_bow_item(link->mEquipItem) ? BowPhase::None : bow_phase(link);
-    if (s_reloadTracking) {
-        ++s_reloadSteps;
-        if (extraStep) ++s_reloadExtraSteps;
-    }
     if (phase == s_bowPhase) return;
     const BowPhase previous = s_bowPhase;
     s_bowPhase = phase;
     if (previous == BowPhase::Charge && phase == BowPhase::Shoot) {
-        s_reloadTracking = true;
-        s_reloadSteps = 0;
-        s_reloadExtraSteps = 0;
-        s_reloadStart = LiveClock::now();
-        const s16 holdTimer = link->field_0x30a4;
         if (s_active && link->field_0x30a4 > kBombArrowHoldSteps) link->field_0x30a4 = kBombArrowHoldSteps;
-        bt_log("reload: shot (bt=%d holdTimer=%d->%d itemMode=%d bombSel=%d)", s_active ? 1 : 0,
-               static_cast<int>(holdTimer), static_cast<int>(link->field_0x30a4),
-               static_cast<int>(link->mItemMode), static_cast<int>(link->field_0x301e));
         return;
     }
     if (s_active && phase == BowPhase::Reload) {
         daPy_frameCtrl_c& frameCtrl = link->mUpperFrameCtrl[2];
         frameCtrl.setRate(frameCtrl.getRate() * kReloadAnimeSpeedUp);
     }
-    if (!s_reloadTracking) return;
-    const double ms = std::chrono::duration<double, std::milli>(LiveClock::now() - s_reloadStart).count();
-    bt_log("reload: %s -> %s after %d steps (%d extra) %.0f ms (bt=%d holdTimer=%d itemMode=%d)",
-           bow_phase_name(previous), bow_phase_name(phase), s_reloadSteps, s_reloadExtraSteps, ms,
-           s_active ? 1 : 0, static_cast<int>(link->field_0x30a4), static_cast<int>(link->mItemMode));
-    if (phase == BowPhase::Charge || phase == BowPhase::None) s_reloadTracking = false;
 }
 
 void release_reaim_block(daAlink_c* link) {
@@ -1135,7 +969,6 @@ void release_reaim_block(daAlink_c* link) {
     const bool itemPressed = (link->mItemTrigger & (1 << link->mSelectItemId)) != 0;
     if (!itemPressed && bow_aiming(link) && airborne(link)) return;
     s_reaimBlock = false;
-    bt_log("re-aim unlocked (%s)", itemPressed ? "item pressed" : "aim ended");
 }
 
 int run_extra_steps(daAlink_c* link) {
@@ -1150,9 +983,8 @@ int run_extra_steps(daAlink_c* link) {
     while (done < extra && air_bow_state(link)) {
         BulletTimeExecuteHook::g_orig(link);
         ++done;
-        track_reload(link, true);
+        track_reload(link);
     }
-    if (done < extra) bt_log("extra steps cut: %d/%d (proc=%u)", done, extra, static_cast<unsigned>(link->mProcID));
     s_inExtraStep = false;
     pad.mPressedButtonFlags = pressed;
     return done;
@@ -1166,8 +998,6 @@ void auto_aim_after_air_equip(daAlink_c* link) {
     if (!fresh || !g_configBulletTimeEnabled || !airborne(link) || bow_aiming(link)) return;
     link->setBowReadyAnime();
     link->mItemMode = 0;
-    bt_log("auto-aim after air equip (item=%u proc=%u)", static_cast<unsigned>(link->mEquipItem),
-           static_cast<unsigned>(link->mProcID));
 }
 
 fpc_ProcID nocked_arrow_id(daAlink_c* link) {
@@ -1182,16 +1012,18 @@ void launch_released_arrow(fpc_ProcID id) {
     if (arrow == nullptr || fopAcM_GetName(arrow) != fpcNm_ARROW_e) return;
     const u32 param = fopAcM_GetParam(arrow);
     if ((param != 1 && param != 2) || s_waitArrowId != id) return;
+    arrow->old = arrow->current;
     arrow->execute();
-    if (s_waitArrowId == id && fopAcM_SearchByID(id) == arrow) arrow->execute();
-    ++s_stats.arrowLaunches;
-    bt_log("arrow launched in release tick (param=%u tick=%d)", static_cast<unsigned>(param), s_activeTicks);
+    if (s_waitArrowId == id && fopAcM_SearchByID(id) == arrow) {
+        arrow->old = arrow->current;
+        arrow->execute();
+    }
 }
 
 void on_link_execute_post(ModContext*, void* args, void*, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (link == nullptr || link != player_link()) return;
-    track_reload(link, false);
+    track_reload(link);
     release_reaim_block(link);
     auto_aim_after_air_equip(link);
     if (!s_active) {
@@ -1208,8 +1040,6 @@ void on_link_execute_post(ModContext*, void* args, void*, void*) {
     if (heldBefore != s_nockedArrowId) launch_released_arrow(heldBefore);
     s_nockedArrowId = nocked_arrow_id(link);
     ++s_activeTicks;
-    ++s_stats.ticks;
-    s_stats.linkSteps += 1 + extra;
     if (g_configStaminaSrcBulletTime) stamina_add_drain(drain_per_step() * static_cast<f32>(1 + extra));
     stop_if_needed(link);
 }
@@ -1264,10 +1094,41 @@ bool boost_arrow(daArrow_c* arrow) {
     return param == 1 || param == 2;
 }
 
+ArrowSweep& find_arrow_sweep(fpc_ProcID id) {
+    for (ArrowSweep& sweep : s_arrowSweeps) {
+        if (sweep.id == id) return sweep;
+    }
+    ArrowSweep& sweep = s_arrowSweeps[s_arrowSweepNext];
+    s_arrowSweepNext = (s_arrowSweepNext + 1) % kArrowSweepSlots;
+    sweep.id = id;
+    sweep.tick = 0;
+    sweep.registeredTick = 0;
+    return sweep;
+}
+
 HookAction on_arrow_wait_pre(ModContext*, void* args, void*, void*) {
     daArrow_c* arrow = mods::arg<daArrow_c*>(args, 0);
-    if (arrow != nullptr) s_waitArrowId = fopAcM_GetID(arrow);
+    if (arrow == nullptr) return HOOK_CONTINUE;
+    s_waitArrowId = fopAcM_GetID(arrow);
+    const u32 param = fopAcM_GetParam(arrow);
+    if (scaling_active() && (param == 1 || param == 2)) {
+        find_arrow_sweep(s_waitArrowId).registeredTick = s_simTickCount;
+    }
     return HOOK_CONTINUE;
+}
+
+cXyz arrow_sweep_start(daArrow_c* arrow) {
+    ArrowSweep& sweep = find_arrow_sweep(fopAcM_GetID(arrow));
+    if (sweep.tick != s_simTickCount) {
+        sweep.tick = s_simTickCount;
+        sweep.start = arrow->current.pos;
+    }
+    return sweep.start;
+}
+
+void clear_arrow_sweeps() {
+    for (ArrowSweep& sweep : s_arrowSweeps) sweep.id = fpcM_ERROR_PROCESS_ID_e;
+    s_arrowSweepNext = 0;
 }
 
 HookAction on_arrow_move_pre(ModContext*, void* args, void*, void*) {
@@ -1279,10 +1140,9 @@ HookAction on_arrow_move_pre(ModContext*, void* args, void*, void*) {
     const f32 boost = 1.0f / s_linkScale;
     s_arrowMove.arrow = arrow;
     s_arrowMove.boost = boost;
-    s_arrowMove.outLengthRate = arrow->mOutLengthRate;
+    s_arrowMove.sweepStart = arrow_sweep_start(arrow);
     arrow->speed *= boost;
     arrow->mOutLengthRate /= boost;
-    ++s_stats.arrowBoosts;
     return HOOK_CONTINUE;
 }
 
@@ -1294,20 +1154,210 @@ void on_arrow_move_post(ModContext*, void* args, void*, void*) {
     const f32 boost = s_arrowMove.boost;
     arrow->speed /= boost;
     if (arrow->gravity < 0.0f) arrow->speed.y += arrow->gravity * (boost - 1.0f / boost);
-    arrow->mOutLengthRate = s_arrowMove.outLengthRate;
+    arrow->mOutLengthRate *= boost;
+    cM3dGCps& at = arrow->field_0x688;
+    cXyz* atStart = at.GetStartP();
+    const cXyz& pos = arrow->current.pos;
+    ArrowSweep& sweep = find_arrow_sweep(fopAcM_GetID(arrow));
+    if (atStart->x == pos.x && atStart->y == pos.y && atStart->z == pos.z) {
+        *atStart = s_arrowMove.sweepStart;
+        sweep.registeredTick = s_simTickCount;
+        return;
+    }
+    if (sweep.registeredTick != s_simTickCount || arrow->mArrowType == 1) return;
+    *atStart = s_arrowMove.sweepStart;
+    *at.GetEndP() = pos;
+}
+
+bool tracked_arrow(fopAc_ac_c* actor) {
+    if (actor == nullptr || fopAcM_GetName(actor) != fpcNm_ARROW_e) return false;
+    if (s_active) return true;
+    const fpc_ProcID id = fopAcM_GetID(actor);
+    for (const ArrowSweep& sweep : s_arrowSweeps) {
+        if (sweep.id == id) return true;
+    }
+    return false;
+}
+
+struct PendingArrowHit {
+    fpc_ProcID arrowId = fpcM_ERROR_PROCESS_ID_e;
+    fpc_ProcID enemyId = fpcM_ERROR_PROCESS_ID_e;
+    fopAc_ac_c* arrow = nullptr;
+    fopAc_ac_c* enemy = nullptr;
+    dCcD_GObjInf* atObj = nullptr;
+    dCcD_GObjInf* tgObj = nullptr;
+    cXyz hitPos;
+    u32 hitTick = 0;
+    s16 health = 0;
+    u8 atp = 0;
+};
+constexpr int kPendingHitSlots = 16;
+constexpr u32 kPendingHitMaxTicks = 120;
+PendingArrowHit s_pendingHits[kPendingHitSlots];
+
+struct CcEnemy {
+    fpc_ProcID id = fpcM_ERROR_PROCESS_ID_e;
+    Z2Creature* sound = nullptr;
+    u32 mapInfo = 0;
+    u8 powerType = 0;
+};
+constexpr int kCcEnemySlots = 32;
+CcEnemy s_ccEnemies[kCcEnemySlots] = {};
+int s_ccEnemyCount = 0;
+int s_ccEnemyNext = 0;
+
+const CcEnemy* find_cc_enemy(fpc_ProcID id) {
+    for (int i = 0; i < s_ccEnemyCount; ++i) {
+        if (s_ccEnemies[i].id == id) return &s_ccEnemies[i];
+    }
+    return nullptr;
+}
+
+bool uses_cc_damage(fpc_ProcID id) {
+    return find_cc_enemy(id) != nullptr;
+}
+
+void remember_cc_enemy(fopAc_ac_c* enemy, const dCcU_AtInfo* info) {
+    const fpc_ProcID id = fopAcM_GetID(enemy);
+    CcEnemy* entry = const_cast<CcEnemy*>(find_cc_enemy(id));
+    if (entry == nullptr) {
+        entry = &s_ccEnemies[s_ccEnemyNext];
+        s_ccEnemyNext = (s_ccEnemyNext + 1) % kCcEnemySlots;
+        if (s_ccEnemyCount < kCcEnemySlots) ++s_ccEnemyCount;
+    }
+    entry->id = id;
+    entry->sound = info->mpSound;
+    entry->mapInfo = info->field_0x18;
+    entry->powerType = info->mPowerType;
+}
+
+void clear_pending_hits() {
+    for (PendingArrowHit& hit : s_pendingHits) hit = PendingArrowHit{};
+    s_ccEnemyCount = 0;
+    s_ccEnemyNext = 0;
+}
+
+void record_pending_hit(daArrow_c* arrow, dCcD_GObjInf* atObj, fopAc_ac_c* enemy, dCcD_GObjInf* tgObj) {
+    const fpc_ProcID arrowId = fopAcM_GetID(arrow);
+    const fpc_ProcID enemyId = fopAcM_GetID(enemy);
+    PendingArrowHit* slot = nullptr;
+    for (PendingArrowHit& hit : s_pendingHits) {
+        if (hit.arrowId == arrowId && hit.enemyId == enemyId) return;
+        if (slot == nullptr && hit.arrowId == fpcM_ERROR_PROCESS_ID_e) slot = &hit;
+    }
+    if (slot == nullptr) {
+        slot = &s_pendingHits[0];
+        for (PendingArrowHit& hit : s_pendingHits) {
+            if (hit.hitTick < slot->hitTick) slot = &hit;
+        }
+    }
+    *slot = PendingArrowHit{};
+    slot->arrowId = arrowId;
+    slot->enemyId = enemyId;
+    slot->arrow = arrow;
+    slot->enemy = enemy;
+    slot->atObj = atObj;
+    slot->tgObj = tgObj;
+    slot->hitPos = *atObj->GetAtHitPosP();
+    slot->hitTick = s_simTickCount;
+    slot->health = enemy->health;
+    slot->atp = atObj->GetAtAtp();
+}
+
+void resolve_pending_hit(fopAc_ac_c* arrow, fopAc_ac_c* enemy) {
+    const fpc_ProcID arrowId = fopAcM_GetID(arrow);
+    const fpc_ProcID enemyId = fopAcM_GetID(enemy);
+    for (PendingArrowHit& hit : s_pendingHits) {
+        if (hit.arrowId != arrowId || hit.enemyId != enemyId) continue;
+        hit = PendingArrowHit{};
+    }
+}
+
+bool apply_pending_hit_now(PendingArrowHit& hit) {
+    const CcEnemy* cc = find_cc_enemy(hit.enemyId);
+    if (cc == nullptr) return false;
+    const u8 currentAtp = hit.atObj->GetAtAtp();
+    hit.atObj->SetAtAtp(hit.atp);
+    dCcU_AtInfo probe{};
+    probe.mpCollider = hit.atObj;
+    probe.mPowerType = cc->powerType;
+    at_power_check(&probe);
+    if (probe.mpActor == nullptr || probe.mAttackPower == 0 || hit.enemy->health - probe.mAttackPower <= 0) {
+        hit.atObj->SetAtAtp(currentAtp);
+        return false;
+    }
+    fopAc_ac_c* enemy = hit.enemy;
+    dCcD_GObjInf* atObj = hit.atObj;
+    const s16 before = enemy->health;
+    dCcU_AtInfo info{};
+    info.mpCollider = atObj;
+    info.mpSound = cc->sound;
+    info.field_0x18 = cc->mapInfo;
+    info.mPowerType = cc->powerType;
+    cc_at_check(enemy, &info);
+    atObj->SetAtAtp(currentAtp);
+    if (enemy->health <= 0) {
+        enemy->health = before;
+        return false;
+    }
+    hit = PendingArrowHit{};
+    return true;
+}
+
+void on_cc_move_post(ModContext*, void*, void*, void*) {
+    for (PendingArrowHit& hit : s_pendingHits) {
+        if (hit.arrowId == fpcM_ERROR_PROCESS_ID_e || hit.hitTick == s_simTickCount) continue;
+        const bool enemyAlive = fopAcM_SearchByID(hit.enemyId) == hit.enemy && hit.enemy->health > 0;
+        const bool arrowAlive = fopAcM_SearchByID(hit.arrowId) == hit.arrow;
+        if (!enemyAlive || !arrowAlive || s_simTickCount - hit.hitTick > kPendingHitMaxTicks) {
+            hit = PendingArrowHit{};
+            continue;
+        }
+        if (hit.enemy->health < hit.health) {
+            hit = PendingArrowHit{};
+            continue;
+        }
+        if (!uses_cc_damage(hit.enemyId)) continue;
+        if (apply_pending_hit_now(hit)) continue;
+        if (hit.tgObj->ChkTgHit()) continue;
+        hit.tgObj->SetTgHit(hit.atObj);
+        hit.tgObj->SetTgHitApid(hit.arrowId);
+        hit.tgObj->SetTgHitPos(hit.hitPos);
+    }
+}
+
+HookAction on_arrow_at_hit_pre(ModContext*, void* args, void*, void*) {
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    auto* atObj = mods::arg<dCcD_GObjInf*>(args, 1);
+    auto* tgActor = mods::arg<fopAc_ac_c*>(args, 2);
+    auto* tgObj = mods::arg<dCcD_GObjInf*>(args, 3);
+    if (!tracked_arrow(arrow)) return HOOK_CONTINUE;
+    if (atObj != nullptr && tgActor != nullptr && tgObj != nullptr &&
+        fopAcM_GetGroup(tgActor) == fopAc_ENEMY_e) {
+        record_pending_hit(arrow, atObj, tgActor, tgObj);
+    }
+    return HOOK_CONTINUE;
+}
+
+void on_at_check_post(ModContext*, void* args, void*, void*) {
+    fopAc_ac_c* enemy = mods::arg<fopAc_ac_c*>(args, 0);
+    dCcU_AtInfo* info = mods::arg<dCcU_AtInfo*>(args, 1);
+    if (enemy != nullptr && info != nullptr) remember_cc_enemy(enemy, info);
+    if (enemy == nullptr || info == nullptr || !tracked_arrow(info->mpActor)) return;
+    resolve_pending_hit(info->mpActor, enemy);
 }
 
 template <class Entry>
 ModResult add_pre_logged(const char* name, HookPreFn callback) {
     const ModResult result = mods::hook::add_pre<Entry>(s_hookSvc, callback);
-    bt_log("hook pre  %s -> %s (%d)", name, result == MOD_OK ? "ok" : "FAILED", static_cast<int>(result));
+    if (result != MOD_OK) bt_log("hook pre %s FAILED (%d)", name, static_cast<int>(result));
     return result;
 }
 
 template <class Entry>
 ModResult add_post_logged(const char* name, HookPostFn callback) {
     const ModResult result = mods::hook::add_post<Entry>(s_hookSvc, callback);
-    bt_log("hook post %s -> %s (%d)", name, result == MOD_OK ? "ok" : "FAILED", static_cast<int>(result));
+    if (result != MOD_OK) bt_log("hook post %s FAILED (%d)", name, static_cast<int>(result));
     return result;
 }
 
@@ -1319,6 +1369,9 @@ void install_hooks() {
     add_pre_logged<BulletTimeArrowMoveHook>("daArrow_c::procMove", on_arrow_move_pre);
     add_post_logged<BulletTimeArrowMoveHook>("daArrow_c::procMove", on_arrow_move_post);
     add_pre_logged<BulletTimeArrowWaitHook>("daArrow_c::procWait", on_arrow_wait_pre);
+    add_pre_logged<BulletTimeArrowAtHitHook>("daArrow_c::atHitCallBack", on_arrow_at_hit_pre);
+    add_post_logged<BulletTimeAtCheckHook>("cc_at_check", on_at_check_post);
+    add_post_logged<BulletTimeCcMoveHook>("dCcS::Move", on_cc_move_post);
     add_pre_logged<BulletTimeReadyBodyAngleHook>("daAlink_c::setBodyAngleXReadyAnime", on_ready_body_angle_pre);
     add_post_logged<BulletTimeAimContextHook>("daAlink_c::checkAimContext", on_aim_context_post);
     add_post_logged<BulletTimeAimInputContextHook>("daAlink_c::checkAimInputContext", on_aim_context_post);
@@ -1349,7 +1402,7 @@ void resolve_function(const HookService* hook_svc, const char* symbol, Fn& out) 
     void* address = nullptr;
     if (hook_svc->resolve(mod_ctx, symbol, &address, nullptr) != MOD_OK) address = nullptr;
     out = reinterpret_cast<Fn>(address);
-    bt_log("resolve %s -> %s", symbol, found(address));
+    if (address == nullptr) bt_log("resolve %s FAILED", symbol);
 }
 
 void resolve_functions(const HookService* hook_svc) {
@@ -1367,8 +1420,6 @@ void resolve_functions(const HookService* hook_svc) {
 void bullet_time_apply_enabled() {
     if (s_hookSvc == nullptr) return;
 
-    bt_log("enabled=%d timescale=%s", g_configBulletTimeEnabled ? 1 : 0,
-           general_timescale_available() ? "ok" : "unavailable");
     if (g_configBulletTimeEnabled && general_timescale_available()) {
         install_hooks();
     } else {
@@ -1398,12 +1449,6 @@ ModResult init_bullet_time(const HookService* hook_svc, const LogService* log_sv
         s_settingVars.invertX = getConfigVar("game.invertFirstPersonXAxis");
         s_settingVars.invertY = getConfigVar("game.invertFirstPersonYAxis");
     }
-    bt_log("init: frameInterp=%s gyroAim=%s gyroSens=%s/%s gyroSmoothing=%s gyroDeadband=%s gyroInvert=%s/%s "
-           "mirror=%s invertX=%s invertY=%s",
-           found(s_frameInterpVar), found(s_settingVars.gyroAim), found(s_settingVars.gyroSensX),
-           found(s_settingVars.gyroSensY), found(s_settingVars.gyroSmoothing), found(s_settingVars.gyroDeadband),
-           found(s_settingVars.gyroInvertPitch), found(s_settingVars.gyroInvertYaw),
-           found(s_settingVars.mirror), found(s_settingVars.invertX), found(s_settingVars.invertY));
     resolve_functions(hook_svc);
 
     bullet_time_apply_enabled();
@@ -1431,12 +1476,7 @@ void update_bullet_time(const LogService*, ModContext*) {
     } else if (s_hooksInstalled && can_start(link)) {
         start_bullet_time(link);
     }
-    if (s_active) {
-        s_linkScale = live_scale();
-        log_stats();
-    } else {
-        log_normal_gyro();
-    }
+    if (s_active) s_linkScale = live_scale();
     if (!first_person_wanted(link)) release_aim_status();
     sync_gyro_keep_alive();
 }
@@ -1450,6 +1490,8 @@ void shutdown_bullet_time() {
     s_reaimBlock = false;
     s_move.active = false;
     s_arrowMove.arrow = nullptr;
+    clear_arrow_sweeps();
+    clear_pending_hits();
     s_presentationHooked = false;
     s_inSimTick = false;
     s_nockedArrowId = fpcM_ERROR_PROCESS_ID_e;
