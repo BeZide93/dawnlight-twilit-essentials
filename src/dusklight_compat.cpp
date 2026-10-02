@@ -201,27 +201,27 @@ void dComIfGs_setBottleNum(u8 i_bottleIdx, u8 i_bottleNum) {
 }
 
 int dComIfGs_isCollectShield(u8 i_shield) {
-    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(0, i_shield);
+    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(COLLECT_SHIELD, i_shield);
 }
 
 void dComIfGs_setCollectShield(u8 i_shieldNo) {
-    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(0, i_shieldNo);
+    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_SHIELD, i_shieldNo);
 }
 
 BOOL dComIfGs_isCollectClothes(u8 i_clothesNo) {
-    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(1, i_clothesNo);
+    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(COLLECT_CLOTHING, i_clothesNo);
 }
 
 void dComIfGs_setCollectClothes(u8 i_clothesNo) {
-    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(1, i_clothesNo);
+    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_CLOTHING, i_clothesNo);
 }
 
 BOOL dComIfGs_isCollectSword(u8 i_swordNo) {
-    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(2, i_swordNo);
+    return g_dComIfG_gameInfo.info.getPlayer().getCollect().isCollect(COLLECT_SWORD, i_swordNo);
 }
 
 void dComIfGs_setCollectSword(u8 i_swordNo) {
-    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(2, i_swordNo);
+    g_dComIfG_gameInfo.info.getPlayer().getCollect().setCollect(COLLECT_SWORD, i_swordNo);
 }
 
 int dComIfGs_isEventBit(u16 i_flag) {

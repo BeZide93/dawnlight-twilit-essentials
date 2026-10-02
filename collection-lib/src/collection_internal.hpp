@@ -7,6 +7,7 @@
 #include "mods/svc/resource.h"
 #include "mods/svc/save.h"
 
+#include "d/d_com_inf_game.h"
 #include "d/d_menu_collect.h"
 #include "d/d_menu_window.h"
 #include "d/d_select_cursor.h"
@@ -76,6 +77,23 @@ constexpr int32_t kClAfterOtherMods = -100;
 
 extern dMenu_Collect2D_c* s_currentCollect2D;
 extern bool s_needReloadCollect;
+
+struct ClCollectFlagGuard {
+    u8 sword;
+    u8 shield;
+    ClCollectFlagGuard() {
+        const dSv_player_collect_c& c = g_dComIfG_gameInfo.info.getPlayer().getCollect();
+        sword = c.mItem[COLLECT_SWORD];
+        shield = c.mItem[COLLECT_SHIELD];
+    }
+    ~ClCollectFlagGuard() {
+        dSv_player_collect_c& c = g_dComIfG_gameInfo.info.getPlayer().getCollect();
+        c.mItem[COLLECT_SWORD] = sword;
+        c.mItem[COLLECT_SHIELD] = shield;
+    }
+    ClCollectFlagGuard(const ClCollectFlagGuard&) = delete;
+    ClCollectFlagGuard& operator=(const ClCollectFlagGuard&) = delete;
+};
 
 bool cl_unequip_enabled(CustomEquipKind kind);
 bool cl_keep_ordon_shield_enabled();

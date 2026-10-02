@@ -1065,8 +1065,10 @@ void custom_equip_restore_from_save() {
 
         s_activeId[kind] = i;
         if (kind == CE_SHIELD) {
+            ClCollectFlagGuard keepCollect;
             if (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e) dMeter2Info_setShield(best_owned(kind), false);
         } else if (kind == CE_SWORD) {
+            ClCollectFlagGuard keepCollect;
             if (dComIfGs_getSelectEquipSword() == dItemNo_NONE_e) dMeter2Info_setSword(best_owned(kind), false);
         } else {
             const u8 base = custom_equip_resolved_base(s_entries[i].def);
@@ -1346,9 +1348,13 @@ static u8 current_vanilla(CustomEquipKind kind) {
 
 static void set_vanilla_equip(CustomEquipKind kind, u8 item, bool playerChange) {
     if (kind == CE_SWORD) {
+        ClCollectFlagGuard keepCollect;
         dMeter2Info_setSword(item, false);
     } else if (kind == CE_SHIELD) {
-        dMeter2Info_setShield(item, false);
+        {
+            ClCollectFlagGuard keepCollect;
+            dMeter2Info_setShield(item, false);
+        }
         if (playerChange) {
             if (daAlink_c* a = daAlink_getAlinkActorClass()) a->setShieldChange();
         }
@@ -1450,7 +1456,24 @@ ResTIMG* custom_equip_icon(int id) {
     return e.iconTex;
 }
 
+static void repair_pre_faron_collect_flags() {
+    dSv_player_c& player = g_dComIfG_gameInfo.info.getPlayer();
+    if (player.getPlayerStatusB().mDarkClearLevelFlag & 1) return;
+    u8* collect = player.getCollect().mItem;
+    const u8 woodShieldBit = static_cast<u8>(1 << COLLECT_WOODEN_SHIELD);
+    if ((collect[COLLECT_SHIELD] & woodShieldBit) && !dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {
+        collect[COLLECT_SHIELD] &= static_cast<u8>(~woodShieldBit);
+        log_collect_info("collection-lib: cleared Ordon Shield collect flag");
+    }
+    const u8 ordonSwordBit = static_cast<u8>(1 << COLLECT_ORDON_SWORD);
+    if ((collect[COLLECT_SWORD] & ordonSwordBit) && !dComIfGs_isItemFirstBit(dItemNo_SWORD_e)) {
+        collect[COLLECT_SWORD] &= static_cast<u8>(~ordonSwordBit);
+        log_collect_info("collection-lib: cleared Ordon Sword collect flag");
+    }
+}
+
 static void on_custom_equip_save_loaded(ModContext*, uint32_t, void*) {
+    repair_pre_faron_collect_flags();
     s_activeId[0] = s_activeId[1] = s_activeId[2] = -1;
     s_restoredFromSave = false;
     custom_equip_restore_from_save();
@@ -1724,6 +1747,8 @@ void custom_equip_update() {
     }
 
     doll_session_watchdog();
+
+    if (is_gameplay_ready()) repair_pre_faron_collect_flags();
 
     for (int k = 0; k < 3; k++) {
         if (s_prevEquipWasActive[k] && s_activeId[k] < 0) {

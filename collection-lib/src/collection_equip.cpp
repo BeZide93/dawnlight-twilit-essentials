@@ -58,9 +58,13 @@ void equip_feedback(bool equipped) {
 
 void set_vanilla(int r, u8 item) {
     if (r == 0) {
+        ClCollectFlagGuard keepCollect;
         dMeter2Info_setSword(item, false);
     } else if (r == 1) {
-        dMeter2Info_setShield(item, false);
+        {
+            ClCollectFlagGuard keepCollect;
+            dMeter2Info_setShield(item, false);
+        }
         if (daAlink_c* link = daAlink_getAlinkActorClass()) link->setShieldChange();
     } else {
         dMeter2Info_setCloth(item, false);
