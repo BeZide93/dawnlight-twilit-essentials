@@ -18,6 +18,8 @@ extern int  g_configStaminaRegenDelay;
 extern int  g_configStaminaExhaustRecover;
 extern bool g_configStaminaSlowHangRegen;
 extern bool g_configStaminaRefillOnStageChange;
+extern bool g_configStaminaSwimRestRegen;
+extern bool g_configStaminaSwimDrown;
 
 extern float g_configStaminaBarX;
 extern float g_configStaminaBarY;

@@ -10,6 +10,7 @@
 #include "d/d_s_play.h"
 #include "d/d_meter2_info.h"
 #include "d/d_msg_object.h"
+#include "d/d_camera.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -31,13 +32,15 @@ int  g_configStaminaRegenDelay = 2;
 int  g_configStaminaExhaustRecover = 35;
 bool g_configStaminaSlowHangRegen = true;
 bool g_configStaminaRefillOnStageChange = true;
+bool g_configStaminaSwimRestRegen = true;
+bool g_configStaminaSwimDrown = true;
 
 bool g_configStaminaSrcAttacks  = true;
 bool g_configStaminaSrcJumpSpin  = true;
 bool g_configStaminaSrcRolls     = true;
 bool g_configStaminaSrcClimb     = true;
 bool g_configStaminaSrcHang      = true;
-bool g_configStaminaSrcSwim      = true;
+bool g_configStaminaSrcSwim = true;
 bool g_configStaminaSrcPushPull  = true;
 bool g_configStaminaSrcWolfDash  = true;
 bool g_configStaminaSrcHiddenSkills = true;
@@ -115,6 +118,13 @@ static constexpr int kDenyCooldownFrames = 24;
 
 static constexpr f32 kHangRestRegenFactor = 0.15f;
 
+static constexpr int kDrownGraceFrames = 30;
+static constexpr int kDrownDamage = 4;
+static constexpr u32 kDrownRestartMode = 5;
+
+static int  s_drownTimer = 0;
+static bool s_drowning = false;
+
 static f32 stamina_scaled_max_for_hearts() {
     using namespace stamina_impl;
     f32 hearts = static_cast<f32>(dComIfGs_getMaxLife() / 5);
@@ -149,7 +159,20 @@ static bool in_gameplay() {
     return true;
 }
 
-static f32 drain_rate(u16 proc) {
+static bool zora_armor_worn() {
+    return dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_ZORA_e;
+}
+
+static bool swim_costs_stamina(const daAlink_c* link) {
+    return g_configStaminaSrcSwim && link != nullptr && !link->checkWolf() && !zora_armor_worn();
+}
+
+static bool is_swim_drain_proc(u16 proc) {
+    return proc == daAlink_c::PROC_SWIM_MOVE || proc == daAlink_c::PROC_SWIM_DIVE;
+}
+
+static f32 drain_rate(const daAlink_c* link) {
+    const u16 proc = link->mProcID;
     switch (proc) {
     case daAlink_c::PROC_CLIMB_MOVE_UPDOWN:
     case daAlink_c::PROC_CLIMB_MOVE_SIDE:
@@ -171,7 +194,7 @@ static f32 drain_rate(u16 proc) {
                    : 0.0f;
     case daAlink_c::PROC_SWIM_MOVE:
     case daAlink_c::PROC_SWIM_DIVE:
-        return g_configStaminaSrcSwim
+        return swim_costs_stamina(link)
                    ? stamina_impl::cost_scaled(0.40f, g_configStaminaCostSwim)
                    : 0.0f;
     case daAlink_c::PROC_PUSH_MOVE:
@@ -473,6 +496,50 @@ static bool is_hang_rest_proc(daAlink_c* link) {
     }
 }
 
+static bool is_swim_rest_proc(const daAlink_c* link) {
+    return link != nullptr && link->mProcID == daAlink_c::PROC_SWIM_WAIT && swim_costs_stamina(link);
+}
+
+static void reset_drown() {
+    s_drownTimer = 0;
+    s_drowning = false;
+}
+
+static bool start_drown(daAlink_c* link) {
+    if (!dComIfGp_event_compulsory(link, NULL, 0xFFFF)) return false;
+    link->mDemo.setSpecialDemoType();
+    if (!link->commonProcInitNotSameProc(daAlink_c::PROC_LAVA_RETURN)) return true;
+    link->onNoResetFlg0(daAlink_c::FLG0_SWIM_UP);
+    link->setSingleAnimeBase(daAlink_c::ANM_SWIM_DROWN);
+    if (link->mEquipItem == 0x103) link->mLeftHandIndex = 100;
+    link->voiceStart(Z2SE_AL_V_FALL_QUICKSAND);
+    link->seStartOnlyReverb(Z2SE_AL_WATER_STROKE_L);
+    link->field_0x32cc = kDrownRestartMode;
+    link->field_0x3198 = kDrownDamage;
+    link->field_0x3080 = 0;
+    link->mDamageTimer = 0;
+    link->mNormalSpeed = 0.0f;
+    link->field_0x3194 = 1;
+    dCam_getBody()->StartEventCamera(9, fopAcM_GetID(link), "Type", 1, &link->field_0x3194, nullptr);
+    return true;
+}
+
+static void update_drown(daAlink_c* link) {
+    if (!g_configStaminaSwimDrown || link == nullptr || !swim_costs_stamina(link)
+        || !link->checkModeFlg(daAlink_c::MODE_SWIMMING)) {
+        reset_drown();
+        return;
+    }
+    if (s_drowning || link->mProcID == daAlink_c::PROC_LAVA_RETURN) return;
+    if (!drained() || !is_swim_drain_proc(link->mProcID)) {
+        s_drownTimer = 0;
+        return;
+    }
+    if (s_drownTimer == 0) deny();
+    if (++s_drownTimer < kDrownGraceFrames) return;
+    if (start_drown(link)) s_drowning = true;
+}
+
 void update_stamina(const LogService*, ModContext*) {
     stamina_hud_begin_tick();
     s_blockedThisFrame = false;
@@ -497,6 +564,7 @@ void update_stamina(const LogService*, ModContext*) {
         s_hiddenSkillLock = 0;
         s_otherSpend = 0.0f;
         s_extraDrain = 0.0f;
+        reset_drown();
         return;
     }
 
@@ -507,6 +575,7 @@ void update_stamina(const LogService*, ModContext*) {
 
     if (!in_gameplay()) {
         s_extraDrain = 0.0f;
+        s_drownTimer = 0;
         return;
     }
 
@@ -521,7 +590,7 @@ void update_stamina(const LogService*, ModContext*) {
 
     const f32 extra = s_extraDrain;
     s_extraDrain = 0.0f;
-    f32 rate = (link ? drain_rate(link->mProcID) + spin_charge_drain(link) : 0.0f) + extra;
+    f32 rate = (link ? drain_rate(link) + spin_charge_drain(link) : 0.0f) + extra;
 
     if (rate > 0.0f) {
         s_stamina -= rate;
@@ -541,6 +610,8 @@ void update_stamina(const LogService*, ModContext*) {
             f32 base = 1.3f;
             if (is_hang_rest_proc(link)) {
                 base = g_configStaminaSlowHangRegen ? 1.3f * kHangRestRegenFactor : 0.0f;
+            } else if (is_swim_rest_proc(link)) {
+                base = g_configStaminaSwimRestRegen ? 1.3f * kHangRestRegenFactor : 0.0f;
             } else if (link != nullptr && !link->checkWolf() && link->checkPlayerGuard()) {
                 base = 1.3f * kGuardRegenFactor;
             }
@@ -550,6 +621,7 @@ void update_stamina(const LogService*, ModContext*) {
     }
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     if (s_stamina > kMax) s_stamina = kMax;
+    update_drown(link);
     f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
     if (recoverFrac < 0.05f) recoverFrac = 0.05f;
     if (recoverFrac > 1.0f) recoverFrac = 1.0f;
@@ -636,4 +708,5 @@ void shutdown_stamina() {
     s_regenRamp = 0.0f;
     s_hiddenSkillLock = 0;
     s_otherSpend = 0.0f;
+    reset_drown();
 }

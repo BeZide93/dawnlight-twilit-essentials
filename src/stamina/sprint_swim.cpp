@@ -2,6 +2,7 @@
 
 #include "stamina.hpp"
 #include "stamina_internal.hpp"
+#include "sprint_human.hpp"
 #include "../controls/controls.hpp"
 
 #include "d/d_com_inf_game.h"
@@ -31,7 +32,7 @@ static bool sprint_swim_wanted(const daAlink_c* link) {
     const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
     if (!sprintHeld) return false;
 
-    if (g_configStaminaEnabled && g_configStaminaSrcSwim && stamina_impl::is_empty()) {
+    if (g_configStaminaEnabled && g_configStaminaSrcSprint && stamina_impl::is_empty()) {
         return false;
     }
 
@@ -88,7 +89,7 @@ void update_sprint_swim() {
         }
     }
 
-    if (g_configStaminaEnabled && g_configStaminaSrcSwim) {
+    if (g_configStaminaEnabled && g_configStaminaSrcSprint) {
         stamina_impl::report_drain(stamina_impl::cost_scaled(kSwimSprintDrainRate, g_configStaminaCostSwimSprint));
     }
 }
