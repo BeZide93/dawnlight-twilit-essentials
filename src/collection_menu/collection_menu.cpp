@@ -351,6 +351,7 @@ void update_collection_menu(const LogService*, ModContext*) {
         unequip_ordon_hero_gear();
     }
     if (g_configCollectionStarterEquip && g_configCollectionKeepOrdonShield &&
+        (g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusB().mDarkClearLevelFlag & 1) &&
         dComIfGs_isCollectShield(COLLECT_WOODEN_SHIELD) &&
         !dComIfGs_isItemFirstBit(dItemNo_WOOD_SHIELD_e)) {
         dComIfGs_onItemFirstBit(dItemNo_WOOD_SHIELD_e);
