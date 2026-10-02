@@ -149,7 +149,7 @@ bool z_items_dimmed() {
     if (dMeter2Info_getWindowStatus() == 2) {
         return false;
     }
-    return !dMeter2Info_isUseButton(METER2_USEBUTTON_X) && !dMeter2Info_isUseButton(METER2_USEBUTTON_Y);
+    return g_zDimX && g_zDimY;
 }
 
 u8 z_item_icon_alpha() {

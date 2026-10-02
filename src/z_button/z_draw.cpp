@@ -688,6 +688,10 @@ void draw_z_ammo_digits(dMeter2Draw_c* draw, f32 baseX, f32 baseY, f32 iconW, f3
         return;
     }
 
+    if (z_item_icon_alpha() != 255) {
+        alphaRate *= g_drawHIO.field_0x42c / 255.0f;
+    }
+
     ensure_z_slot_initialized();
     u8 zItem = z_display_item();
     if (zItem == 0xFF || zItem == 0x00 || zItem == dItemNo_NONE_e) {
@@ -817,6 +821,9 @@ HookAction on_set_button_icon_midona_alpha_pre(ModContext*, void* args, void*, v
     if (!args || isTitleOrMainMenu()) {
         return HOOK_CONTINUE;
     }
+
+    g_zDimX = !dMeter2Info_isUseButton(METER2_USEBUTTON_X);
+    g_zDimY = !dMeter2Info_isUseButton(METER2_USEBUTTON_Y);
 
     dMeter2Draw_c* draw = mods::arg<dMeter2Draw_c*>(args, 0);
 
@@ -962,12 +969,6 @@ HookAction on_set_button_icon_alpha_pre(ModContext*, void* args, void*, void*) {
     }
 
     int i_no = mods::arg<int>(args, 1);
-
-    if (i_no == 0) {
-        g_zDimX = !dMeter2Info_isUseButton(METER2_USEBUTTON_X);
-    } else if (i_no == 1) {
-        g_zDimY = !dMeter2Info_isUseButton(METER2_USEBUTTON_Y);
-    }
 
     if (i_no != 2) {
         return HOOK_CONTINUE;
