@@ -122,6 +122,11 @@ static const int QB_PENDING_MAX_FRAMES = 900;
 
 static u8 s_preSelectIndex = 0xFF;
 static u8 s_preSelectPlay = 0;
+static bool s_oilPourCheck = false;
+
+bool quick_access_oil_pour_check_active() {
+    return s_oilPourCheck;
+}
 
 static bool bottles_lantern_equipped() {
     for (int i = 0; i < 3; i++) {
@@ -182,7 +187,8 @@ static void bottles_use_bottle(int slotIdx) {
     }
 
     const bool isOil = link->checkOilBottleItem(item);
-    if (isOil && !bottles_lantern_equipped()) {
+    const bool lanternOnQa = isOil && quick_access_lantern_on_quick_access();
+    if (isOil && !bottles_lantern_equipped() && !lanternOnQa) {
         bottles_play_error_se();
         return;
     }
@@ -202,7 +208,9 @@ static void bottles_use_bottle(int slotIdx) {
     g_dComIfG_gameInfo.play.setSelectItem(SELECT_ITEM_B, item);
     dComIfGs_setSelectItemIndex(SELECT_ITEM_B, SLOT_11 + slotIdx);
 
+    s_oilPourCheck = lanternOnQa;
     int proc = link->checkNewItemChange(SELECT_ITEM_B);
+    s_oilPourCheck = false;
     if (isOil && proc == QB_ITEM_PROC_COMMON_CHANGE_ITEM) {
         proc = QB_ITEM_PROC_KANDELAAR_POUR;
     }

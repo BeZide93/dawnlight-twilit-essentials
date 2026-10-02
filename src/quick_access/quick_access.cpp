@@ -546,6 +546,11 @@ bool quick_access_boots_on_quick_access() {
     return quick_access_enabled() && s_assignedItem == dItemNo_HVY_BOOTS_e;
 }
 
+bool quick_access_lantern_on_quick_access() {
+    return quick_access_enabled() &&
+           (s_assignedItem == dItemNo_KANTERA_e || s_assignedItem == dItemNo_KANTERA2_e);
+}
+
 static u32 qa_bti_image_size(const ResTIMG* t) {
     const u32 w = t->width;
     const u32 h = t->height;
