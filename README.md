@@ -30,7 +30,8 @@ The in-game settings window is organized into tabs.
   * **Human sprint** — run faster, with long-distance jumps.
   * **Wolf sprint** — keep running at dash speed as a wolf.
   * **Swim sprint** — swim faster.
-
+  * **Swimming stamina** — swimming and diving cost stamina unless you wear the Zora Armor; floating still slowly recovers it, and running out makes Link drown.
+  
 <p align="center">
   <img src="images/new/stamina.png" alt="Stamina System" width="100%" />
 </p>
@@ -40,6 +41,7 @@ The in-game settings window is organized into tabs.
 * **Boss Health Bars** — a big health bar with the boss's name at the top of the screen during boss and miniboss fights. Works for every boss, with several styles to choose from.
 * **Sheathed Spin Attack** — perform spin attacks directly with a sheathed sword.
 * **Flurry Rush** — dodge an attack with perfect timing to slow down time and land a rapid flurry of hits, like in Breath of the Wild.
+* **Bullet Time** — aim the bow in mid-air to slow down time while Link and his arrows keep full speed, like in Breath of the Wild. Drains stamina and ends when you land or run out of stamina.
 * **Puppet Zelda Fixed Pattern** — removes the randomness from Puppet Zelda's attacks: she always follows the same 7-step pattern.
 
 <p align="center">

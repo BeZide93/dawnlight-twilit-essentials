@@ -34,6 +34,7 @@
 #include "sheathed_spin/sheathed_spin.hpp"
 #include "flurry_rush/flurry_rush.hpp"
 #include "flurry_rush/flurry_vignette.hpp"
+#include "bullet_time/bullet_time.hpp"
 #include "puppet_zelda_pattern/puppet_zelda_pattern.hpp"
 #include "stamina/stamina.hpp"
 #include "stamina/sprint_human.hpp"
@@ -480,9 +481,12 @@ static ConfigVarHandle s_varCustomZButton = 0;
 static ConfigVarHandle s_varQuickAccess = 0;
 static ConfigVarHandle s_varQuickAccessAppearance = 0;
 static ConfigVarHandle s_varQuickAccessHideWheelItems = 0;
+static ConfigVarHandle s_varQuickAccessHideWheelMode = 0;
 static ConfigVarHandle s_varSheathedSpin = 0;
 static ConfigVarHandle s_varFlurryRush = 0;
 static ConfigVarHandle s_varFlurryRushPerfectFrames = 0;
+static ConfigVarHandle s_varBulletTime = 0;
+static ConfigVarHandle s_varBulletTimeFirstPerson = 0;
 static ConfigVarHandle s_varStamina = 0;
 static ConfigVarHandle s_varStaminaMax = 0;
 static ConfigVarHandle s_varStaminaScaleWithHearts = 0;
@@ -492,6 +496,8 @@ static ConfigVarHandle s_varStaminaRegenDelay = 0;
 static ConfigVarHandle s_varStaminaExhaustRecover = 0;
 static ConfigVarHandle s_varStaminaSlowHangRegen = 0;
 static ConfigVarHandle s_varStaminaRefillOnStageChange = 0;
+static ConfigVarHandle s_varStaminaSwimRestRegen = 0;
+static ConfigVarHandle s_varStaminaSwimDrown = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
 static ConfigVarHandle s_varStaminaSrcRolls = 0;
@@ -501,6 +507,7 @@ static ConfigVarHandle s_varStaminaSrcSwim = 0;
 static ConfigVarHandle s_varStaminaSrcPushPull = 0;
 static ConfigVarHandle s_varStaminaSrcWolfDash = 0;
 static ConfigVarHandle s_varStaminaSrcHiddenSkills = 0;
+static ConfigVarHandle s_varStaminaSrcBulletTime = 0;
 static ConfigVarHandle s_varStaminaSprint = 0;
 static ConfigVarHandle s_varStaminaSprintStartRoll = 0;
 static ConfigVarHandle s_varStaminaSrcSprint = 0;
@@ -525,6 +532,7 @@ static ConfigVarHandle s_varStaminaCostWolfSprint = 0;
 static ConfigVarHandle s_varStaminaCostSwimSprint = 0;
 static ConfigVarHandle s_varStaminaCostHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaCostSpinCharge = 0;
+static ConfigVarHandle s_varStaminaCostBulletTime = 0;
 static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
@@ -560,6 +568,7 @@ static bool s_zButtonInitialized = false;
 static bool s_quickAccessInitialized = false;
 static bool s_sheathedSpinInitialized = false;
 static bool s_flurryRushInitialized = false;
+static bool s_bulletTimeInitialized = false;
 static bool s_staminaInitialized = false;
 static bool s_puppetZeldaPatternInitialized = false;
 static bool s_collectionMenuInitialized = false;
@@ -744,9 +753,9 @@ static void on_quick_access_appearance_changed(ModContext*, ConfigVarHandle, con
     }
 }
 
-static void on_quick_access_hide_wheel_items_changed(ModContext* mod_ctx, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+static void on_quick_access_hide_wheel_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
-        g_configQuickAccessHideWheelItems = value->bool_value;
+        g_configQuickAccessHideWheelMode = static_cast<int>(value->int_value);
     }
     quick_access_itemwheel_refresh();
 }
@@ -770,6 +779,19 @@ static void on_flurry_rush_perfect_frames_changed(ModContext*, ConfigVarHandle, 
         if (frames < 5) frames = 5;
         if (frames > 120) frames = 120;
         g_configFlurryRushPerfectFrames = static_cast<int>(frames);
+    }
+}
+
+static void on_bullet_time_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configBulletTimeEnabled = value->bool_value;
+        bullet_time_apply_enabled();
+    }
+}
+
+static void on_bullet_time_first_person_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configBulletTimeFirstPerson = value->bool_value;
     }
 }
 
@@ -839,6 +861,14 @@ static void on_stamina_refill_on_stage_change_changed(ModContext*, ConfigVarHand
     }
 }
 
+static void on_stamina_swim_rest_regen_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSwimRestRegen = value->bool_value;
+}
+
+static void on_stamina_swim_drown_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSwimDrown = value->bool_value;
+}
+
 static void on_stamina_src_attacks_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcAttacks = value->bool_value;
 }
@@ -866,6 +896,10 @@ static void on_stamina_src_wolf_dash_changed(ModContext*, ConfigVarHandle, const
 
 static void on_stamina_src_hidden_skills_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcHiddenSkills = value->bool_value;
+}
+
+static void on_stamina_src_bullet_time_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcBulletTime = value->bool_value;
 }
 
 static void on_stamina_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1084,6 +1118,10 @@ static bool is_puppet_zelda_sub_disabled(ModContext*, void*) {
     return !g_configPuppetZeldaPatternEnabled;
 }
 
+static bool is_bullet_time_sub_disabled(ModContext*, void*) {
+    return !g_configBulletTimeEnabled;
+}
+
 static bool is_collection_starter_sub_disabled(ModContext*, void*) {
     return !g_configCollectionStarterEquip;
 }
@@ -1098,6 +1136,10 @@ static bool is_collection_ordon_hero_sub_disabled(ModContext*, void*) {
 
 static bool is_stamina_sub_disabled(ModContext*, void*) {
     return !g_configStaminaEnabled;
+}
+
+static bool is_stamina_swim_sub_disabled(ModContext*, void*) {
+    return !g_configStaminaEnabled || !g_configStaminaSrcSwim;
 }
 
 static bool is_stamina_max_disabled(ModContext*, void*) {
@@ -1219,6 +1261,7 @@ static ModResult build_stamina_dialog(ModContext* ctx, UiElementHandle pane, voi
     if (!svc_ui) return MOD_OK;
     stamina_dialog_toggle(ctx, pane, "Sword attacks", s_varStaminaSrcAttacks);
     stamina_dialog_toggle(ctx, pane, "Hidden Skills", s_varStaminaSrcHiddenSkills);
+    stamina_dialog_toggle(ctx, pane, "Bullet Time", s_varStaminaSrcBulletTime);
     stamina_dialog_toggle(ctx, pane, "Jump & spin attacks", s_varStaminaSrcJumpSpin);
     stamina_dialog_toggle(ctx, pane, "Rolls, side hops & backflips", s_varStaminaSrcRolls);
     stamina_dialog_toggle(ctx, pane, "Sprint", s_varStaminaSrcSprint);
@@ -1296,6 +1339,10 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
         s_varStaminaCostSidestep);
 
     svc_ui->pane_add_section(mod_ctx, pane, "Continuous (drain per frame while doing)");
+    stamina_dialog_number(ctx, pane, "Bullet Time",
+        "<p>Drain while Bullet Time slows down time. At 100% a full 100-point pool lasts "
+        "about 10 seconds (default: 100%).</p>",
+        s_varStaminaCostBulletTime);
     stamina_dialog_number(ctx, pane, "Climbing",
         "<p>Wall climbing drain per frame (default: 0.55).</p>",
         s_varStaminaCostClimb);
@@ -1306,7 +1353,7 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
         "<p>Crawling drain per frame (default: 0.22).</p>",
         s_varStaminaCostCrawl);
     stamina_dialog_number(ctx, pane, "Swimming",
-        "<p>Swimming and diving drain per frame - idle floating is free (default: 0.40).</p>",
+        "<p>Swimming and diving drain per frame - idle floating is free, and so is everything with the Zora Armor (default: 0.40).</p>",
         s_varStaminaCostSwim);
     stamina_dialog_number(ctx, pane, "Pushing & pulling",
         "<p>Pushing or pulling objects drain per frame (default: 0.55).</p>",
@@ -1375,6 +1422,9 @@ static void on_open_visible_equip_dialog(ModContext* ctx, void*) {
     UiDialogHandle hDialog = 0;
     svc_ui->dialog_push(ctx, &desc, &hDialog);
 }
+
+#define RML_HL(text) "<b style=\"color: #b48cff;\">" text "</b>"
+#define RML_OPT(text) "<br/>" RML_HL(text)
 
 static void ui_add_toggle(UiElementHandle pane, const char* label, ConfigVarHandle var,
                           const char* help_rml, UiPredicateFn disabled = nullptr) {
@@ -1583,6 +1633,17 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         "<p>While hanging still on ivy or on a ledge, stamina recovers very slowly "
         "(about a seventh of the normal rate) instead of staying frozen. Moving or "
         "climbing on the wall still drains stamina.</p>", is_stamina_sub_disabled);
+    ui_add_toggle(left, "Slow regen while floating", s_varStaminaSwimRestRegen,
+        "<p>While floating still in water, stamina recovers very slowly instead of staying "
+        "frozen. Only applies when " RML_HL("Swimming") " is enabled under "
+        RML_HL("Choose Stamina Activities") ". The Zora Armor makes swimming free.</p>",
+        is_stamina_swim_sub_disabled);
+    ui_add_toggle(left, "Drown when out of stamina", s_varStaminaSwimDrown,
+        "<p>Swimming or diving with no stamina left makes Link drown: he loses a heart and "
+        "is returned to solid ground, like falling into a pit. Only applies when "
+        RML_HL("Swimming") " is enabled under " RML_HL("Choose Stamina Activities")
+        ". Never happens with the Zora Armor.</p>",
+        is_stamina_swim_sub_disabled);
     ui_add_toggle(left, "Restore stamina on stage change", s_varStaminaRefillOnStageChange,
         "<p>Refills stamina whenever you go through a loading zone, door to another area or "
         "warp. When off, stamina carries over to the next area as it is.</p>",
@@ -1648,13 +1709,13 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
         "<p>General options.</p>", nullptr);
     ui_add_toggle(left, "Skip all cutscenes", s_varGeneralSkipCutscenes,
         "<p>Skips skippable cutscenes automatically. Always active when "
-        "<b>Fast-forward unskippable cutscenes</b> is set to <b>Skip even more</b>.</p>",
+        RML_HL("Fast-forward unskippable cutscenes") " is set to " RML_HL("Skip even more") ".</p>",
         is_skip_cutscenes_disabled);
     static const char* const kFastForwardCutscenesModes[] = {"Off", "On", "Skip even more"};
     ui_add_select(left, "Fast-forward unskippable cutscenes", s_varGeneralFastForwardCutscenes,
-        "<p><b>On</b> plays cutscenes that can't be skipped at increased speed. Dialogue text "
-        "still runs at normal speed. <b>Skip even more</b> also skips all skippable cutscenes "
-        "(even if <b>Skip all cutscenes</b> is off), speeds up doors opening and other waits "
+        "<p>" RML_HL("On") " plays cutscenes that can't be skipped at increased speed. Dialogue text "
+        "still runs at normal speed." RML_OPT("Skip even more") " also skips all skippable cutscenes "
+        ", speeds up doors opening and other waits "
         "that normally stay at normal speed, and shows all dialogue text instantly and "
         "advances it automatically. Choices still wait for your input.</p>",
         kFastForwardCutscenesModes, 3);
@@ -1676,12 +1737,12 @@ static ModResult tab_general(ModContext*, UiWindowHandle, UiElementHandle left,
     ui_add_toggle(left, "Fast door animations", s_varGeneralFastDoorAnimations,
         "<p>Speeds up only Link opening and walking through doors, cutscenes keep their normal "
         "speed. Works independently of the fast-forward setting. Already included in "
-        "<b>Skip even more</b>.</p>",
+        RML_HL("Skip even more") ".</p>",
         is_fast_door_animations_disabled);
     static const char* const kSceneTransitionModes[] = {"Fast", "Vanilla"};
     ui_add_select(left, "Transition speed", s_varGeneralSceneTransitions,
-        "<p><b>Fast</b> speeds up room, door and map transitions. "
-        "<b>Vanilla</b> keeps the normal speed.</p>",
+        "<p>" RML_HL("Fast") " speeds up room, door and map transitions."
+        RML_OPT("Vanilla") " keeps the normal speed.</p>",
         kSceneTransitionModes, 2);
     svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
 
@@ -1749,8 +1810,8 @@ static ModResult tab_visuals(ModContext*, UiWindowHandle, UiElementHandle left,
     static const char* const kVisibleEquipQuiverTypes[] = {
         "Default (by arrow capacity)", "Quiver", "Big Quiver", "Giant Quiver" };
     ui_add_select(left, "Quiver model", s_varVisibleEquipQuiverType,
-        "<p>Chooses which quiver is shown on Link. <b>Default</b> picks it based on your "
-        "max arrow capacity, like in the vanilla game. The other options always show the "
+        "<p>Chooses which quiver is shown on Link." RML_OPT("Default") " picks it based on your "
+        "max arrow capacity, like in the vanilla game.<br/>The other options always show the "
         "selected quiver, regardless of your arrow capacity.</p>",
         kVisibleEquipQuiverTypes, 4, is_visible_equip_sub_disabled);
     return MOD_OK;
@@ -1766,12 +1827,15 @@ static ModResult tab_quick_access(ModContext*, UiWindowHandle, UiElementHandle l
         "<p>Tap the Quick Access button to use the item assigned to it. Hold it to open the "
         "item menu. The button can be changed in the Controls tab. The look of the menu can be "
         "changed in the Customization tab.</p>");
-    ui_add_toggle(left, "Hide items from item wheel", s_varQuickAccessHideWheelItems,
-        "<p>Hides your quick items and bottles from the normal item wheel. Bottles stay "
-        "reachable on the Quick Access bottle page (L). Items equipped on X or Y stay "
-        "visible. Your inventory is never changed: turning this off, disabling Quick Access "
-        "or disabling the mod shows them again.</p>",
-        is_quick_access_sub_disabled);
+    static const char* const kHideWheelModes[] = { "Off", "Items except bottles", "Items including bottles" };
+    ui_add_select(left, "Hide items from item wheel", s_varQuickAccessHideWheelMode,
+        "<p>Hides your quick items from the normal item wheel." RML_OPT("Off") ": nothing is hidden."
+        RML_OPT("Items except bottles") ": bottles stay in the item wheel and on the Quick Access "
+        "bottle page (L)." RML_OPT("Items including bottles") ": bottles are hidden too and only "
+        "reachable on the Quick Access bottle page.<br/>Items equipped on X or Y stay visible. "
+        "Your inventory is never changed: turning this off, disabling Quick Access or "
+        "disabling the mod shows them again.</p>",
+        kHideWheelModes, 3, is_quick_access_sub_disabled);
 
     return MOD_OK;
 }
@@ -1857,6 +1921,17 @@ static ModResult tab_combat(ModContext*, UiWindowHandle, UiElementHandle left,
         c.suffix = " frames";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+
+    svc_ui->pane_add_section(mod_ctx, left, "Bullet Time");
+    ui_add_toggle(left, "Enabled", s_varBulletTime,
+        "<p>Aim the bow in mid-air (side hop, jump off a ledge or fall) to slow down time, "
+        "like in Breath of the Wild. Link draws and shoots at full speed and his arrows fly "
+        "at full speed while everything else slows down. Slowing time drains stamina; Bullet "
+        "Time ends when you land, press A or run out of stamina.</p>");
+    ui_add_toggle(left, "First-person aiming", s_varBulletTimeFirstPerson,
+        "<p>Switches to the first-person bow view while aiming during Bullet Time, so you can "
+        "aim freely with the stick. Not used while Z-targeting an enemy.</p>",
+        is_bullet_time_sub_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Puppet Zelda");
     ui_add_toggle(left, "Enabled", s_varPuppetZeldaPattern,
@@ -1963,13 +2038,13 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     svc_ui->pane_add_section(mod_ctx, left, "Master Rush");
     static const char* const kMasterRushRetryModes[] = {"At beginning", "Current boss"};
     ui_add_select(left, "Retry", s_varMasterRushRetryMode,
-        "<p><b>At beginning</b> restarts the whole Master Rush at Ook and resets the timer. "
-        "<b>Current boss</b> restarts only the current fight and keeps the timer running.</p>",
+        "<p>" RML_HL("At beginning") " restarts the whole Master Rush at Ook and resets the timer."
+        RML_OPT("Current boss") " restarts only the current fight and keeps the timer running.</p>",
         kMasterRushRetryModes, 2);
     static const char* const kMasterRushDifficulties[] = {"Normal (20 hearts)", "Hard (3 hearts)"};
     ui_add_select(left, "Difficulty", s_varMasterRushDifficulty,
-        "<p><b>Normal</b> starts the Master Rush with 20 hearts. "
-        "<b>Hard</b> starts it with only 3 hearts for the whole run.</p>",
+        "<p>" RML_HL("Normal") " starts the Master Rush with 20 hearts."
+        RML_OPT("Hard") " starts it with only 3 hearts for the whole run.</p>",
         kMasterRushDifficulties, 2);
 
 #if 0
@@ -2007,11 +2082,11 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
     svc_ui->pane_add_section(mod_ctx, left, "Midna");
     ui_add_select(left, "Midna button", g_controlsMidnaVar,
         "<p>Button that calls Midna while the Z-Button (on Lazy Tweaks: the separate Midna "
-        "button) is enabled. <b>L</b> is the default and "
+        "button) is enabled." RML_OPT("L") " is the default and "
         "uses the left shoulder button (L1 / LB) of the controller; Midna is then shown top left "
-        "on a mirrored Z button and D-Pad Left toggles the minimap. <b>D-Pad Left</b> calls "
-        "Midna from the D-Pad instead. "
-        "<b>R + D-Pad Right</b> shows or hides the minimap in both modes.</p>",
+        "on a mirrored Z button and D-Pad Left toggles the minimap." RML_OPT("D-Pad Left") " calls "
+        "Midna from the D-Pad instead."
+        RML_OPT("R + D-Pad Right") " shows or hides the minimap in both modes.</p>",
         kControlsMidnaLabels, CTRL_MIDNA_COUNT, is_controls_midna_disabled);
 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
@@ -2066,8 +2141,8 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
 
     svc_ui->pane_add_section(mod_ctx, left, "Stamina Bar");
     ui_add_select(left, "Style", g_staminaBarStyleVar,
-        "<p><b>Default</b>: Twilight Princess lantern-style bar in the HUD. "
-        "<b>BotW Wheel</b>: Breath of the Wild stamina wheel floating next to Link. "
+        "<p>" RML_HL("Default") ": Twilight Princess lantern-style bar in the HUD."
+        RML_OPT("BotW Wheel") ": Breath of the Wild stamina wheel floating next to Link. "
         "Extra stamina is shown as up to two smaller rings around it. With max stamina scaling "
         "with hearts, 3 hearts show only the big wheel and every extra heart grows the outer "
         "rings until both are complete at 20 hearts.</p>",
@@ -2081,8 +2156,8 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
 
     svc_ui->pane_add_section(mod_ctx, left, "Boss Bar");
     ui_add_select(left, "Style", g_bossBarStyleVar,
-        "<p><b>Default</b>: Twilight Princess style with brass frame. "
-        "<b>Thinner</b>: long thin bar at the bottom with the boss's full title.</p>",
+        "<p>" RML_HL("Default") ": Twilight Princess style with brass frame."
+        RML_OPT("Thinner") ": long thin bar at the bottom with the boss's full title.</p>",
         kBossBarStyleLabels, kBossBarStyleCount);
     ui_add_number(left, "X Offset", g_bossBarVars[0],
         "<p>Horizontal position of the boss bar as an offset.</p>");
@@ -2092,7 +2167,7 @@ static ModResult tab_customization(ModContext*, UiWindowHandle, UiElementHandle 
     svc_ui->pane_add_section(mod_ctx, left, "Quick Access");
     static const char* const kQuickAccessAppearances[] = { "Radial", "Item Bar (BotW-style)" };
     ui_add_select(left, "Appearance", s_varQuickAccessAppearance,
-        "<p><b>Radial</b>: vanilla item wheel look. <b>Item Bar</b>: horizontal bar at the top "
+        "<p>" RML_HL("Radial") ": vanilla item wheel look." RML_OPT("Item Bar") ": horizontal bar at the top "
         "of the screen, like in Breath of the Wild. Press X while the menu is open to "
         "customize its items.</p>",
         kQuickAccessAppearances, 2, is_quick_access_sub_disabled);
@@ -2862,9 +2937,24 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         descQuickAccessHideWheel.name = "quickAccessHideWheelItems";
         descQuickAccessHideWheel.type = CONFIG_VAR_BOOL;
         descQuickAccessHideWheel.default_bool = false;
+        bool legacyHideWheel = false;
         if (svc_config->register_var(mod_ctx, &descQuickAccessHideWheel, &s_varQuickAccessHideWheelItems) == MOD_OK) {
-            svc_config->get_bool(mod_ctx, s_varQuickAccessHideWheelItems, &g_configQuickAccessHideWheelItems);
-            svc_config->subscribe(mod_ctx, s_varQuickAccessHideWheelItems, on_quick_access_hide_wheel_items_changed, nullptr, nullptr);
+            svc_config->get_bool(mod_ctx, s_varQuickAccessHideWheelItems, &legacyHideWheel);
+        }
+
+        ConfigVarDesc descQuickAccessHideWheelMode = CONFIG_VAR_DESC_INIT;
+        descQuickAccessHideWheelMode.name = "quickAccessHideWheelMode";
+        descQuickAccessHideWheelMode.type = CONFIG_VAR_INT;
+        descQuickAccessHideWheelMode.default_int = QA_HIDE_WHEEL_OFF;
+        if (svc_config->register_var(mod_ctx, &descQuickAccessHideWheelMode, &s_varQuickAccessHideWheelMode) == MOD_OK) {
+            if (legacyHideWheel) {
+                svc_config->set_int(mod_ctx, s_varQuickAccessHideWheelMode, QA_HIDE_WHEEL_INCLUDING_BOTTLES);
+                svc_config->set_bool(mod_ctx, s_varQuickAccessHideWheelItems, false);
+            }
+            int64_t hideMode = QA_HIDE_WHEEL_OFF;
+            svc_config->get_int(mod_ctx, s_varQuickAccessHideWheelMode, &hideMode);
+            g_configQuickAccessHideWheelMode = static_cast<int>(hideMode);
+            svc_config->subscribe(mod_ctx, s_varQuickAccessHideWheelMode, on_quick_access_hide_wheel_mode_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descSpin = CONFIG_VAR_DESC_INIT;
@@ -2896,6 +2986,24 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             if (v > 120) v = 120;
             g_configFlurryRushPerfectFrames = static_cast<int>(v);
             svc_config->subscribe(mod_ctx, s_varFlurryRushPerfectFrames, on_flurry_rush_perfect_frames_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descBulletTime = CONFIG_VAR_DESC_INIT;
+        descBulletTime.name = "bulletTimeEnabled";
+        descBulletTime.type = CONFIG_VAR_BOOL;
+        descBulletTime.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descBulletTime, &s_varBulletTime) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varBulletTime, &g_configBulletTimeEnabled);
+            svc_config->subscribe(mod_ctx, s_varBulletTime, on_bullet_time_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descBulletTimeFirstPerson = CONFIG_VAR_DESC_INIT;
+        descBulletTimeFirstPerson.name = "bulletTimeFirstPerson";
+        descBulletTimeFirstPerson.type = CONFIG_VAR_BOOL;
+        descBulletTimeFirstPerson.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descBulletTimeFirstPerson, &s_varBulletTimeFirstPerson) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varBulletTimeFirstPerson, &g_configBulletTimeFirstPerson);
+            svc_config->subscribe(mod_ctx, s_varBulletTimeFirstPerson, on_bullet_time_first_person_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStamina = CONFIG_VAR_DESC_INIT;
@@ -2989,6 +3097,24 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varStaminaRefillOnStageChange, on_stamina_refill_on_stage_change_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descStaminaSwimRestRegen = CONFIG_VAR_DESC_INIT;
+        descStaminaSwimRestRegen.name = "staminaSwimRestRegen";
+        descStaminaSwimRestRegen.type = CONFIG_VAR_BOOL;
+        descStaminaSwimRestRegen.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descStaminaSwimRestRegen, &s_varStaminaSwimRestRegen) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSwimRestRegen, &g_configStaminaSwimRestRegen);
+            svc_config->subscribe(mod_ctx, s_varStaminaSwimRestRegen, on_stamina_swim_rest_regen_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaSwimDrown = CONFIG_VAR_DESC_INIT;
+        descStaminaSwimDrown.name = "staminaSwimDrown";
+        descStaminaSwimDrown.type = CONFIG_VAR_BOOL;
+        descStaminaSwimDrown.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descStaminaSwimDrown, &s_varStaminaSwimDrown) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSwimDrown, &g_configStaminaSwimDrown);
+            svc_config->subscribe(mod_ctx, s_varStaminaSwimDrown, on_stamina_swim_drown_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descStaminaSprint = CONFIG_VAR_DESC_INIT;
         descStaminaSprint.name = "staminaSprint";
         descStaminaSprint.type = CONFIG_VAR_BOOL;
@@ -3064,7 +3190,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varStaminaSwimSprintSpeed, on_stamina_swim_sprint_speed_changed, nullptr, nullptr);
         }
 
-        struct { const char* name; ConfigVarHandle* handle; bool* global; ConfigChangedFn cb; } staminaSrcVars[] = {
+        struct { const char* name; ConfigVarHandle* handle; bool* global; ConfigChangedFn cb; bool default_on = true; } staminaSrcVars[] = {
             { "staminaSrcAttacks",  &s_varStaminaSrcAttacks,  &g_configStaminaSrcAttacks,  on_stamina_src_attacks_changed },
             { "staminaSrcJumpSpin", &s_varStaminaSrcJumpSpin, &g_configStaminaSrcJumpSpin, on_stamina_src_jump_spin_changed },
             { "staminaSrcRolls",    &s_varStaminaSrcRolls,    &g_configStaminaSrcRolls,    on_stamina_src_rolls_changed },
@@ -3075,12 +3201,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaSrcPushPull", &s_varStaminaSrcPushPull, &g_configStaminaSrcPushPull, on_stamina_src_push_pull_changed },
             { "staminaSrcWolfDash", &s_varStaminaSrcWolfDash, &g_configStaminaSrcWolfDash, on_stamina_src_wolf_dash_changed },
             { "staminaSrcHiddenSkills", &s_varStaminaSrcHiddenSkills, &g_configStaminaSrcHiddenSkills, on_stamina_src_hidden_skills_changed },
+            { "staminaSrcBulletTime", &s_varStaminaSrcBulletTime, &g_configStaminaSrcBulletTime, on_stamina_src_bullet_time_changed },
         };
         for (auto& sv : staminaSrcVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
             d.name = sv.name;
             d.type = CONFIG_VAR_BOOL;
-            d.default_bool = true;
+            d.default_bool = sv.default_on;
             if (svc_config->register_var(mod_ctx, &d, sv.handle) == MOD_OK) {
                 svc_config->get_bool(mod_ctx, *sv.handle, sv.global);
                 svc_config->subscribe(mod_ctx, *sv.handle, sv.cb, nullptr, nullptr);
@@ -3105,6 +3232,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostSwimSprint", &s_varStaminaCostSwimSprint, &g_configStaminaCostSwimSprint,  10 },
             { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills, 100 },
             { "staminaCostSpinCharge", &s_varStaminaCostSpinCharge, &g_configStaminaCostSpinCharge, 10 },
+            { "staminaCostBulletTime", &s_varStaminaCostBulletTime, &g_configStaminaCostBulletTime, 100 },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -3357,6 +3485,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     log_init_result("sheathed_spin", s_sheathedSpinInitialized);
     s_flurryRushInitialized = init_flurry_rush(svc_hook, svc_log, error) == MOD_OK;
     log_init_result("flurry_rush", s_flurryRushInitialized);
+    s_bulletTimeInitialized = init_bullet_time(svc_hook, svc_log, error) == MOD_OK;
+    log_init_result("bullet_time", s_bulletTimeInitialized);
     s_staminaInitialized = init_stamina(svc_hook, error) == MOD_OK;
     log_init_result("stamina", s_staminaInitialized);
     s_puppetZeldaPatternInitialized = init_puppet_zelda_pattern(svc_hook, error) == MOD_OK;
@@ -3394,6 +3524,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     if (s_quickAccessInitialized) update_quick_access(svc_log, mod_ctx);
     if (s_sheathedSpinInitialized) update_sheathed_spin(svc_log, mod_ctx);
     if (s_flurryRushInitialized) update_flurry_rush(svc_log, mod_ctx);
+    if (s_bulletTimeInitialized) update_bullet_time(svc_log, mod_ctx);
     if (s_flurryVignetteInitialized) update_flurry_vignette(svc_log, mod_ctx);
     if (s_staminaInitialized) update_stamina(svc_log, mod_ctx);
     if (s_puppetZeldaPatternInitialized) update_puppet_zelda_pattern(svc_log, mod_ctx);
@@ -3448,6 +3579,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("z_button", shutdown_z_button);
     run_shutdown_step("quick_access", shutdown_quick_access);
     run_shutdown_step("quick_access_bottles", shutdown_quick_access_bottles);
+    run_shutdown_step("bullet_time", shutdown_bullet_time);
     run_shutdown_step("flurry_rush", shutdown_flurry_rush);
     run_shutdown_step("stamina", shutdown_stamina);
     run_shutdown_step("collection_menu", shutdown_collection_menu);
