@@ -71,16 +71,16 @@ bool low_health_now(u16 life) {
 
 constexpr u16 kRampMaxStartUnits = 5 * kLifeUnitsPerHeart;
 float low_health_level(u16 life) {
-    const u16 maxLife = dComIfGs_getMaxLife();
+    const u16 maxLife = static_cast<u16>(dComIfGs_getMaxLife() / 5 * kLifeUnitsPerHeart);
     if (maxLife == 0 || life >= maxLife) {
         return 0.0f;
     }
-    const u16 start = std::min<u16>(maxLife / 2, kRampMaxStartUnits);
+    const u16 start = std::min<u16>(maxLife, kRampMaxStartUnits);
     if (life >= start) {
         return 0.0f;
     }
     const float t = 1.0f - static_cast<float>(life) / static_cast<float>(start);
-    return t * t * (3.0f - 2.0f * t);
+    return t * (2.0f - t);
 }
 
 double pulse_phase(double now) {
