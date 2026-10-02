@@ -44,6 +44,7 @@ constexpr f32 kNoSlowScale = 0.99f;
 constexpr f32 kMinLiveScale = 0.05f;
 constexpr f32 kDrainPerStep = 0.35f;
 constexpr int kMinCostPct = 5;
+constexpr f32 kMinStartDropHeight = 300.0f;
 constexpr u8 kSlingArrowType = 4;
 constexpr u32 kBowAimStatus = 0x1000;
 constexpr u32 kHawkEyeStatus = 0x200000;
@@ -227,8 +228,7 @@ daAlink_c* player_link() {
 }
 
 bool is_air_proc(u16 proc) {
-    return proc == daAlink_c::PROC_SIDESTEP || proc == daAlink_c::PROC_AUTO_JUMP ||
-           proc == daAlink_c::PROC_FALL;
+    return proc == daAlink_c::PROC_AUTO_JUMP || proc == daAlink_c::PROC_FALL;
 }
 
 bool is_bow_item(u16 item) {
@@ -281,8 +281,13 @@ const char* stop_reason(daAlink_c* link) {
     return "unknown";
 }
 
+bool high_enough(daAlink_c* link) {
+    return link->current.pos.y - link->mLinkAcch.GetGroundH() >= kMinStartDropHeight;
+}
+
 bool can_start(daAlink_c* link) {
-    return !s_needLanding && !s_reaimBlock && general_timescale_available() && can_continue(link);
+    return !s_needLanding && !s_reaimBlock && general_timescale_available() && can_continue(link) &&
+           high_enough(link);
 }
 
 f32 live_scale() {
