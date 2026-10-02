@@ -47,6 +47,7 @@ extern bool g_configStaminaSrcSwim;
 extern bool g_configStaminaSrcPushPull;
 extern bool g_configStaminaSrcWolfDash;
 extern bool g_configStaminaSrcHiddenSkills;
+extern bool g_configStaminaSrcBulletTime;
 
 extern int g_configStaminaCostAttack;
 extern int g_configStaminaCostJumpAttack;
@@ -64,6 +65,10 @@ extern int g_configStaminaCostWolfSprint;
 extern int g_configStaminaCostSwimSprint;
 extern int g_configStaminaCostHiddenSkills;
 extern int g_configStaminaCostSpinCharge;
+extern int g_configStaminaCostBulletTime;
+
+void stamina_add_drain(float amount);
+bool stamina_is_exhausted();
 
 ModResult init_stamina(const HookService* hook_svc, ModError* error);
 void update_stamina(const LogService* log_svc, ModContext* mod_ctx);

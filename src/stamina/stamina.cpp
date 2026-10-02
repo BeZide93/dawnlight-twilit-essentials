@@ -41,6 +41,7 @@ bool g_configStaminaSrcSwim      = true;
 bool g_configStaminaSrcPushPull  = true;
 bool g_configStaminaSrcWolfDash  = true;
 bool g_configStaminaSrcHiddenSkills = true;
+bool g_configStaminaSrcBulletTime = true;
 
 int g_configStaminaCostAttack     = 100;
 int g_configStaminaCostJumpAttack = 100;
@@ -58,6 +59,7 @@ int g_configStaminaCostWolfSprint = 100;
 int g_configStaminaCostSwimSprint = 100;
 int g_configStaminaCostHiddenSkills = 100;
 int g_configStaminaCostSpinCharge = 10;
+int g_configStaminaCostBulletTime = 100;
 
 enum StamCat {
     STAM_ATTACKS = 1,
@@ -190,8 +192,8 @@ static f32 drain_rate(u16 proc) {
 static constexpr f32 kSpinChargeDrain = 0.5f;
 
 static bool is_spin_charge(const daAlink_c* link) {
-    if (link->mProcID == daAlink_c::PROC_CUT_TURN_CHARGE) return true;
-    return link->mProcID == daAlink_c::PROC_CUT_TURN_MOVE && link->mProcVar2.field_0x300c == 0;
+    if (link->mProcID != daAlink_c::PROC_CUT_TURN_CHARGE && link->mProcID != daAlink_c::PROC_CUT_TURN_MOVE) return false;
+    return link->mProcVar2.field_0x300c == 0;
 }
 
 static f32 spin_charge_drain(const daAlink_c* link) {
@@ -237,6 +239,15 @@ f32 main_ring_capacity(f32 maxValue) {
     if (maxValue > main * kRingMax) main = maxValue / kRingMax;
     return main;
 }
+}
+
+void stamina_add_drain(float amount) {
+    if (!g_configStaminaEnabled || amount <= 0.0f) return;
+    s_extraDrain += amount;
+}
+
+bool stamina_is_exhausted() {
+    return g_configStaminaEnabled && s_exhausted;
 }
 
 static void tired_check_post(ModContext*, void* args, void* retval, void*) {
