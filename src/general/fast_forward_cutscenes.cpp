@@ -32,7 +32,7 @@ float g_configGeneralFastForwardSpeed = 8.0f;
 
 bool g_configGeneralFastDoorAnimations = false;
 
-#define ENABLE_FF_LOG 1
+#define ENABLE_FF_LOG 0
 
 float clamp_fast_forward_speed(float speed) {
     if (speed < 2.0f) speed = 2.0f;
@@ -427,6 +427,44 @@ bool is_item_get_proc() {
     }
 }
 
+bool is_metamorphose_proc() {
+    daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
+    if (link == nullptr) return false;
+    return link->mProcID == daAlink_c::PROC_METAMORPHOSE ||
+           link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY;
+}
+
+bool is_midna_hint_talk(dEvt_control_c* evt) {
+    if (evt == nullptr || evt->mEventStatus != 1 || evt->mEventId < 0) return false;
+    dEvDtEvent_c* data = g_dComIfG_gameInfo.play.getEvtManager().getEventData(evt->mEventId);
+    if (data == nullptr || data->getName() == nullptr) return false;
+    if (std::strcmp(data->getName(), "MHINT_TALK") == 0) return true;
+    return std::strcmp(data->getName(), "DEFAULT_TALK") == 0 && is_midna_event(evt);
+}
+
+bool is_message_waiting_for_input() {
+    dMsgObject_c* msg = dMsgObject_getMsgObjectClass();
+    if (msg == nullptr) return false;
+    switch (msg->getStatus()) {
+    case 5:
+    case 7:
+    case 8:
+    case 9:
+    case 11:
+    case 16:
+    case 20:
+    case 21:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_midna_talk_passive(dEvt_control_c* evt) {
+    return is_midna_hint_talk(evt) && !is_message_waiting_for_input() &&
+           dMeter2Info_getWindowStatus() == 0;
+}
+
 bool is_gameplay_event_proc() {
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     return link != nullptr && link->mProcID == daAlink_c::PROC_MONKEY_MOVE;
@@ -521,10 +559,30 @@ bool is_door_animation(dEvt_control_c* evt) {
     return data != nullptr && data->getName() != nullptr && is_door_start_event(data->getName());
 }
 
+bool is_sign_actor(fopAc_ac_c* actor) {
+    if (actor == nullptr) return false;
+    const s16 name = fopAcM_GetProfName(actor);
+    return name == fpcNm_Obj_KKanban_e || name == fpcNm_OBJ_KANBAN2_e || name == fpcNm_Obj_NamePlate_e;
+}
+
+bool is_sign_message() {
+    dMsgObject_c* msg = dMsgObject_getMsgObjectClass();
+    if (msg == nullptr) return false;
+    const u8 kind = msg->getFukiKind();
+    return kind == 2 || kind == 6 || kind == 15;
+}
+
+bool is_sign_talk(dEvt_control_c* evt) {
+    if (is_sign_message()) return true;
+    return evt != nullptr && (is_sign_actor(evt->getPt1()) || is_sign_actor(evt->getPt2()));
+}
+
 bool is_dialogue_fast_forward_wanted() {
     if (g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_VERY_FAST) return false;
 
     if (!is_gameplay_scene() || !is_talk_message_active()) return false;
+
+    if (is_sign_talk(dComIfGp_getEvent())) return false;
 
     return is_player_process_running();
 }
@@ -550,6 +608,10 @@ void on_ff_dialogue_pad_read_post(ModContext*, void*, void*, void*) {
 }
 
 bool is_genuine_cutscene(dEvt_control_c* evt, bool allowDoors) {
+    if (is_metamorphose_proc() && evt != nullptr && evt->mEventStatus == 1) return true;
+
+    if (is_midna_talk_passive(evt)) return true;
+
     if (!is_gameplay_scene()) return false;
 
     if (is_dialogue_active(evt)) return false;
@@ -772,7 +834,8 @@ void update_fast_forward_cutscenes(const LogService* log_svc, ModContext* ff_ctx
 
     const bool shouldFastForward = (fastDoor || g_configGeneralFastForwardCutscenesMode != FF_CUTSCENES_OFF) &&
                                    !skipWillHandle &&
-                                   s_confirmFrames >= kLeadFrames;
+                                   (s_confirmFrames >= kLeadFrames || is_midna_talk_passive(evt) ||
+                                    is_metamorphose_proc());
 
     const float targetScale = g_configGeneralFastForwardSpeed;
     log_fast_forward_event(log_svc, ff_ctx, evt, true, shouldFastForward);
