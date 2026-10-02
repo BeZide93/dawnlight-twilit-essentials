@@ -1192,7 +1192,10 @@ static bool poseLanternOnBelt(daAlink_c *alink) {
     flamePos.y -= 17.0f;
   }
 
+  const u32 savedEndResetFlg1 = alink->mEndResetFlg1;
+  alink->mEndResetFlg1 &= ~static_cast<u32>(daPy_py_c::ERFLG1_UNK_8);
   model->calc();
+  alink->mEndResetFlg1 = savedEndResetFlg1;
   return true;
 }
 
