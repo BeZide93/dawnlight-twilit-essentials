@@ -2991,13 +2991,17 @@ static void draw_strip_hud_icon(J2DScreen* screen) {
         targetW = targetH * (static_cast<f32>(img->width) / static_cast<f32>(img->height));
     }
 
+    constexpr f32 kRefIconSize = 26.0f;
     const JGeometry::TBox2<f32>& bounds = juji->getGlbBounds();
     const f32 growW = bounds.getWidth() * (1.0f - hudScale) * 0.5f;
     const f32 shrinkH = bounds.getHeight() * (1.0f - hudScale) * 0.5f;
-    f32 drawX = bounds.i.x + (bounds.getWidth() - targetW) * 0.30f * hudScale + growW;
-    f32 drawY = bounds.i.y + (isLantern ? 31.5f : 33.0f) * hudScale + shrinkH;
+    const f32 centerX = bounds.i.x + (bounds.getWidth() - kRefIconSize) * 0.30f * hudScale + growW +
+                        kRefIconSize * 0.5f * hudScale;
+    const f32 centerY = bounds.i.y + (33.0f + kRefIconSize * 0.5f) * hudScale + shrinkH;
     targetW *= hudScale;
     targetH *= hudScale;
+    f32 drawX = centerX - targetW * 0.5f;
+    f32 drawY = centerY - targetH * 0.5f;
 
     f32 crossLeft = 0.0f;
     f32 crossTop = 0.0f;
@@ -3008,7 +3012,7 @@ static void draw_strip_hud_icon(J2DScreen* screen) {
         dpad_cross_bounds(screen, crossLeft, crossTop, crossRight, crossBottom))
     {
         const f32 crossW = crossRight - crossLeft;
-        drawX = crossLeft - targetW + crossW * 0.08f;
+        drawX = crossLeft + crossW * 0.08f - kRefIconSize * 0.5f * hudScale - targetW * 0.5f;
         drawY = (crossTop + crossBottom - targetH) * 0.5f;
     } else if (qaButton == CTRL_BTN_DPAD_DOWN && controls_hd_collection_on_left() &&
                dpad_cross_bounds(screen, crossLeft, crossTop, crossRight, crossBottom))
