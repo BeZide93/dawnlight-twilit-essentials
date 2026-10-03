@@ -223,6 +223,13 @@ bool isCanoeRiding() {
     return player != nullptr && player->checkCanoeRide();
 }
 
+bool isCanoeFishing(const daPy_py_c* player) {
+    if (player == nullptr) {
+        player = daPy_getLinkPlayerActorClass();
+    }
+    return player != nullptr && player->checkCanoeRide() && daAlink_c::checkStageName("F_SP127");
+}
+
 bool isTitleOrMainMenu() {
     daPy_py_c* player = daPy_getLinkPlayerActorClass();
     if (player == nullptr) {

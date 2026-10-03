@@ -86,6 +86,7 @@ bool z_item_is_lantern(u8 itemNo);
 bool z_item_ammo(u8 itemNo, int& count, int& maxCount);
 bool isWolfPlayer();
 bool isCanoeRiding();
+bool isCanoeFishing(const daPy_py_c* player = nullptr);
 bool isTitleOrMainMenu();
 bool isMidnaUnlocked();
 bool is_pause_menu_open(dMeter2Draw_c* draw = nullptr);

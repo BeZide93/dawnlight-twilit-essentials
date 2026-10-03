@@ -192,7 +192,7 @@ HookAction on_check_item_change_from_button_pre(ModContext*, void* args, void* r
                 if (!link->itemTriggerCheck(1 << i)) {
                     continue;
                 }
-                if (i == 2 && link->checkCanoeRide()) {
+                if (i == 2 && isCanoeFishing(link)) {
                     continue;
                 }
 

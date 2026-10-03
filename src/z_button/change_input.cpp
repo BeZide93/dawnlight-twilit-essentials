@@ -127,16 +127,16 @@ void on_pad_read_post(ModContext*, void*, void*, void*) {
     g_physZTrig = physZTrig;
 
     daAlink_c* padLink = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
-    const bool canoeRide = padLink != nullptr && padLink->checkCanoeRide();
+    const bool canoeFishing = padLink != nullptr && isCanoeFishing(padLink);
 
-    if (!extraSetCombo && !canoeRide) {
+    if (!extraSetCombo && !canoeFishing) {
         pad.mButtonFlags &= ~PAD_TRIGGER_Z;
         pad.mPressedButtonFlags &= ~PAD_TRIGGER_Z;
     }
 
     ensure_z_slot_initialized();
 
-    if (!canoeRide && !quickAccessOpen && !isWolfPlayer() && g_zInventorySlot != 0xFF) {
+    if (!canoeFishing && !quickAccessOpen && !isWolfPlayer() && g_zInventorySlot != 0xFF) {
         u8 zItem = dComIfGs_getItem(g_zInventorySlot, false);
         if (zItem != 0xFF && zItem != 0x00 && zItem != dItemNo_NONE_e && zItem != 0x72) {
             daAlink_c* alink = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
@@ -180,7 +180,7 @@ void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
         alink->mItemTrigger &= ~0x04;
     }
 
-    if (alink != nullptr && !alink->checkWolf() && !alink->checkCanoeRide()) {
+    if (alink != nullptr && !alink->checkWolf() && !isCanoeFishing(alink)) {
         u8 windowStatus = dMeter2Info_getWindowStatus();
         if (windowStatus == 0 && !quick_access_is_active() && !s_extraSetZLatch) {
             JUTGamePad* rawGamePad = JUTGamePad::getGamePad(0);

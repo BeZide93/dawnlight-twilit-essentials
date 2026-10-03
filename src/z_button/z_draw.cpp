@@ -61,7 +61,7 @@ void update_z_item_texture(dMeter2Draw_c* draw) {
     update_midna_pane(draw);
 
     CPaneMgr* itemR = dMeter2Info_getMeterItemPanePtr(2);
-    if (isWolfPlayer() || isCanoeRiding() || is_pause_menu_open(draw)) {
+    if (isWolfPlayer() || isCanoeFishing() || is_pause_menu_open(draw)) {
         safe_pane_hide(itemR);
         g_cachedZMainPic = nullptr;
         return;
@@ -626,7 +626,7 @@ void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    if (isWolfPlayer() || isCanoeRiding() || is_pause_menu_open(draw)) {
+    if (isWolfPlayer() || isCanoeFishing() || is_pause_menu_open(draw)) {
         J2DScreen* screen = draw->getMainScreenPtr();
         if (screen != nullptr) {
             J2DPane* itemRPane = screen->search(MULTI_CHAR('r_itm_p'));
@@ -684,7 +684,7 @@ void on_meter2_draw_draw_post(ModContext*, void* args, void*, void*) {
 }
 
 void draw_z_ammo_digits(dMeter2Draw_c* draw, f32 baseX, f32 baseY, f32 iconW, f32 iconH, f32 alphaRate) {
-    if (draw == nullptr || isWolfPlayer() || isCanoeRiding() || is_pause_menu_open(draw)) {
+    if (draw == nullptr || isWolfPlayer() || isCanoeFishing() || is_pause_menu_open(draw)) {
         return;
     }
 
