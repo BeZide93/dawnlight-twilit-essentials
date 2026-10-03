@@ -1,4 +1,5 @@
 #include "quick_access_internal.hpp"
+#include "../text_outline.hpp"
 #include "quick_access_bottles.hpp"
 #include "../collection_menu/collection_menu.hpp"
 #include "../compat/twilight_hd.hpp"
@@ -155,11 +156,8 @@ void draw_button_letter(const char* letter, f32 cx, f32 cy, f32 h, u8 alpha) {
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
     if (port != nullptr) port->setup2D();
     font->setGX();
-    font->setCharColor(JUtility::TColor(0, 0, 0, static_cast<u8>(alpha * 0.7f)));
-    static const f32 kOff[4][2] = {{1.0f, 0.0f}, {-1.0f, 0.0f}, {0.0f, 1.0f}, {0.0f, -1.0f}};
-    for (const auto& o : kOff) {
-        font->drawString_scale(tx + o[0], ty + o[1], charW, charH, letter, true);
-    }
+    draw_text_outline(font, letter, tx, ty, charW, charH,
+                      JUtility::TColor(0, 0, 0, static_cast<u8>(alpha * 0.7f)), 1.0f);
     font->setCharColor(JUtility::TColor(255, 255, 255, alpha));
     font->drawString_scale(tx, ty, charW, charH, letter, true);
     if (port != nullptr) port->setup2D();

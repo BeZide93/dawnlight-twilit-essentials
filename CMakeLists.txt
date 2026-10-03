@@ -60,6 +60,7 @@ add_mod(twilit_essentials
             src/general/free_cam_distance.cpp
             src/general/no_battle_music.cpp
             src/general/zora_swim.cpp
+            src/general/shield_surf.cpp
             src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp
             src/boss_bar/boss_bar.cpp
@@ -74,6 +75,9 @@ add_mod(twilit_essentials
             src/boss_rush/boss_rush_timer.cpp
             src/boss_rush/boss_rush_timer_v2.cpp
             src/boss_rush/boss_rush_hardmode.cpp
+            src/boss_rush/boss_rush_leaderboard.cpp
+            src/boss_rush/boss_rush_leaderboard_blur.cpp
+            src/text_outline.cpp
             src/boss_rush/boss_rush_portal.cpp
             src/boss_rush/boss_rush_dpad.cpp
             src/boss_rush/boss_rush_music.cpp

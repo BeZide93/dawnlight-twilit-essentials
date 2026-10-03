@@ -1,4 +1,5 @@
 #include "general/general.hpp"
+#include "text_outline.hpp"
 #include "general/always.hpp"
 #include "general/damage_vignette.hpp"
 #include "general/hud_auto_fade.hpp"
@@ -8,6 +9,7 @@
 #include "general/free_cam_distance.hpp"
 #include "general/no_battle_music.hpp"
 #include "general/zora_swim.hpp"
+#include "general/shield_surf.hpp"
 
 #include "general/human_warp.hpp"
 #include "general/faster_midna_cancel.hpp"
@@ -19,6 +21,7 @@
 #include "boss_bar/boss_bar.hpp"
 #include "boss_rush/boss_rush.hpp"
 #include "boss_rush/boss_rush_hardmode.hpp"
+#include "boss_rush/boss_rush_leaderboard.hpp"
 #include "actor_attribute.hpp"
 #include "boss_rush/boss_rush_darklink.hpp"
 #include "boss_rush/boss_rush_models.hpp"
@@ -40,6 +43,7 @@
 #include "flurry_rush/flurry_vignette.hpp"
 #include "bullet_time/bullet_time.hpp"
 #include "bullet_time/bullet_time_vignette.hpp"
+#include "boss_rush/boss_rush_leaderboard_blur.hpp"
 #include "puppet_zelda_pattern/puppet_zelda_pattern.hpp"
 #include "stamina/stamina.hpp"
 #include "stamina/sprint_human.hpp"
@@ -120,16 +124,7 @@ static void draw_debug_label(const char* text, f32 x, f32 y, f32 charW, f32 char
 
     font->setGX();
 
-    const f32 c = 1.6f;
-    const f32 d = 1.1f;
-    const f32 kOff[8][2] = {
-        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
-        { d, d}, {d, -d}, {-d, d}, {-d, -d},
-    };
-    font->setCharColor(JUtility::TColor(0, 0, 0, 255));
-    for (const auto& o : kOff) {
-        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
-    }
+    draw_text_outline(font, text, x, y, charW, charH, JUtility::TColor(0, 0, 0, 255), 1.6f);
 
     font->setGradColor(top, bottom);
     font->drawString_scale(x, y, charW, charH, text, true);
@@ -340,6 +335,7 @@ static void free_cam_inject_pad(interface_of_controller_pad& pad) {
 
 static bool free_cam_combo_is_gameplay_input() {
     if (dComIfGp_getDoStatus() == BUTTON_STATUS_UNK_147) return true;
+    if (shield_surf_wants_a()) return true;
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     return link != nullptr && link->getAtnActor() != nullptr;
 }
@@ -472,6 +468,9 @@ static ConfigVarHandle s_varGeneralFastDoorAnimations = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralNoBattleMusic = 0;
 static ConfigVarHandle s_varGeneralModernZoraSwim = 0;
+#if 0
+static ConfigVarHandle s_varGeneralShieldSurf = 0;
+#endif
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varSprintFovKick = 0;
@@ -568,12 +567,16 @@ static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
 static ConfigVarHandle s_varMasterRushRetryMode = 0;
 static ConfigVarHandle s_varMasterRushDifficulty = 0;
 static ConfigVarHandle s_varBossRushHardMode = 0;
+static ConfigVarHandle s_varBossRushLeaderboard = 0;
+static ConfigVarHandle s_varBossRushLeaderboardName = 0;
+static ConfigVarHandle s_varBossRushLeaderboardToken = 0;
 
 static bool s_generalInitialized = false;
 static bool s_damageVignetteInitialized = false;
 static bool s_oxygenVignetteInitialized = false;
 static bool s_flurryVignetteInitialized = false;
 static bool s_bulletTimeVignetteInitialized = false;
+static bool s_leaderboardBlurInitialized = false;
 static bool s_hpBarsInitialized = false;
 static bool s_bossBarInitialized = false;
 static bool s_bossRushInitialized = false;
@@ -654,6 +657,18 @@ static void on_master_rush_difficulty_changed(ModContext*, ConfigVarHandle, cons
 static void on_boss_rush_hard_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         boss_rush_hardmode_set_enabled(value->bool_value);
+    }
+}
+
+static void on_boss_rush_leaderboard_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        boss_rush_leaderboard_set_enabled(value->bool_value);
+    }
+}
+
+static void on_boss_rush_leaderboard_name_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        boss_rush_leaderboard_set_name(value->string_value);
     }
 }
 
@@ -1061,6 +1076,12 @@ static void on_general_no_battle_music_changed(ModContext*, ConfigVarHandle, con
 static void on_general_modern_zora_swim_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configModernZoraSwim = value->bool_value;
 }
+
+#if 0
+static void on_general_shield_surf_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configShieldSurf = value->bool_value;
+}
+#endif
 
 static void on_hud_auto_fade_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
@@ -1581,6 +1602,17 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         "does a barrel roll when you tap " RML_HL("A") " (and now and then while holding it), and "
         "leaves a trail of bubbles while he "
         "speeds up, with a short rumble and a slight camera zoom.</p>");
+#if 0
+    ui_add_toggle(left, "Shield Surfing", s_varGeneralShieldSurf,
+        "<p>Surf on your shield anywhere, like in Breath of the Wild. Needs a shield equipped. "
+        "Hold " RML_HL("Lock-on") ", jump with a side hop or backflip (or fall off a ledge) and "
+        "press " RML_HL("A") " in the air to land on your shield. "
+        "It rides like the snowboard from Snowpeak: lean with the stick, "
+        "slopes speed you up, push off with the stick forward. Press " RML_HL("A") " or "
+        RML_HL("Lock-on") " again to get off right away. You also get off when you "
+        "stop, land in water or crash into a wall. The shield moves from your back under your "
+        "feet while you ride.</p>");
+#endif
     ui_add_toggle(left, "Spin attack charge levels", s_varStaminaSpinChargeLevels,
         "<p>Keep holding the spin attack charge to power it up in three levels (about 4 seconds "
         "for all three). Level 1 is the normal spin attack, level 2 flashes stars on the sword "
@@ -2049,6 +2081,15 @@ static ModResult tab_menus(ModContext*, UiWindowHandle, UiElementHandle left,
     return MOD_OK;
 }
 
+static bool is_boss_rush_leaderboard_name_disabled(ModContext*, void*) {
+    return !boss_rush_leaderboard_enabled();
+}
+
+static ModResult tab_boss_rush_update(ModContext*, void*, ModError*) {
+    boss_rush_leaderboard_status_update();
+    return MOD_OK;
+}
+
 static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left,
                                UiElementHandle right, void*, ModError*) {
     svc_ui->pane_add_rml(mod_ctx, right,
@@ -2131,6 +2172,27 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         RML_OPT("Hard") " starts it with only 3 hearts for the whole run.</p>",
         kMasterRushDifficulties, 2);
 
+    svc_ui->pane_add_section(mod_ctx, left, "Online Leaderboard");
+    ui_add_toggle(left, "Online leaderboard", s_varBossRushLeaderboard,
+        "<p>Uploads your Boss Rush times (each boss, Ganondorf all phases and the Master Rush) "
+        "to the Twilit Essentials leaderboard at te.fimmel.dev. In the chamber, call Midna and "
+        "choose Show Leaderboard to browse every boss with your best time and the online Top 10.</p>"
+        "<p>Only your player name, your times and an anonymous ID are sent. Needs the Boss Rush "
+        "timer. Hard Mode, Vanilla Gear, 3 Hearts and Dark Link runs are ranked separately.</p>");
+    if (s_varBossRushLeaderboardName != 0) {
+        UiControlDesc c = UI_CONTROL_DESC_INIT;
+        c.kind = UI_CONTROL_STRING;
+        c.label = "Player name";
+        c.help_rml = "<p>Your name on the leaderboard: 3-16 letters, digits, spaces or _ . - "
+                     "The first player to use a name keeps it.</p>";
+        c.binding = UI_BINDING_CONFIG_VAR;
+        c.config_var = s_varBossRushLeaderboardName;
+        c.max_length = 16;
+        c.is_disabled = is_boss_rush_leaderboard_name_disabled;
+        svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
+    }
+    boss_rush_leaderboard_add_status(left);
+
 #if 0
     svc_ui->pane_add_section(mod_ctx, left, "Preset Save");
     svc_ui->pane_add_rml(mod_ctx, right,
@@ -2195,8 +2257,8 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_SELECT;
         c.label = "Sprint button";
-        c.help_rml = "<p>Hold to sprint. Applies to sprinting on foot, as a wolf and while "
-                     "swimming. L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>";
+        c.help_rml = "<p>Button used to sprint. Applies to sprinting on foot, as a wolf and "
+                     "while swimming. L3/R3 are the stick clicks, L2/R2 the analog triggers.</p>";
         c.binding = UI_BINDING_CALLBACKS;
         c.get = sprint_button_get;
         c.set = sprint_button_set;
@@ -2206,6 +2268,11 @@ static ModResult tab_controls(ModContext*, UiWindowHandle, UiElementHandle left,
         c.is_disabled = is_controls_sprint_disabled;
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_select(left, "Sprint mode", g_controlsSprintModeVar,
+        "<p>How the sprint button works." RML_OPT("Hold") ": default, sprint while the "
+        "button is held." RML_OPT("Toggle") ": tap the button to start sprinting. Sprinting stops "
+        "when you let go of the stick, tap the button again or run out of stamina.</p>",
+        kControlsSprintModeLabels, CTRL_SPRINT_MODE_COUNT, is_controls_sprint_disabled);
 
     return MOD_OK;
 }
@@ -2274,7 +2341,7 @@ static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "Visuals",   tab_visuals,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quick Access", tab_quick_access, nullptr, nullptr },
     { sizeof(UiTabDesc), "Menus",     tab_menus,     nullptr, nullptr },
-    { sizeof(UiTabDesc), "BossRush",  tab_boss_rush, nullptr, nullptr },
+    { sizeof(UiTabDesc), "BossRush",  tab_boss_rush, tab_boss_rush_update, nullptr },
     { sizeof(UiTabDesc), "Controls",  tab_controls,  nullptr, nullptr },
     { sizeof(UiTabDesc), "Customization", tab_customization, customization_tab_update, nullptr },
 };
@@ -2612,8 +2679,11 @@ static std::string build_rml(const std::vector<Entry>& issues) {
     }
     std::string rml;
     for (const Entry& issue : issues) {
-        const char* tagColor = issue.tag == "Spoiler" ? "#c98bd9"
-            : issue.tag == "Bug" ? "#e05a5a"
+        std::string tagLower = issue.tag;
+        for (char& c : tagLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const char* tagColor = tagLower == "spoiler" ? "#c98bd9"
+            : tagLower == "bug" ? "#e05a5a"
+            : tagLower == "important" ? "#ff6b4a"
             : "#e0b458";
         rml += "<p><span style=\"color: ";
         rml += tagColor;
@@ -2850,6 +2920,19 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_bool(mod_ctx, s_varGeneralModernZoraSwim, &g_configModernZoraSwim);
             svc_config->subscribe(mod_ctx, s_varGeneralModernZoraSwim, on_general_modern_zora_swim_changed, nullptr, nullptr);
         }
+
+#if 0
+        ConfigVarDesc descGeneralShieldSurf = CONFIG_VAR_DESC_INIT;
+        descGeneralShieldSurf.name = "generalShieldSurf";
+        descGeneralShieldSurf.type = CONFIG_VAR_BOOL;
+        descGeneralShieldSurf.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descGeneralShieldSurf, &s_varGeneralShieldSurf) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralShieldSurf, &g_configShieldSurf);
+            svc_config->subscribe(mod_ctx, s_varGeneralShieldSurf, on_general_shield_surf_changed, nullptr, nullptr);
+        }
+#else
+        g_configShieldSurf = false;
+#endif
 
         g_configHudAutoFadeIdleSeconds = kHudAutoFadeIdleSeconds;
         g_configHudAutoFadeFadeSeconds = kHudAutoFadeFadeSeconds;
@@ -3552,6 +3635,33 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         svc_config->register_var(mod_ctx, &descBossRushAllPhasesBest, &s_varBossRushAllPhasesBest);
         boss_rush_timer_init_all_phases_best(svc_config, mod_ctx, s_varBossRushAllPhasesBest);
 
+        ConfigVarDesc descBossRushLeaderboard = CONFIG_VAR_DESC_INIT;
+        descBossRushLeaderboard.name = "bossRushLeaderboard";
+        descBossRushLeaderboard.type = CONFIG_VAR_BOOL;
+        descBossRushLeaderboard.default_bool = false;
+        svc_config->register_var(mod_ctx, &descBossRushLeaderboard, &s_varBossRushLeaderboard);
+
+        ConfigVarDesc descBossRushLeaderboardName = CONFIG_VAR_DESC_INIT;
+        descBossRushLeaderboardName.name = "bossRushLeaderboardName";
+        descBossRushLeaderboardName.type = CONFIG_VAR_STRING;
+        descBossRushLeaderboardName.default_string = "";
+        svc_config->register_var(mod_ctx, &descBossRushLeaderboardName, &s_varBossRushLeaderboardName);
+
+        ConfigVarDesc descBossRushLeaderboardToken = CONFIG_VAR_DESC_INIT;
+        descBossRushLeaderboardToken.name = "bossRushLeaderboardToken";
+        descBossRushLeaderboardToken.type = CONFIG_VAR_STRING;
+        descBossRushLeaderboardToken.default_string = "";
+        svc_config->register_var(mod_ctx, &descBossRushLeaderboardToken, &s_varBossRushLeaderboardToken);
+
+        boss_rush_leaderboard_init(svc_config, mod_ctx, s_varBossRushLeaderboard,
+                                   s_varBossRushLeaderboardName, s_varBossRushLeaderboardToken);
+        if (s_varBossRushLeaderboard != 0) {
+            svc_config->subscribe(mod_ctx, s_varBossRushLeaderboard, on_boss_rush_leaderboard_changed, nullptr, nullptr);
+        }
+        if (s_varBossRushLeaderboardName != 0) {
+            svc_config->subscribe(mod_ctx, s_varBossRushLeaderboardName, on_boss_rush_leaderboard_name_changed, nullptr, nullptr);
+        }
+
         init_controls_config(svc_config, svc_hook, mod_ctx);
         init_stamina_bar_config(svc_config, mod_ctx);
         init_boss_bar_config(svc_config, mod_ctx);
@@ -3595,6 +3705,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     s_bulletTimeVignetteInitialized =
         init_bullet_time_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("bullet_time_vignette", s_bulletTimeVignetteInitialized);
+    s_leaderboardBlurInitialized =
+        init_boss_rush_leaderboard_blur(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
+    log_init_result("leaderboard_blur", s_leaderboardBlurInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
     init_shade_shield_fix(svc_hook, error);
     log_init_result("twilight_hd_compat", init_twilight_hd_compat(svc_hook) == MOD_OK);
@@ -3703,6 +3816,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("oxygen_vignette", shutdown_oxygen_vignette);
     run_shutdown_step("flurry_vignette", shutdown_flurry_vignette);
     run_shutdown_step("bullet_time_vignette", shutdown_bullet_time_vignette);
+    run_shutdown_step("leaderboard_blur", shutdown_boss_rush_leaderboard_blur);
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
     run_shutdown_step("shade_shield_fix", shutdown_shade_shield_fix);
     run_shutdown_step("twilight_hd_compat", shutdown_twilight_hd_compat);

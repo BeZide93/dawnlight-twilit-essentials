@@ -32,6 +32,7 @@ constexpr const char* kExcludedNames[] = {
     "bossRushBestTimes",
     "bossRushChainBest",
     "bossRushAllPhasesBest",
+    "bossRushLeaderboardToken",
 };
 
 struct TrackedVar {

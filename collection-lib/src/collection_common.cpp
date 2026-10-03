@@ -11,25 +11,9 @@ const LogService* g_logSvc = nullptr;
 dMenu_Collect2D_c* s_currentCollect2D = nullptr;
 bool s_needReloadCollect = false;
 
-void log_collect_info(const char* fmt, ...) {
-    if (g_logSvc == nullptr || g_modCtx == nullptr) return;
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    g_logSvc->info(g_modCtx, buf);
-}
+void log_collect_info(const char*, ...) {}
 
-void log_collect_warn(const char* fmt, ...) {
-    if (g_logSvc == nullptr || g_modCtx == nullptr) return;
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    g_logSvc->warn(g_modCtx, buf);
-}
+void log_collect_warn(const char*, ...) {}
 
 u64 cl_make_tag(char p0, char p1, char p2, char p3, u8 a, u8 b) {
     const u8 chars[6] = {static_cast<u8>(p0), static_cast<u8>(p1), static_cast<u8>(p2),

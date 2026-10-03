@@ -1,4 +1,6 @@
 #include "quick_access.hpp"
+#include "../text_outline.hpp"
+#include "../boss_rush/boss_rush_leaderboard.hpp"
 #include "quick_access_internal.hpp"
 #include "quick_access_bottles.hpp"
 #include "quick_access_itemwheel.hpp"
@@ -397,16 +399,7 @@ f32 qa_draw_text(const char* text, f32 x, f32 y, f32 charW, f32 charH,
 
     font->setGX();
 
-    const f32 c = 1.5f;
-    const f32 d = 1.0f;
-    const f32 kOff[8][2] = {
-        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
-        { d, d}, {d, -d}, {-d, d}, {-d, -d},
-    };
-    font->setCharColor(JUtility::TColor(0, 0, 0, alpha));
-    for (const auto& o : kOff) {
-        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
-    }
+    draw_text_outline(font, text, x, y, charW, charH, JUtility::TColor(0, 0, 0, alpha), 1.5f);
 
     top.a = alpha;
     bottom.a = alpha;
@@ -2821,7 +2814,8 @@ static void on_pad_read_quick_access_post(ModContext*, void*, void*, void*) {
     u8 windowStatus = dMeter2Info_getWindowStatus();
     bool isMenuOrPause = (windowStatus != 0) || dComIfGp_isPauseFlag() || dScnPly_c::isPause()
                          || dComIfGp_event_runCheck() || dMeter2Info_isShopTalkFlag()
-                         || dMsgObject_isTalkNowCheck() || human_warp_blocks_menus();
+                         || dMsgObject_isTalkNowCheck() || human_warp_blocks_menus()
+                         || boss_rush_leaderboard_view_active();
 
     if (isMenuOrPause) {
         if (s_aimItem != QA_ITEM_NONE) {
