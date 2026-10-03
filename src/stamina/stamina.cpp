@@ -74,8 +74,8 @@ int g_configStaminaCostHiddenSkills = 100;
 int g_configStaminaCostSpinCharge = 10;
 int g_configStaminaCostBulletTime = 100;
 int g_configStaminaCostBlock = 100;
-int g_configStaminaCostBow = 100;
-int g_configStaminaCostSlingshot = 100;
+int g_configStaminaCostBow = 75;
+int g_configStaminaCostSlingshot = 50;
 int g_configStaminaCostIronBall = 100;
 
 enum StamCat {
@@ -117,6 +117,10 @@ DEFINE_HOOK(&daAlink_c::procCutTurnMove, StamSpinChargeMove);
 DEFINE_HOOK(&daAlink_c::setGuardSe, StamGuardHit);
 DEFINE_HOOK(&daAlink_c::procGuardSlipInit, StamGuardSlip);
 DEFINE_HOOK(&daAlink_c::setSmallGuard, StamSmallGuard);
+DEFINE_HOOK(&daAlink_c::checkUpperItemActionBow, StamBowAction);
+DEFINE_HOOK(&daAlink_c::checkUpperItemActionIronBall, StamIronBallAction);
+DEFINE_HOOK(&daAlink_c::checkItemActionInitStart, StamItemStart);
+DEFINE_HOOK(&daAlink_c::checkUpperItemActionBowFly, StamBowFly);
 
 static f32 s_stamina    = 100.0f;
 static int s_regenDelay = 0;
@@ -235,8 +239,6 @@ static constexpr f32 kSpinChargeDrain = 0.5f;
 static constexpr f32 kBowDrawDrain = 0.4f;
 static constexpr f32 kSlingshotDrawDrain = 0.4f;
 static constexpr f32 kIronBallSwingDrain = 0.5f;
-
-static bool s_itemDrainDenied = false;
 
 static bool is_bow_item(u16 item) {
     return item == dItemNo_BOW_e || item == dItemNo_BOMB_ARROW_e || item == dItemNo_HAWK_ARROW_e;
@@ -418,6 +420,63 @@ static HookAction small_guard_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     link->procGuardBreakInit();
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static bool item_kick_allowed() {
+    return g_configStaminaEnabled && empty() && in_gameplay();
+}
+
+static bool item_source_enabled(u16 item) {
+    if (is_bow_item(item)) return g_configStaminaSrcBow;
+    if (item == dItemNo_PACHINKO_e) return g_configStaminaSrcSlingshot;
+    if (item == dItemNo_IRONBALL_e) return g_configStaminaSrcIronBall;
+    return false;
+}
+
+static bool in_bow_anime(const daAlink_c* link) {
+    return is_drawing_string(link) || link->checkBowWaitAnime() || link->checkBowShootAnime();
+}
+
+static HookAction item_start_pre(ModContext*, void* args, void* retval, void*) {
+    if (!args || !item_kick_allowed()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || link->checkWolf() || !item_source_enabled(link->mEquipItem)) return HOOK_CONTINUE;
+    deny();
+    if (retval) *static_cast<int*>(retval) = -1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction bow_fly_pre(ModContext*, void* args, void*, void*) {
+    if (!args || !item_kick_allowed()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || link->checkWolf() || !item_source_enabled(link->mEquipItem) || in_bow_anime(link)) {
+        return HOOK_CONTINUE;
+    }
+    if (link->checkReadyItem() && link->itemTrigger()) deny();
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction bow_action_pre(ModContext*, void* args, void* retval, void*) {
+    if (!args || !item_kick_allowed()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || link->checkWolf() || (!is_drawing_string(link) && !link->checkBowWaitAnime())) return HOOK_CONTINUE;
+    if (!item_source_enabled(link->mEquipItem) || link->mEquipItem == dItemNo_IRONBALL_e) return HOOK_CONTINUE;
+    link->resetUpperAnime(daAlink_c::UPPER_2, 3.0f);
+    if (link->mLinkAcch.ChkGroundHit()) link->checkWaitAction();
+    deny();
+    if (retval) *static_cast<BOOL*>(retval) = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction iron_ball_action_pre(ModContext*, void* args, void* retval, void*) {
+    if (!args || !g_configStaminaSrcIronBall || !item_kick_allowed()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || (!link->checkIronBallPreSwingAnime() && !link->checkIronBallSwingAnime())) return HOOK_CONTINUE;
+    link->mItemVar0.field_0x3018 = 8;
+    link->procIronBallReturnInit();
+    deny();
+    if (retval) *static_cast<BOOL*>(retval) = 1;
     return HOOK_SKIP_ORIGINAL;
 }
 
@@ -758,17 +817,6 @@ static bool is_swim_rest_proc(const daAlink_c* link) {
     return link != nullptr && link->mProcID == daAlink_c::PROC_SWIM_WAIT && swim_costs_stamina(link);
 }
 
-static void update_item_drain_deny(f32 itemDrain) {
-    if (itemDrain <= 0.0f) {
-        s_itemDrainDenied = false;
-        return;
-    }
-    if (empty() && !s_itemDrainDenied) {
-        deny();
-        s_itemDrainDenied = true;
-    }
-}
-
 static void reset_drown() {
     s_drownTimer = 0;
     s_drowning = false;
@@ -837,7 +885,6 @@ void update_stamina(const LogService*, ModContext*) {
         s_hiddenSkillLock = 0;
         s_otherSpend = 0.0f;
         s_extraDrain = 0.0f;
-        s_itemDrainDenied = false;
         reset_drown();
         return;
     }
@@ -897,7 +944,6 @@ void update_stamina(const LogService*, ModContext*) {
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     if (s_stamina > kMax) s_stamina = kMax;
     update_drown(link);
-    update_item_drain_deny(itemDrain);
     const f32 recoverAt = exhaust_recover_at(kMax);
     if (s_exhausted && s_stamina >= recoverAt - 0.01f) {
         s_exhausted = false;
@@ -951,6 +997,10 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<StamGuardHit>(hook_svc, guard_hit_pre);
     mods::hook::add_pre<StamGuardSlip>(hook_svc, guard_slip_pre);
     mods::hook::add_pre<StamSmallGuard>(hook_svc, small_guard_pre);
+    mods::hook::add_pre<StamBowAction>(hook_svc, bow_action_pre);
+    mods::hook::add_pre<StamIronBallAction>(hook_svc, iron_ball_action_pre);
+    mods::hook::add_pre<StamItemStart>(hook_svc, item_start_pre);
+    mods::hook::add_pre<StamBowFly>(hook_svc, bow_fly_pre);
 
     hook_cost<StamFrontRoll>(hook_svc, STAM_ROLLS, STAMC_ROLL);
     hook_cost<StamSideRoll>(hook_svc, STAM_ROLLS, STAMC_ROLL);
@@ -992,6 +1042,5 @@ void shutdown_stamina() {
     s_regenRamp = 0.0f;
     s_hiddenSkillLock = 0;
     s_otherSpend = 0.0f;
-    s_itemDrainDenied = false;
     reset_drown();
 }
