@@ -8,6 +8,7 @@ extern bool g_configBulletTimeEnabled;
 extern bool g_configBulletTimeFirstPerson;
 
 void bullet_time_apply_enabled();
+bool bullet_time_is_active();
 
 ModResult init_bullet_time(const HookService* hook_svc, const LogService* log_svc, ModError* error);
 void update_bullet_time(const LogService* log_svc, ModContext* mod_ctx);

@@ -1460,6 +1460,10 @@ ModResult init_bullet_time(const HookService* hook_svc, const LogService* log_sv
     return MOD_OK;
 }
 
+bool bullet_time_is_active() {
+    return s_active;
+}
+
 void update_bullet_time(const LogService*, ModContext*) {
     if (s_hookSvc == nullptr) return;
     if (g_configBulletTimeEnabled && !s_hooksInstalled && general_timescale_available()) {
