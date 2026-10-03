@@ -52,9 +52,4 @@ to TE settings, or suppress TE's normal attack costs during Flurry Rush. Normal
 TE costs remain additive; a fixed-price sequence with attack-cost suppression
 would require a separate scoped interface.
 
-## Validation
-
-Run `python3 tests/stamina_service_test.py --sdk /path/to/dusklight` for native
-service contract tests with mocked game/HUD dependencies. The test compiles the
-actual service implementation and relevant stamina update helpers. It does not
-replace an in-game compatibility test with an importing mod.
+An in-game compatibility test with an importing mod is still required.
