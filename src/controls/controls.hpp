@@ -60,6 +60,15 @@ enum ControlsSprintOption {
 
 extern const char* const kControlsSprintLabels[CTRL_SPRINT_OPTION_COUNT];
 
+enum ControlsSprintMode {
+    CTRL_SPRINT_MODE_HOLD = 0,
+    CTRL_SPRINT_MODE_TOGGLE,
+    CTRL_SPRINT_MODE_COUNT,
+};
+
+extern const char* const kControlsSprintModeLabels[CTRL_SPRINT_MODE_COUNT];
+extern ConfigVarHandle g_controlsSprintModeVar;
+
 extern int g_controlsBinding[CTRL_BIND_COUNT];
 extern ConfigVarHandle g_controlsVars[CTRL_BIND_COUNT];
 
@@ -85,6 +94,7 @@ int controls_quick_access_default_option();
 void controls_set_quick_access_option(int option);
 int controls_sprint_option();
 void controls_set_sprint_option(int option);
+bool controls_sprint_held();
 void update_controls();
 
 int controls_binding_button(int b);

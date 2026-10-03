@@ -1,6 +1,7 @@
 #include "controls.hpp"
 #include "../compat/twilight_hd.hpp"
 #include "../quick_access/quick_access.hpp"
+#include "../stamina/stamina.hpp"
 
 #include "m_Do/m_Do_controller_pad.h"
 
@@ -49,6 +50,14 @@ const char* const kControlsSprintLabels[CTRL_SPRINT_OPTION_COUNT] = {
 static const int kSprintButtons[CTRL_SPRINT_OPTION_COUNT] = {
     CTRL_BTN_A, CTRL_BTN_L3, CTRL_BTN_R3, CTRL_BTN_L2, CTRL_BTN_R2,
 };
+
+const char* const kControlsSprintModeLabels[CTRL_SPRINT_MODE_COUNT] = {"Hold", "Toggle"};
+ConfigVarHandle g_controlsSprintModeVar = 0;
+static int s_sprintMode = CTRL_SPRINT_MODE_HOLD;
+static bool s_sprintToggled = false;
+static int s_sprintIdleFrames = 0;
+static constexpr f32 kSprintToggleStickDeadzone = 0.15f;
+static constexpr int kSprintToggleIdleFrames = 10;
 
 extern bool g_configCustomZButtonEnabled;
 bool te_midna_button_active();
@@ -330,11 +339,14 @@ static bool sdl_binding_raw_held(int b) {
     return (JUTGamePad::mPadStatus[PAD_1].extButton & controls_ext_button_bit(button)) != 0;
 }
 
+static void update_sprint_toggle();
+
 static void controls_pad_read_post(ModContext*, void*, void*, void*) {
     for (int b = 0; b < CTRL_BIND_COUNT; b++) {
         s_sdlHeldPrev[b] = s_sdlHeldCur[b];
         s_sdlHeldCur[b] = sdl_binding_raw_held(b);
     }
+    update_sprint_toggle();
 }
 
 bool controls_binding_held(int b) {
@@ -357,6 +369,53 @@ bool controls_binding_pressed(int b) {
         return (mDoCPd_c::getCpadInfo(PAD_1).mPressedButtonFlags & bit) != 0;
     }
     return s_sdlHeldCur[b] && !s_sdlHeldPrev[b];
+}
+
+static void update_sprint_toggle() {
+    if (s_sprintMode != CTRL_SPRINT_MODE_TOGGLE || controls_binding_blocked(CTRL_BIND_SPRINT) ||
+        ui_blocks_game_input()) {
+        s_sprintToggled = false;
+        s_sprintIdleFrames = 0;
+        return;
+    }
+    if (controls_binding_pressed(CTRL_BIND_SPRINT)) {
+        s_sprintToggled = !s_sprintToggled;
+        s_sprintIdleFrames = 0;
+        return;
+    }
+    if (!s_sprintToggled) {
+        return;
+    }
+    if (stamina_is_exhausted()) {
+        s_sprintToggled = false;
+        return;
+    }
+    if (mDoCPd_c::getCpadInfo(PAD_1).mMainStickValue < kSprintToggleStickDeadzone) {
+        if (++s_sprintIdleFrames >= kSprintToggleIdleFrames) {
+            s_sprintToggled = false;
+            s_sprintIdleFrames = 0;
+        }
+    } else {
+        s_sprintIdleFrames = 0;
+    }
+}
+
+bool controls_sprint_held() {
+    if (s_sprintMode == CTRL_SPRINT_MODE_TOGGLE) {
+        return s_sprintToggled && !controls_binding_blocked(CTRL_BIND_SPRINT);
+    }
+    return controls_binding_held(CTRL_BIND_SPRINT);
+}
+
+static void on_controls_sprint_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+                                            const ConfigVarValue*, void*) {
+    if (value == nullptr) {
+        return;
+    }
+    const int v = static_cast<int>(value->int_value);
+    s_sprintMode = (v >= 0 && v < CTRL_SPRINT_MODE_COUNT) ? v : CTRL_SPRINT_MODE_HOLD;
+    s_sprintToggled = false;
+    s_sprintIdleFrames = 0;
 }
 
 static void on_controls_binding_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value,
@@ -405,6 +464,21 @@ ModResult init_controls_config(const ConfigService* cfg, const HookService* hook
             s_midnaButton = (v >= 0 && v < CTRL_MIDNA_COUNT) ? static_cast<int>(v)
                                                               : CTRL_MIDNA_L;
             cfg->subscribe(ctx, g_controlsMidnaVar, on_controls_midna_changed, nullptr, nullptr);
+        }
+    }
+
+    {
+        ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
+        d.name = "controlsSprintMode";
+        d.type = CONFIG_VAR_INT;
+        d.default_int = CTRL_SPRINT_MODE_HOLD;
+        if (cfg->register_var(ctx, &d, &g_controlsSprintModeVar) == MOD_OK) {
+            int64_t v = CTRL_SPRINT_MODE_HOLD;
+            cfg->get_int(ctx, g_controlsSprintModeVar, &v);
+            s_sprintMode = (v >= 0 && v < CTRL_SPRINT_MODE_COUNT) ? static_cast<int>(v)
+                                                                   : CTRL_SPRINT_MODE_HOLD;
+            cfg->subscribe(ctx, g_controlsSprintModeVar, on_controls_sprint_mode_changed, nullptr,
+                           nullptr);
         }
     }
 
