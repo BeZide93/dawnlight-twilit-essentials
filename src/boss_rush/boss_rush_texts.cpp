@@ -5,6 +5,7 @@
 #include "boss_rush_timer.hpp"
 #include "boss_rush_timer_v2.hpp"
 #include "boss_rush_darklink.hpp"
+#include "boss_rush_hardmode.hpp"
 #include "../boss_bar/boss_bar.hpp"
 
 #include "d/actor/d_a_alink.h"
@@ -135,9 +136,12 @@ void draw_boss_rush_texts(float floorY) {
         const u8 nameA = static_cast<u8>(255.0f * s_labelFade[tableIdx]);
         const u8 locA = static_cast<u8>(220.0f * s_labelFade[tableIdx]);
 
+        const bool hard = boss_rush_hardmode_enabled();
         draw_world_label(displayName, screenPos.x - nameW * 0.5f, screenPos.y - nameCharH - locCharH,
                          nameCharW, nameCharH,
-                         JUtility::TColor(255, 236, 170, 255), JUtility::TColor(255, 190, 60, 255), nameA);
+                         hard ? JUtility::TColor(255, 170, 150, 255) : JUtility::TColor(255, 236, 170, 255),
+                         hard ? JUtility::TColor(220, 40, 30, 255) : JUtility::TColor(255, 190, 60, 255),
+                         nameA);
 
         if (boss.location != nullptr && boss.location[0] != '\0') {
             draw_world_label(boss.location, screenPos.x - locW * 0.5f, screenPos.y - locCharH,

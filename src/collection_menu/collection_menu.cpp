@@ -181,6 +181,26 @@ static HookAction on_tunic_change_execute_pre(ModContext*, void* args, void*, vo
     return HOOK_SKIP_ORIGINAL;
 }
 
+DEFINE_HOOK(&daAlink_c::setFootSpeed, CollectionFootSpeedHook);
+
+static bool s_footSyncStale = false;
+static bool s_footSyncWasOff = false;
+
+static HookAction on_foot_speed_pre(ModContext*, void* args, void*, void*) {
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    s_footSyncWasOff = link != nullptr && link->field_0x2060 != nullptr &&
+                       !link->field_0x2060->getOldFrameFlg();
+    return HOOK_CONTINUE;
+}
+
+static void on_foot_speed_post(ModContext*, void* args, void*, void*) {
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (link != nullptr && s_footSyncStale && !s_footSyncWasOff) {
+        link->field_0x33a0 = link->mNormalSpeed;
+    }
+    s_footSyncStale = s_footSyncWasOff;
+}
+
 static void start_safe_clothes_change(daAlink_c* link) {
     s_safeClothesChange = true;
     link->setClothesChange(0);
@@ -191,12 +211,13 @@ static bool link_floating_still(daAlink_c* link) {
            link->checkNoResetFlg0(daPy_py_c::FLG0_SWIM_UP);
 }
 
-static bool link_can_change_clothes(daAlink_c* link) {
+static bool link_can_change_clothes(daAlink_c* link, bool allowSwimming = false) {
     if (link == nullptr || link->checkWolf() || link->getClothesChangeWaitTimer() != 0 ||
         link->checkEventRun() || link->checkRide()) {
         return false;
     }
     if (link_floating_still(link)) return true;
+    if (allowSwimming && link->checkModeFlg(daAlink_c::MODE_SWIMMING)) return true;
     return !link->checkPlayerFly() && link->mLinkAcch.ChkGroundHit();
 }
 
@@ -257,17 +278,17 @@ bool collection_tunic_equipped(int tunic) {
     return item != dItemNo_NONE_e && dComIfGs_getSelectEquipClothes() == item;
 }
 
-bool collection_tunic_equip(int tunic) {
+bool collection_tunic_equip(int tunic, bool allowSwimming) {
     if (!collection_tunic_unlocked(tunic)) return false;
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (collection_tunic_equipped(tunic)) {
-        if (!link_can_change_clothes(link)) return false;
+        if (!link_can_change_clothes(link, allowSwimming)) return false;
         const u8 before = dComIfGs_getSelectEquipClothes();
         if (!collectionlib_unequip_tunic()) return true;
         if (dComIfGs_getSelectEquipClothes() != before) start_safe_clothes_change(link);
         return true;
     }
-    if (!link_can_change_clothes(link)) return false;
+    if (!link_can_change_clothes(link, allowSwimming)) return false;
 
     if (tunic == COLLECTION_TUNIC_ORDON_HERO) {
         const int id = find_ordon_hero_tunic_id();
@@ -327,6 +348,8 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
 
     if (hook_svc != nullptr) {
         mods::hook::add_pre<CollectionTunicChangeExecuteHook>(hook_svc, on_tunic_change_execute_pre);
+        mods::hook::add_pre<CollectionFootSpeedHook>(hook_svc, on_foot_speed_pre);
+        mods::hook::add_post<CollectionFootSpeedHook>(hook_svc, on_foot_speed_post);
     }
 
     collectionlib_set_register_callback([]() {

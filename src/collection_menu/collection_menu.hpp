@@ -27,7 +27,7 @@ enum CollectionTunic {
 struct ResTIMG;
 bool collection_tunic_unlocked(int tunic);
 bool collection_tunic_equipped(int tunic);
-bool collection_tunic_equip(int tunic);
+bool collection_tunic_equip(int tunic, bool allowSwimming = false);
 const char* collection_tunic_name(int tunic);
 ResTIMG* collection_tunic_icon(int tunic);
 unsigned char collection_tunic_icon_item(int tunic);

@@ -36,7 +36,20 @@
 #undef private
 #undef protected
 
+#include <cmath>
+
+f32 boss_rush_hardmode_health_scale(const fopAc_ac_c* actor);
+
 namespace bbi {
+
+inline f32 hard_hp(fopAc_ac_c* a, f32 vanilla) {
+    return vanilla * boss_rush_hardmode_health_scale(a);
+}
+
+inline int hard_hits(fopAc_ac_c* a, f32 vanilla) {
+    const long hits = std::lround(hard_hp(a, vanilla));
+    return hits < 1 ? 1 : static_cast<int>(hits);
+}
 
 inline f32 clamp01(f32 v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
@@ -99,8 +112,9 @@ inline bool beastganon_engaged(fopAc_ac_c* a) {
 inline f32 beastganon_ratio(fopAc_ac_c* a) {
     const daB_MGN_c* g = reinterpret_cast<const daB_MGN_c*>(a);
     if (g->mActionMode == daB_MGN_c::ACTION_DEATH_e) return 0.0f;
-    s16 hp = a->health; if (hp < 0) hp = 0; if (hp > 700) hp = 700;
-    return clamp01(static_cast<f32>(hp) / 700.0f);
+    const f32 cap = hard_hp(a, 700.0f);
+    f32 hp = a->health; if (hp < 0.0f) hp = 0.0f; if (hp > cap) hp = cap;
+    return clamp01(hp / cap);
 }
 
 inline f32 darknut_ratio(fopAc_ac_c* a) {
@@ -150,7 +164,7 @@ inline f32 stallord_ratio(fopAc_ac_c* a) {
         return 1.0f - static_cast<f32>(lvl) / 3.0f;
     }
     s16 hp = a->health; if (hp < 0) hp = 0;
-    return clamp01(static_cast<f32>(hp) / 1080.0f);
+    return clamp01(static_cast<f32>(hp) / hard_hp(a, 1080.0f));
 }
 inline bool stallord_engaged(fopAc_ac_c* a) {
     const daB_DS_c* d = reinterpret_cast<const daB_DS_c*>(a);
@@ -224,13 +238,17 @@ inline void stallord_read_bitsw(fopAc_ac_c* a, int& sw1, int& sw2, int& sw3) {
 inline bool fyrus_defeated(fopAc_ac_c* a);
 inline f32 fyrus_ratio(fopAc_ac_c* a) {
     const e_fm_class* f = reinterpret_cast<const e_fm_class*>(a);
-    int downs = f->mDownCnt; if (downs < 0) downs = 0; if (downs > 3) downs = 3;
-    if (downs >= 3) {
-        return fyrus_defeated(a) ? 0.0f : (1.0f / 3.0f);
+    const f32 budget = std::sqrt(boss_rush_hardmode_health_scale(a));
+    int maxDowns = static_cast<int>(std::lround(3.0f * budget)); if (maxDowns < 1) maxDowns = 1;
+    const f32 hpPerDown = 50.0f * budget;
+    const f32 total = static_cast<f32>(maxDowns);
+    int downs = f->mDownCnt; if (downs < 0) downs = 0; if (downs > maxDowns) downs = maxDowns;
+    if (downs >= maxDowns) {
+        return fyrus_defeated(a) ? 0.0f : (1.0f / total);
     }
     s16 hp = a->health;
-    f32 frac = (hp <= 0) ? 0.0f : (hp >= 50 ? 1.0f : static_cast<f32>(hp) / 50.0f);
-    return clamp01(((3.0f - static_cast<f32>(downs)) + frac) / 3.0f);
+    f32 frac = (hp <= 0) ? 0.0f : (hp >= hpPerDown ? 1.0f : static_cast<f32>(hp) / hpPerDown);
+    return clamp01(((total - static_cast<f32>(downs)) + frac) / total);
 }
 inline void fyrus_dbg(fopAc_ac_c* a, int& downs, int& hp, int& act, int& demo) {
     const e_fm_class* f = reinterpret_cast<const e_fm_class*>(a);
@@ -293,7 +311,7 @@ inline void dekutoad_force_fight_start(fopAc_ac_c* a) {
 
 inline f32 armogohma_ratio(fopAc_ac_c* a) {
     const b_gm_class* g = reinterpret_cast<const b_gm_class*>(a);
-    return 1.0f - clamp01(static_cast<f32>(g->mHitCount) / 3.0f);
+    return 1.0f - clamp01(static_cast<f32>(g->mHitCount) / static_cast<f32>(hard_hits(a, 3.0f)));
 }
 inline bool armogohma_engaged(fopAc_ac_c* a) {
     const b_gm_class* g = reinterpret_cast<const b_gm_class*>(a);
@@ -311,7 +329,7 @@ inline f32 deathsword_ratio(fopAc_ac_c* a) {
     if (v->mAction == daE_VA_c::ACTION_OPACI_DEATH_e || g_dComIfG_gameInfo.info.getMemory().getBit().isStageBossEnemy2()) {
         return 0.0f;
     }
-    const f32 total = 800.0f;
+    const f32 total = hard_hp(a, 800.0f);
     int raw = v->field_0x1364;
     if (raw < 0) raw = 0;
     if (raw > (int)total) raw = (int)total;
@@ -381,11 +399,14 @@ inline f32 morpheel_ratio(fopAc_ac_c* a) {
     const bool phase2 = (o->mAction >= 100) || (o->mFishBattleMode != 0);
     if (!phase2) {
         s16 hp = a->health; if (hp < 0) hp = 0;
-        return clamp01(static_cast<f32>(hp) / 30.0f);
+        return clamp01(static_cast<f32>(hp) / hard_hp(a, 30.0f));
     }
+    long perFinish = std::lround(4.0f * std::sqrt(boss_rush_hardmode_health_scale(a)));
+    if (perFinish < 1) perFinish = 1;
+    const int hitsPer = static_cast<int>(perFinish);
     int fin = o->mHangFinishCount; if (fin < 0) fin = 0; if (fin > 3) fin = 3;
-    int hit = o->mHangHitCount;   if (hit < 0) hit = 0; if (hit > 4) hit = 4;
-    return 1.0f - clamp01(static_cast<f32>(fin * 4 + hit) / 12.0f);
+    int hit = o->mHangHitCount;   if (hit < 0) hit = 0; if (hit > hitsPer) hit = hitsPer;
+    return 1.0f - clamp01(static_cast<f32>(fin * hitsPer + hit) / static_cast<f32>(hitsPer * 3));
 }
 inline void morpheel_dbg(fopAc_ac_c* a, int& act, int& fish, int& fin, int& hit,
                          int& demo, int& hp, int& coreMode) {
@@ -551,7 +572,7 @@ inline f32 ganondorf_ratio(fopAc_ac_c* a) {
     const b_gnd_class* g = reinterpret_cast<const b_gnd_class*>(a);
     s16 hp = a->health; if (hp < 0) hp = 0;
     f32 cap = (g->mDrawHorse != 0 || (g->mActionMode >= 1 && g->mActionMode <= 6)) ? 24.0f : 100.0f;
-    return clamp01(static_cast<f32>(hp) / cap);
+    return clamp01(static_cast<f32>(hp) / hard_hp(a, cap));
 }
 
 inline f32 zant_ratio(fopAc_ac_c* a) {
@@ -560,14 +581,14 @@ inline f32 zant_ratio(fopAc_ac_c* a) {
         return 1.0f;
     s16 hp = a->health; if (hp < 0) hp = 0;
     f32 cap = (z->mFightPhase == daB_ZANT_c::PHASE_LAST) ? 600.0f : 280.0f;
-    return clamp01(static_cast<f32>(hp) / cap);
+    return clamp01(static_cast<f32>(hp) / hard_hp(a, cap));
 }
 
 inline f32 argorok_ratio(fopAc_ac_c* a) {
     const daB_DR_c* d = reinterpret_cast<const daB_DR_c*>(a);
     if (d->field_0x7d1 != 2) return 1.0f - clamp01(static_cast<f32>(d->mBreakPartsNo) / 2.0f);
     s16 hp = a->health; if (hp < 0) hp = 0;
-    return clamp01(static_cast<f32>(hp) / 24.0f);
+    return clamp01(static_cast<f32>(hp) / hard_hp(a, 24.0f));
 }
 
 inline bool darkhammer_awaiting_walkin(fopAc_ac_c* a) {

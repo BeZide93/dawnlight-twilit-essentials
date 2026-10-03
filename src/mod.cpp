@@ -2108,7 +2108,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     ui_add_toggle(left, "Show boss rush portal", s_varBossRushPortal,
         "<p>Shows the warp portal on the map while a Boss Rush is active.</p>");
 
-#if 1
+#if 0
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;

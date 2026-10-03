@@ -3,6 +3,7 @@
 #include "../controls/controls.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_common.hpp"
+#include "boss_rush_hardmode.hpp"
 #include "../compat/twilight_hd.hpp"
 
 #include "mods/svc/flow.hpp"
@@ -112,7 +113,7 @@ static uint16_t s_midnaRoot3001 = mods::flow::kEnd;
 static uint16_t s_midnaVessel2Way = kMidnaMenuPromptEntry;
 static uint16_t s_midnaVessel3Way = kMidnaMenuPromptEntry;
 
-enum class PendingBossRushMidnaAction { None, LeaveChamber, BackToChamber, RetryFight };
+enum class PendingBossRushMidnaAction { None, LeaveChamber, BackToChamber, RetryFight, ToggleHardMode };
 static PendingBossRushMidnaAction s_pendingMidnaAction = PendingBossRushMidnaAction::None;
 static u8 s_pendingMidnaDelay = 0;
 
@@ -121,8 +122,12 @@ static mods::flow::RegisteredMessage s_bossRushMidnaBackOnlyMsg;
 static mods::flow::RegisteredMessage s_bossRushMidnaFightBackMsg;
 static mods::flow::RegisteredMessage s_bossRushMidnaHumanFightMsg;
 static mods::flow::RegisteredMessage s_bossRushMidnaWolfFightMsg;
+static mods::flow::RegisteredMessage s_bossRushMidnaHardModeMsg;
+static mods::flow::RegisteredMessage s_bossRushMidnaNormalModeMsg;
 static mods::flow::Event s_bossRushLeaveMidnaEvent;
 static mods::flow::Event s_bossRushRetryMidnaEvent;
+static mods::flow::Event s_bossRushHardModeMidnaEvent;
+static bool s_bossRushMidnaHardMode = false;
 static mods::flow::Graph s_bossRushMidnaFlowGraph;
 
 static uint16_t read_be16(const uint8_t* bytes) {
@@ -583,6 +588,11 @@ void on_boss_rush_retry_midna_event(ModContext*, const FlowEventContext*, void*)
     s_pendingMidnaDelay = 2;
 }
 
+void on_boss_rush_hard_mode_midna_event(ModContext*, const FlowEventContext*, void*) {
+    s_pendingMidnaAction = PendingBossRushMidnaAction::ToggleHardMode;
+    s_pendingMidnaDelay = 2;
+}
+
 static mods::flow::RegisteredMessage register_boss_rush_midna_message_3(
     std::string_view opt1, std::string_view opt2, std::string_view opt3) {
     std::vector<mods::flow::MessageVariant> variants;
@@ -634,6 +644,14 @@ bool ensure_boss_rush_midna_messages() {
         if (!s_bossRushMidnaWolfFightMsg) {
             return false;
         }
+    }
+    if (!s_bossRushMidnaHardModeMsg) {
+        s_bossRushMidnaHardModeMsg = register_boss_rush_midna_message_3(
+            "Hard Mode", "Leave Boss Rush", "Cancel");
+    }
+    if (!s_bossRushMidnaNormalModeMsg) {
+        s_bossRushMidnaNormalModeMsg = register_boss_rush_midna_message_3(
+            "Normal Mode", "Leave Boss Rush", "Cancel");
     }
     return true;
 }
@@ -790,6 +808,39 @@ static mods::flow::Graph build_boss_rush_midna_graph(BossRushMidnaMode mode) {
         !boss_rush_add_event_node(
             graph, s_bossRushRetryMidnaEvent.id(), {0, 0, 0, 0}, mods::flow::kEnd, retryEvent))
     {
+        return graph.commit();
+    }
+
+    uint16_t hardModeEvent = mods::flow::kEnd;
+    const mods::flow::RegisteredMessage& hardModeMsg = s_bossRushMidnaHardModeMsg;
+
+    /* Hard
+    uint16_t hardModeEvent = mods::flow::kEnd;
+    const mods::flow::RegisteredMessage& hardModeMsg =
+        boss_rush_hardmode_enabled() ? s_bossRushMidnaNormalModeMsg : s_bossRushMidnaHardModeMsg;
+    if (mode == BossRushMidnaMode::Chamber && s_bossRushHardModeMidnaEvent && hardModeMsg &&
+        !boss_rush_add_event_node(
+            graph, s_bossRushHardModeMidnaEvent.id(), {0, 0, 0, 0}, mods::flow::kEnd, hardModeEvent))
+    {
+        return graph.commit();
+    }
+    */
+
+    if (mode == BossRushMidnaMode::Chamber && hardModeEvent != mods::flow::kEnd &&
+        (s_midnaRoot3001 != mods::flow::kEnd || s_bossRushMidnaTopology.promptCount != 0)) {
+        if (s_midnaRoot3001 != mods::flow::kEnd &&
+            boss_rush_build_three_choice_prompt(graph, s_midnaRoot3001,
+                hardModeMsg.id(), hardModeEvent, leaveEvent))
+        {
+            return graph.commit();
+        }
+        for (size_t i = 0; i < s_bossRushMidnaTopology.promptCount; ++i) {
+            if (!boss_rush_build_three_choice_prompt(graph, s_bossRushMidnaTopology.prompts[i].promptNode,
+                    hardModeMsg.id(), hardModeEvent, leaveEvent))
+            {
+                return graph.commit();
+            }
+        }
         return graph.commit();
     }
 
@@ -1017,6 +1068,8 @@ ModResult init_boss_rush_midna(const HookService* hook_svc, const LogService*, M
             mods::flow::register_event("BossRushLeaveMidnaMenu", on_boss_rush_leave_midna_event);
         s_bossRushRetryMidnaEvent =
             mods::flow::register_event("BossRushRetryMidnaMenu", on_boss_rush_retry_midna_event);
+        s_bossRushHardModeMidnaEvent =
+            mods::flow::register_event("BossRushHardModeMidnaMenu", on_boss_rush_hard_mode_midna_event);
     }
 
     return MOD_OK;
@@ -1043,6 +1096,8 @@ void shutdown_boss_rush_midna() {
     s_bossRushMidnaFightBackMsg.reset();
     s_bossRushMidnaHumanFightMsg.reset();
     s_bossRushMidnaWolfFightMsg.reset();
+    s_bossRushMidnaHardModeMsg.reset();
+    s_bossRushMidnaNormalModeMsg.reset();
 }
 
 bool process_pending_boss_rush_midna_action(const LogService* log_svc, ModContext* mod_ctx) {
@@ -1070,6 +1125,8 @@ bool process_pending_boss_rush_midna_action(const LogService* log_svc, ModContex
         }
     } else if (action == PendingBossRushMidnaAction::RetryFight) {
         boss_rush_retry_current_fight(log_svc, mod_ctx);
+    } else if (action == PendingBossRushMidnaAction::ToggleHardMode) {
+        boss_rush_hardmode_toggle();
     }
     return true;
 }
@@ -1116,6 +1173,7 @@ void refresh_boss_rush_midna_flow() {
         boss_rush_gauntlet_phase() : 0;
     const bool horseback = wantMode == BossRushMidnaMode::Fight && is_boss_rush_midna_simple_bmg();
     const char* target = wantMode == BossRushMidnaMode::Fight ? boss_rush_current_target_name() : nullptr;
+    const bool hardMode = wantMode == BossRushMidnaMode::Chamber && boss_rush_hardmode_enabled();
     static const char* s_bossRushMidnaTarget = nullptr;
 
     if (wantMode == s_bossRushMidnaMode &&
@@ -1124,7 +1182,8 @@ void refresh_boss_rush_midna_flow() {
         s_bossRushMidnaTransformOption == transformOption &&
         s_bossRushMidnaGauntletPhase == gauntletPhase &&
         s_bossRushMidnaHorseback == horseback &&
-        s_bossRushMidnaTarget == target) {
+        s_bossRushMidnaTarget == target &&
+        s_bossRushMidnaHardMode == hardMode) {
         return;
     }
 
@@ -1152,6 +1211,7 @@ void refresh_boss_rush_midna_flow() {
         s_bossRushMidnaHorseback = horseback;
         s_bossRushMidnaGauntletPhase = gauntletPhase;
         s_bossRushMidnaTarget = target;
+        s_bossRushMidnaHardMode = hardMode;
         boss_rush_debug_log("[midna] graph built mode=%d horse=%d horseNode=%u ver=%u "
                             "prompts=%u root3001=%u gphase=%d",
                             (int)wantMode, (int)horseback,

@@ -49,6 +49,7 @@ add_mod(twilit_essentials
             src/general/always.cpp
             src/general/human_warp.cpp
             src/general/faster_midna_cancel.cpp
+            src/general/auto_zora_armor.cpp
             src/general/faster_transitions.cpp
             src/general/midna_select_freeze_guard.cpp
             src/general/shade_shield_fix.cpp
@@ -58,6 +59,7 @@ add_mod(twilit_essentials
             src/general/sprint_fov_kick.cpp
             src/general/free_cam_distance.cpp
             src/general/no_battle_music.cpp
+            src/general/zora_swim.cpp
             src/epona/epona.cpp
             src/hp_bars/hp_bars.cpp
             src/boss_bar/boss_bar.cpp
@@ -71,6 +73,7 @@ add_mod(twilit_essentials
             src/boss_rush/boss_rush_equipment.cpp
             src/boss_rush/boss_rush_timer.cpp
             src/boss_rush/boss_rush_timer_v2.cpp
+            src/boss_rush/boss_rush_hardmode.cpp
             src/boss_rush/boss_rush_portal.cpp
             src/boss_rush/boss_rush_dpad.cpp
             src/boss_rush/boss_rush_music.cpp
@@ -93,6 +96,7 @@ add_mod(twilit_essentials
             src/flurry_rush/flurry_rush.cpp
             src/flurry_rush/flurry_vignette.cpp
             src/bullet_time/bullet_time.cpp
+            src/bullet_time/bullet_time_vignette.cpp
             src/puppet_zelda_pattern/puppet_zelda_pattern.cpp
             src/stamina/stamina.cpp
             src/stamina/stamina_hud.cpp
@@ -102,6 +106,7 @@ add_mod(twilit_essentials
             src/stamina/sprint_wolf.cpp
             src/stamina/sprint_wind.cpp
             src/stamina/sprint_swim.cpp
+            src/stamina/stamina_swordcharge.cpp
             src/collection_menu/collection_menu.cpp
             src/collection_menu/collection_menu_shield.cpp
             src/dusklight_compat.cpp

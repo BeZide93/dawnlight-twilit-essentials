@@ -11,6 +11,7 @@
 #include "boss_rush_save.hpp"
 #include "boss_rush_gamemode.hpp"
 #include "boss_rush_music.hpp"
+#include "boss_rush_hardmode.hpp"
 #include "ganondorf_cape.hpp"
 #include "../util.hpp"
 #include "../boss_bar/boss_bar.hpp"
@@ -885,6 +886,54 @@ static HookAction on_beastganon_arrow_hit_pre(ModContext*, void* args, void* ret
     if (!atInfo->mpCollider->ChkAtType(AT_TYPE_ARROW)) return HOOK_CONTINUE;
 
     *static_cast<fopAc_ac_c**>(retval) = nullptr;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+DEFINE_HOOK(&dKy_depth_dist_set, BossRushDepthDistNullCameraHook);
+
+static HookAction on_depth_dist_set_pre(ModContext*, void*, void*, void*) {
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
+DEFINE_HOOK_SYMBOL("src/f_op/f_op_actor.cpp#fopAc_Execute", int(void*), ModActorTeardownExecuteHook);
+DEFINE_HOOK_SYMBOL("src/f_op/f_op_actor.cpp#fopAc_Draw", int(void*), ModActorTeardownDrawHook);
+
+static constexpr fpc_ProcID (*kFopAcMCreate)(s16, u16, u32, const cXyz*, int, const csXyz*,
+    const cXyz*, s8, createFunc IF_DUSK_ARG(u32) IF_DUSK_ARG(u8)) = &fopAcM_create;
+DEFINE_HOOK(kFopAcMCreate, ModActorTeardownCreateHook);
+
+static bool mod_actor_world_ready() {
+    return dComIfGp_getStageRoom() != nullptr && dComIfGp_getCamera(0) != nullptr &&
+           dComIfGp_getLinkPlayer() != nullptr;
+}
+
+static HookAction on_mod_actor_create_pre(ModContext*, void* args, void* retval, void*) {
+    if (args == nullptr || mods::arg<s16>(args, 0) < fpcNm_MAX_NUM) {
+        return HOOK_CONTINUE;
+    }
+    if (!dComIfGp_isEnableNextStage() && mod_actor_world_ready()) {
+        return HOOK_CONTINUE;
+    }
+    if (retval != nullptr) {
+        *static_cast<fpc_ProcID*>(retval) = fpcM_ERROR_PROCESS_ID_e;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction on_mod_actor_teardown_pre(ModContext*, void* args, void* retval, void*) {
+    void* actor = mods::arg<void*>(args, 0);
+    if (actor == nullptr || fopAcM_GetProfName(actor) < fpcNm_MAX_NUM) {
+        return HOOK_CONTINUE;
+    }
+    if (mod_actor_world_ready()) {
+        return HOOK_CONTINUE;
+    }
+    if (retval != nullptr) {
+        *static_cast<int*>(retval) = 1;
+    }
     return HOOK_SKIP_ORIGINAL;
 }
 
@@ -4129,12 +4178,20 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
 
     draw_boss_rush_fight_timer();
 
+    const bool inChamberForText = is_in_boss_rush_chamber();
+    if (!inChamberForText || s_returningToChamber) {
+        return;
+    }
+
+    if (dMeter2Info_getWindowStatus() == 0 && dMeter2Info_getPauseStatus() == 0) {
+        draw_boss_rush_hardmode_embers();
+    }
+
     if (is_ui_or_menu_active()) {
         return;
     }
 
-    const bool inChamberForText = is_in_boss_rush_chamber();
-    if (!kBossGalleryTextsEnabled || !inChamberForText || s_returningToChamber) {
+    if (!kBossGalleryTextsEnabled) {
         return;
     }
 
@@ -5531,6 +5588,7 @@ static bool boss_rush_free_a_trigger() {
 }
 
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
+    update_boss_rush_hardmode();
     if (is_game_resetting_or_title() && !boss_rush_game_mode_entering()) {
         if (s_bossRushModeActive || s_exitingBossRush || boss_rush_session_marker_present()) {
             close_boss_rush_session();
@@ -6514,6 +6572,10 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_pre<DarkhammerArmorExecuteHook>(hook_svc, on_darkhammer_armor_execute_pre);
         mods::hook::add_pre<BossRushBeastGanonArrowHook>(hook_svc, on_beastganon_arrow_hit_pre);
         mods::hook::add_pre<BossRushBeastGanonTransformFreezeHook>(hook_svc, on_beastganon_execute_pre);
+        mods::hook::add_pre<BossRushDepthDistNullCameraHook>(hook_svc, on_depth_dist_set_pre);
+        mods::hook::add_pre<ModActorTeardownExecuteHook>(hook_svc, on_mod_actor_teardown_pre);
+        mods::hook::add_pre<ModActorTeardownDrawHook>(hook_svc, on_mod_actor_teardown_pre);
+        mods::hook::add_pre<ModActorTeardownCreateHook>(hook_svc, on_mod_actor_create_pre);
         mods::hook::add_pre<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_pre);
         mods::hook::add_post<BossRushBeastGanonDamageHook>(hook_svc, on_bmg_damage_post);
         mods::hook::add_pre<BossRushChamberDamagePointHook>(hook_svc, on_chamber_damage_point_pre);
@@ -6531,6 +6593,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_pre<BossRushAchievementTickHook>(hook_svc, on_boss_rush_achievement_tick_pre);
     }
     init_boss_rush_midna(hook_svc, log_svc, mod_ctx);
+    init_boss_rush_hardmode(log_svc, mod_ctx);
     init_boss_rush_collection(hook_svc, log_svc, mod_ctx);
     init_ganondorf_cape(hook_svc, log_svc, mod_ctx);
 
@@ -6659,5 +6722,6 @@ void shutdown_boss_rush() {
     clear_ring_flames();
     unload_boss_rush_models();
     shutdown_boss_rush_midna();
+    shutdown_boss_rush_hardmode();
     shutdown_ganondorf_cape();
 }
