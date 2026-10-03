@@ -1,4 +1,5 @@
 #include "stamina.hpp"
+#include "../../include/twilit_essentials/stamina.h"
 #include "stamina_internal.hpp"
 #include "stamina_hud.hpp"
 #include "sprint_human.hpp"
@@ -18,6 +19,7 @@
 #include "mods/svc/config.h"
 
 #include <cstdint>
+#include <cmath>
 
 extern const SaveService* svc_save;
 extern ModContext* mod_ctx;
@@ -105,6 +107,8 @@ static int  s_jumpChargeCd = 0;
 static f32  s_extraDrain  = 0.0f;
 static bool s_exhausted   = false;
 static f32  s_regenRamp   = 0.0f;
+static bool s_serviceReady = false;
+static bool s_externalSpent = false;
 
 static constexpr int kExhaustMinDelayFrames = 30;
 static constexpr f32 kRegenRampStep = 1.0f / 20.0f;
@@ -313,6 +317,55 @@ static void spend_raw(f32 cost) {
     check_exhaust();
 }
 
+static bool stamina_service_gameplay() {
+    auto* link = daAlink_getAlinkActorClass();
+    return link && !link->checkDeadHP() && !link->checkSceneChangeAreaStart() &&
+           !dComIfGp_isEnableNextStage() && in_gameplay();
+}
+
+static ModResult stamina_service_get_state(ModContext* caller, TwilitEssentialsStaminaState* out) {
+    if (!caller || !out || out->struct_size < sizeof(*out)) return MOD_INVALID_ARGUMENT;
+    *out = TWILIT_ESSENTIALS_STAMINA_STATE_INIT;
+    if (!s_serviceReady) return MOD_UNAVAILABLE;
+    out->enabled = g_configStaminaEnabled;
+    out->gameplay = stamina_service_gameplay();
+    out->exhausted = g_configStaminaEnabled && s_exhausted;
+    out->maximum = stamina_max();
+    out->current = g_configStaminaEnabled ? s_stamina : out->maximum;
+    if (out->current > out->maximum) out->current = out->maximum;
+    return MOD_OK;
+}
+
+static ModResult stamina_service_spend(ModContext* caller, float amount, bool requireFull) {
+    if (!caller || !std::isfinite(amount) || amount < 0.0f) return MOD_INVALID_ARGUMENT;
+    if (!s_serviceReady || !g_configStaminaEnabled || !stamina_service_gameplay())
+        return MOD_UNAVAILABLE;
+    if (amount == 0.0f) return MOD_OK;
+    if (s_exhausted) return MOD_CONFLICT;
+    // Settings can lower the cap before the next update_stamina call.
+    const float maximum = stamina_max();
+    const float available = s_stamina < maximum ? s_stamina : maximum;
+    if (requireFull && amount > available) return MOD_CONFLICT;
+    s_stamina = available;
+    spend_raw(amount); // Deliberately excluded from hidden-skill attack refunds.
+    s_externalSpent = true;
+    return MOD_OK;
+}
+
+static ModResult stamina_service_try_consume(ModContext* caller, float amount) {
+    return stamina_service_spend(caller, amount, true);
+}
+
+static ModResult stamina_service_drain(ModContext* caller, float amount) {
+    return stamina_service_spend(caller, amount, false);
+}
+
+static constexpr TwilitEssentialsStaminaService g_staminaService{
+    SERVICE_HEADER(TwilitEssentialsStaminaService, 1, 0),
+    stamina_service_get_state, stamina_service_try_consume, stamina_service_drain,
+};
+EXPORT_SERVICE(g_staminaService);
+
 static void spend(f32 cost) {
     spend_raw(cost);
     s_otherSpend += cost;
@@ -463,6 +516,8 @@ static bool is_hang_rest_proc(daAlink_c* link) {
 }
 
 void update_stamina(const LogService*, ModContext*) {
+    const bool externalSpent = s_externalSpent;
+    s_externalSpent = false;
     stamina_hud_begin_tick();
     s_blockedThisFrame = false;
     s_swungThisFrame = false;
@@ -518,7 +573,7 @@ void update_stamina(const LogService*, ModContext*) {
         s_regenRamp = 0.0f;
         stamina_hud_notify_drain();
         check_exhaust();
-    } else {
+    } else if (!externalSpent) {
         if (s_regenDelay > 0) {
             s_regenDelay--;
             s_regenRamp = 0.0f;
@@ -565,6 +620,8 @@ static void on_stamina_save_activated(ModContext*, uint32_t, void*) {
 }
 
 ModResult init_stamina(const HookService* hook_svc, ModError*) {
+    s_serviceReady = false;
+    s_externalSpent = false;
     if (!hook_svc) return MOD_OK;
 
     s_stamina = stamina_max();
@@ -605,10 +662,13 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     hook_cost<StamCutDown>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
     hook_cost<StamCutHead>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
     hook_cost<StamGuardAttack>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
+    s_serviceReady = true;
     return MOD_OK;
 }
 
 void shutdown_stamina() {
+    s_serviceReady = false;
+    s_externalSpent = false;
     shutdown_sprint_human();
     shutdown_sprint_wolf();
     shutdown_sprint_swim();
