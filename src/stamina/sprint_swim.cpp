@@ -29,7 +29,7 @@ static bool sprint_swim_wanted(const daAlink_c* link) {
     if (is_zora_tunic(link)) return false;
     if (link->mProcID != daAlink_c::PROC_SWIM_MOVE) return false;
 
-    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
+    const bool sprintHeld = controls_sprint_held();
     if (!sprintHeld) return false;
 
     if (g_configStaminaEnabled && g_configStaminaSrcSprint && stamina_impl::is_empty()) {
@@ -57,7 +57,7 @@ void update_sprint_swim() {
         return;
     }
 
-    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
+    const bool sprintHeld = controls_sprint_held();
     if (sprintHeld) {
         if (s_holdFrames < 0xFF) s_holdFrames++;
     } else {

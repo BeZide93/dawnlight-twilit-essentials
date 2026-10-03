@@ -73,7 +73,7 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
 
-    const bool sprintHeld = controls_binding_held(CTRL_BIND_SPRINT);
+    const bool sprintHeld = controls_sprint_held();
     const bool drains   = g_configStaminaSrcSprint && g_configStaminaEnabled;
     const bool wasLatched = s_sprintLatched;
 
@@ -227,7 +227,7 @@ void update_sprint_human() {
         stop_sprint_wind_effect();
         return;
     }
-    if (controls_binding_held(CTRL_BIND_SPRINT)) {
+    if (controls_sprint_held()) {
         if (s_holdFrames < 0xFF) s_holdFrames++;
     } else {
         s_holdFrames = 0;
@@ -253,7 +253,7 @@ static void sprint_pad_read_post(ModContext*, void*, void*, void*) {
     }
 
     interface_of_controller_pad& pad = mDoCPd_c::getCpadInfo(PAD_1);
-    const bool sprintHold = controls_binding_held(CTRL_BIND_SPRINT) &&
+    const bool sprintHold = controls_sprint_held() &&
                             s_holdFrames >= kSprintHoldFrames;
     if (!s_sprintLatched && !sprintHold) return;
 

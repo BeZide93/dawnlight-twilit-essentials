@@ -143,7 +143,7 @@ static bool sprint_wanted(const daAlink_c* link) {
         return false;
     }
     if (!link || !link->mpHIO) return false;
-    if (!controls_binding_held(CTRL_BIND_SPRINT)) return false;
+    if (!controls_sprint_held()) return false;
     if (g_configStaminaEnabled && g_configStaminaSrcWolfDash && stamina_impl::is_empty()) return false;
     return true;
 }
