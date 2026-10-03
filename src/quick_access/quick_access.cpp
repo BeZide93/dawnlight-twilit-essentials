@@ -270,7 +270,7 @@ static void sync_ooccoo_assignment() {
     }
 }
 
-static bool is_bomb_item(u8 itemNo) {
+static bool qa_is_bomb_item(u8 itemNo) {
     return itemNo == dItemNo_NORMAL_BOMB_e || itemNo == dItemNo_WATER_BOMB_e ||
            itemNo == dItemNo_POKE_BOMB_e;
 }
@@ -288,12 +288,12 @@ static void sync_bomb_assignment() {
     bool changed = false;
     for (int i = 0; i < QA_QUICK_SLOTS; i++) {
         const u8 stale = s_customItems[i];
-        if (!is_bomb_item(stale) || bomb_in_any_bag(stale)) {
+        if (!qa_is_bomb_item(stale) || bomb_in_any_bag(stale)) {
             continue;
         }
         for (int b = 0; b < 3; b++) {
             const u8 bag = dComIfGs_getItem((u8)(SLOT_15 + b), false);
-            if (is_bomb_item(bag) && !qa_custom_contains(bag)) {
+            if (qa_is_bomb_item(bag) && !qa_custom_contains(bag)) {
                 s_customItems[i] = bag;
                 if (s_assignedItem == stale) {
                     s_assignedItem = bag;
