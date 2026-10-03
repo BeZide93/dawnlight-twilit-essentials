@@ -190,15 +190,7 @@ JPABaseEmitter* s_aura[kAuraCount] = {};
 u32 s_particleTick = 0;
 u32 s_statueDrawTick = 0;
 
-void dl_log(const char* fmt, ...) {
-    if (svc_log == nullptr || svc_log->info == nullptr) return;
-    char msg[256];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(msg, sizeof(msg), fmt, args);
-    va_end(args);
-    svc_log->info(mod_ctx, msg);
-}
+void dl_log(const char*, ...) {}
 
 JKRHeap* pick_parent_heap(u32 size) {
     JKRHeap* root = JKRHeap::getRootHeap();

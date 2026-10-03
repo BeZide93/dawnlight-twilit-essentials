@@ -3,6 +3,7 @@
 #include "boss_rush_common.hpp"
 #include "../boss_bar/boss_bar.hpp"
 #include "boss_rush_darklink.hpp"
+#include "boss_rush_leaderboard.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
@@ -120,6 +121,7 @@ void finalize() {
     s_finalCs = static_cast<u32>(fightMs / 10ull);
 
     if (s_allPhasesRun) {
+        boss_rush_leaderboard_submit_all_phases(s_finalCs);
         s_isRecord = (s_allPhasesBestCs == 0) || (s_finalCs < s_allPhasesBestCs);
         if (s_isRecord) {
             s_allPhasesBestCs = s_finalCs;
@@ -133,6 +135,7 @@ void finalize() {
         return;
     }
 
+    boss_rush_leaderboard_submit_boss(s_idx, s_finalCs);
     const int slot = best_slot(s_idx);
     const u32 prev = slot >= 0 ? s_best[slot] : 0;
     s_isRecord = (prev == 0) || (s_finalCs < prev);
@@ -376,6 +379,7 @@ void boss_rush_timer_commit_chain_total() {
 
     const u32 totalCs = cs_now();
     if (totalCs == 0) return;
+    boss_rush_leaderboard_submit_master_rush(totalCs);
 
     const bool record = (s_chainBestCs == 0) || (totalCs < s_chainBestCs);
     if (record) {

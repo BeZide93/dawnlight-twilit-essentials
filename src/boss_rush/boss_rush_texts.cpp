@@ -1,4 +1,5 @@
 #include "boss_rush_texts.hpp"
+#include "../text_outline.hpp"
 #include "boss_rush_common.hpp"
 #include "boss_rush.hpp"
 #include "boss_rush_masterswd.hpp"
@@ -25,6 +26,9 @@
 
 namespace {
 
+constexpr f32 kOutlineRadiusPerCharH = 0.065f;
+constexpr f32 kOutlineMinRadius = 0.8f;
+
 f32 s_labelFade[kMaxBossGalleryEntries] = {};
 
 void draw_world_label(const char* text, f32 x, f32 y, f32 charW, f32 charH,
@@ -35,16 +39,9 @@ void draw_world_label(const char* text, f32 x, f32 y, f32 charW, f32 charH,
 
     font->setGX();
 
-    const f32 c = 1.6f;
-    const f32 d = 1.1f;
-    const f32 kOff[8][2] = {
-        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
-        { d, d}, {d, -d}, {-d, d}, {-d, -d},
-    };
-    font->setCharColor(JUtility::TColor(0, 0, 0, alpha));
-    for (const auto& o : kOff) {
-        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
-    }
+    f32 radius = charH * kOutlineRadiusPerCharH;
+    if (radius < kOutlineMinRadius) radius = kOutlineMinRadius;
+    draw_text_outline(font, text, x, y, charW, charH, JUtility::TColor(0, 0, 0, alpha), radius);
 
     JUtility::TColor t = top;
     JUtility::TColor b = bottom;

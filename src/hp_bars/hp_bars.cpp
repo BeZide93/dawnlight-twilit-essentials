@@ -1,4 +1,5 @@
 #include "hp_bars.hpp"
+#include "../text_outline.hpp"
 
 #include <list>
 #include <unordered_map>
@@ -80,16 +81,8 @@ static void draw_damage_number(const char* text, f32 x, f32 y, f32 charW, f32 ch
 
     font->setGX();
 
-    const f32 c = 1.7f * outlineScale;
-    const f32 d = 1.2f * outlineScale;
-    const f32 kOff[8][2] = {
-        { c, 0.0f}, {-c, 0.0f}, {0.0f,  c}, {0.0f, -c},
-        { d, d}, {d, -d}, {-d, d}, {-d, -d},
-    };
-    font->setCharColor(JUtility::TColor(0, 0, 0, alpha));
-    for (const auto& o : kOff) {
-        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
-    }
+    draw_text_outline(font, text, x, y, charW, charH, JUtility::TColor(0, 0, 0, alpha),
+                      1.7f * outlineScale);
 
     top.a = alpha;
     bottom.a = alpha;

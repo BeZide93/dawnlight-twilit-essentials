@@ -12,6 +12,7 @@
 #include "boss_rush_gamemode.hpp"
 #include "boss_rush_music.hpp"
 #include "boss_rush_hardmode.hpp"
+#include "boss_rush_leaderboard.hpp"
 #include "ganondorf_cape.hpp"
 #include "../util.hpp"
 #include "../boss_bar/boss_bar.hpp"
@@ -4191,11 +4192,14 @@ static void on_boss_rush_meter_draw_post(ModContext*, void* args, void*, void*) 
         return;
     }
 
-    if (!kBossGalleryTextsEnabled) {
+    if (boss_rush_leaderboard_view_active()) {
+        draw_boss_rush_leaderboard_view();
         return;
     }
 
-    draw_boss_rush_texts(kBossChamberFloorY);
+    if (kBossGalleryTextsEnabled) {
+        draw_boss_rush_texts(kBossChamberFloorY);
+    }
 }
 
 static bool link_near_gallery_statue() {
@@ -5589,6 +5593,7 @@ static bool boss_rush_free_a_trigger() {
 
 void update_boss_rush(const LogService* log_svc, ModContext* mod_ctx) {
     update_boss_rush_hardmode();
+    boss_rush_leaderboard_update();
     if (is_game_resetting_or_title() && !boss_rush_game_mode_entering()) {
         if (s_bossRushModeActive || s_exitingBossRush || boss_rush_session_marker_present()) {
             close_boss_rush_session();
@@ -6562,6 +6567,7 @@ ModResult init_boss_rush(const HookService* hook_svc, const LogService* log_svc,
         mods::hook::add_post<BossRushActionStringHook>(hook_svc, on_action_string_post);
         mods::hook::add_pre<BossRushDefeatOverrideHook>(hook_svc, on_defeat_check_pre);
         init_boss_rush_darklink(hook_svc);
+        boss_rush_leaderboard_install_hooks(hook_svc);
         mods::hook::add_pre<BossRushSwitchOverrideHook>(hook_svc, on_switch_check_pre);
         mods::hook::add_pre<BossRushDanSwitchHook>(hook_svc, on_dan_switch_check_pre);
         mods::hook::add_pre<BossRushZoneSwitchHook>(hook_svc, on_zone_switch_check_pre);
@@ -6723,5 +6729,6 @@ void shutdown_boss_rush() {
     unload_boss_rush_models();
     shutdown_boss_rush_midna();
     shutdown_boss_rush_hardmode();
+    boss_rush_leaderboard_shutdown();
     shutdown_ganondorf_cape();
 }

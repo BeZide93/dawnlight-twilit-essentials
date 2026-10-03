@@ -1,4 +1,5 @@
 #include "boss_bar.hpp"
+#include "../text_outline.hpp"
 #include "../boss_rush/boss_rush_darklink.hpp"
 #include "boss_internals.hpp"
 #include "../stamina/stamina.hpp"
@@ -1470,15 +1471,9 @@ static void draw_text_ingame(const char* text, f32 x, f32 y, f32 charW, f32 char
 
     font->setGX();
 
-    static const f32 kOff[8][2] = {
-        { 1.1f, 0.0f}, {-1.1f, 0.0f}, {0.0f,  1.1f}, {0.0f, -1.1f},
-        { 0.8f, 0.8f}, {0.8f, -0.8f}, {-0.8f, 0.8f}, {-0.8f, -0.8f},
-    };
     u8 a = color.a;
-    font->setCharColor(JUtility::TColor(32, 20, 12, static_cast<u8>(a * 0.9f)));
-    for (const auto& o : kOff) {
-        font->drawString_scale(x + o[0], y + o[1], charW, charH, text, true);
-    }
+    draw_text_outline(font, text, x, y, charW, charH,
+                      JUtility::TColor(32, 20, 12, static_cast<u8>(a * 0.9f)), 1.1f);
 
     font->setGradColor(JUtility::TColor(255, 250, 232, a),
                        JUtility::TColor(226, 196, 140, a));
@@ -1615,16 +1610,7 @@ static void draw_text_soft(const char* text, f32 x, f32 y, f32 charW, f32 charH,
     JUTFont* font = boss_name_font();
     if (!font) return;
     font->setGX();
-    if (shadow.a > 0 && radius > 0.0f) {
-        static const f32 kDir[8][2] = {
-            { 1.0f, 0.0f}, {-1.0f, 0.0f}, {0.0f,  1.0f}, {0.0f, -1.0f},
-            { 0.7f, 0.7f}, {0.7f, -0.7f}, {-0.7f, 0.7f}, {-0.7f, -0.7f},
-        };
-        font->setCharColor(shadow);
-        for (const auto& d : kDir) {
-            font->drawString_scale(x + d[0] * radius, y + d[1] * radius, charW, charH, text, true);
-        }
-    }
+    draw_text_outline(font, text, x, y, charW, charH, shadow, radius);
     font->setGradColor(top, bot);
     font->drawString_scale(x, y, charW, charH, text, true);
     J2DGrafContext* port = dComIfGp_getCurrentGrafPort();
