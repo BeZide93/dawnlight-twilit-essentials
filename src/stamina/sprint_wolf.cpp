@@ -75,6 +75,7 @@ static void stop_sprint_wind_effect() {
         emitter->stopDrawParticle();
     }
     s_sprintWindEmitter = 0;
+    stamina_impl::sprint_wind_pitch_reset();
 }
 
 static void update_sprint_wind_effect(daAlink_c* link) {
@@ -99,7 +100,9 @@ static void update_sprint_wind_effect(daAlink_c* link) {
     pos.y = eye_p->y + (t1 * cM_ssin(-fopCamM_GetAngleX(camera)));
     pos.z = eye_p->z + (t0 * cM_scos(fopCamM_GetAngleY(camera)));
 
-    csXyz angle(0, link->shape_angle.y, 0);
+    const s16 pitch =
+        stamina_impl::sprint_wind_pitch(link->current.pos.x, link->current.pos.y, link->current.pos.z);
+    csXyz angle(pitch, link->shape_angle.y, 0);
 
     if (s_sprintWindEmitter != 0) {
         JPABaseEmitter* existing = dComIfGp_particle_getEmitter(s_sprintWindEmitter);

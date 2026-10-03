@@ -18,9 +18,11 @@
 #include "JSystem/JParticle/JPATexture.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_graphic.h"
+#include "SSystem/SComponent/c_math.h"
 
 #include <cstdarg>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 
 #define SPRINT_WIND_LOG 0
@@ -407,6 +409,17 @@ bool compute_sprint_wind_allowed(int* outType) {
     return stageName != nullptr && std::memcmp(stageName, "D_MN07", 6) == 0;
 }
 
+constexpr s16 kPitchMax = 0x2000;
+constexpr f32 kPitchMinStep = 1.0f;
+constexpr f32 kPitchTeleportDist = 300.0f;
+
+bool s_pitchValid = false;
+f32 s_pitchPrevX = 0.0f;
+f32 s_pitchPrevY = 0.0f;
+f32 s_pitchPrevZ = 0.0f;
+s16 s_pitchTarget = 0;
+s16 s_pitch = 0;
+
 #if SPRINT_WIND_LOG
 constexpr size_t kStageNameLen = 8;
 
@@ -458,6 +471,44 @@ void stamina_impl::sprint_wind_report(unsigned int emitterId) {
 #endif
 }
 
+short stamina_impl::sprint_wind_pitch(float x, float y, float z) {
+    if (!s_pitchValid) {
+        s_pitchValid = true;
+        s_pitchPrevX = x;
+        s_pitchPrevY = y;
+        s_pitchPrevZ = z;
+        s_pitchTarget = 0;
+        s_pitch = 0;
+        return 0;
+    }
+
+    const f32 dx = x - s_pitchPrevX;
+    const f32 dy = y - s_pitchPrevY;
+    const f32 dz = z - s_pitchPrevZ;
+    const f32 horiz = std::sqrt(dx * dx + dz * dz);
+    if (horiz > kPitchTeleportDist || std::abs(dy) > kPitchTeleportDist) {
+        s_pitchTarget = 0;
+        s_pitch = 0;
+    } else if (horiz >= kPitchMinStep) {
+        s16 target = cM_atan2s(-dy, horiz);
+        if (target > kPitchMax) target = kPitchMax;
+        if (target < -kPitchMax) target = -kPitchMax;
+        s_pitchTarget = target;
+    }
+    s_pitchPrevX = x;
+    s_pitchPrevY = y;
+    s_pitchPrevZ = z;
+
+    s_pitch = static_cast<s16>(s_pitch + (s_pitchTarget - s_pitch) / 4);
+    return s_pitch;
+}
+
+void stamina_impl::sprint_wind_pitch_reset() {
+    s_pitchValid = false;
+    s_pitchTarget = 0;
+    s_pitch = 0;
+}
+
 ModResult init_sprint_wind(const HookService* hook_svc) {
     if (hook_svc == nullptr) {
         wind_log("[sprint-wind] no hook service");
@@ -475,4 +526,5 @@ void shutdown_sprint_wind() {
     s_capture = Capture{};
     s_loadFailed = false;
     s_sceneCreateCount = 0;
+    stamina_impl::sprint_wind_pitch_reset();
 }
