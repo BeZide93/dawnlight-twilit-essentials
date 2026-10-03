@@ -9,6 +9,7 @@
 #include "free_cam_distance.hpp"
 #include "no_battle_music.hpp"
 #include "zora_swim.hpp"
+#include "shield_surf.hpp"
 
 #include "d/d_com_inf_game.h"
 
@@ -31,6 +32,7 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     init_no_battle_music(hook_svc, error);
     init_zora_swim(hook_svc, error);
     init_auto_zora_armor(hook_svc, error);
+    init_shield_surf(hook_svc, error);
     return MOD_OK;
 }
 
@@ -81,4 +83,5 @@ void shutdown_general() {
     shutdown_free_cam_distance();
     shutdown_no_battle_music();
     shutdown_zora_swim();
+    shutdown_shield_surf();
 }
