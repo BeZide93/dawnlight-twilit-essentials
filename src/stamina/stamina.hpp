@@ -20,6 +20,7 @@ extern bool g_configStaminaSlowHangRegen;
 extern bool g_configStaminaRefillOnStageChange;
 extern bool g_configStaminaSwimRestRegen;
 extern bool g_configStaminaSwimDrown;
+extern bool g_configStaminaSpinChargeLevels;
 
 extern float g_configStaminaBarX;
 extern float g_configStaminaBarY;
@@ -50,6 +51,7 @@ extern bool g_configStaminaSrcPushPull;
 extern bool g_configStaminaSrcWolfDash;
 extern bool g_configStaminaSrcHiddenSkills;
 extern bool g_configStaminaSrcBulletTime;
+extern bool g_configStaminaSrcBlock;
 
 extern int g_configStaminaCostAttack;
 extern int g_configStaminaCostJumpAttack;
@@ -68,6 +70,7 @@ extern int g_configStaminaCostSwimSprint;
 extern int g_configStaminaCostHiddenSkills;
 extern int g_configStaminaCostSpinCharge;
 extern int g_configStaminaCostBulletTime;
+extern int g_configStaminaCostBlock;
 
 void stamina_add_drain(float amount);
 bool stamina_is_exhausted();

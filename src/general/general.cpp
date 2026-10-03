@@ -3,10 +3,12 @@
 #include "always.hpp"
 #include "human_warp.hpp"
 #include "faster_midna_cancel.hpp"
+#include "auto_zora_armor.hpp"
 #include "hud_auto_fade.hpp"
 #include "sprint_fov_kick.hpp"
 #include "free_cam_distance.hpp"
 #include "no_battle_music.hpp"
+#include "zora_swim.hpp"
 
 #include "d/d_com_inf_game.h"
 
@@ -27,6 +29,8 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     init_sprint_fov_kick(hook_svc, error);
     init_free_cam_distance(hook_svc, error);
     init_no_battle_music(hook_svc, error);
+    init_zora_swim(hook_svc, error);
+    init_auto_zora_armor(hook_svc, error);
     return MOD_OK;
 }
 
@@ -61,6 +65,7 @@ void update_general(const LogService* log_svc, ModContext* mod_ctx) {
     update_human_warp(log_svc, mod_ctx);
     update_hud_auto_fade();
     update_sprint_fov_kick();
+    update_auto_zora_armor();
 }
 
 void shutdown_general() {
@@ -69,9 +74,11 @@ void shutdown_general() {
     shutdown_dominion_sword();
     shutdown_human_warp();
     shutdown_faster_midna_cancel();
+    shutdown_auto_zora_armor();
     shutdown_faster_transitions();
     shutdown_hud_auto_fade();
     shutdown_sprint_fov_kick();
     shutdown_free_cam_distance();
     shutdown_no_battle_music();
+    shutdown_zora_swim();
 }

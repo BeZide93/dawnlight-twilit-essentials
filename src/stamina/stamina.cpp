@@ -5,6 +5,7 @@
 #include "sprint_wolf.hpp"
 #include "sprint_swim.hpp"
 #include "sprint_wind.hpp"
+#include "stamina_swordcharge.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -45,6 +46,7 @@ bool g_configStaminaSrcPushPull  = true;
 bool g_configStaminaSrcWolfDash  = true;
 bool g_configStaminaSrcHiddenSkills = true;
 bool g_configStaminaSrcBulletTime = true;
+bool g_configStaminaSrcBlock = true;
 
 int g_configStaminaCostAttack     = 100;
 int g_configStaminaCostJumpAttack = 100;
@@ -63,6 +65,7 @@ int g_configStaminaCostSwimSprint = 100;
 int g_configStaminaCostHiddenSkills = 100;
 int g_configStaminaCostSpinCharge = 10;
 int g_configStaminaCostBulletTime = 100;
+int g_configStaminaCostBlock = 100;
 
 enum StamCat {
     STAM_ATTACKS = 1,
@@ -100,6 +103,9 @@ DEFINE_HOOK(&daAlink_c::procHangWallCatch, StamHangWallCatch);
 DEFINE_HOOK(&daAlink_c::checkLadderFall, StamLadderFall);
 DEFINE_HOOK(&daAlink_c::procCutTurnCharge, StamSpinCharge);
 DEFINE_HOOK(&daAlink_c::procCutTurnMove, StamSpinChargeMove);
+DEFINE_HOOK(&daAlink_c::setGuardSe, StamGuardHit);
+DEFINE_HOOK(&daAlink_c::procGuardSlipInit, StamGuardSlip);
+DEFINE_HOOK(&daAlink_c::setSmallGuard, StamSmallGuard);
 
 static f32 s_stamina    = 100.0f;
 static int s_regenDelay = 0;
@@ -221,7 +227,7 @@ static bool is_spin_charge(const daAlink_c* link) {
 
 static f32 spin_charge_drain(const daAlink_c* link) {
     if (!g_configStaminaSrcJumpSpin || !is_spin_charge(link)) return 0.0f;
-    return stamina_impl::cost_scaled(kSpinChargeDrain, g_configStaminaCostSpinCharge);
+    return stamina_impl::cost_scaled(kSpinChargeDrain, g_configStaminaCostSpinCharge) * stamina_swordcharge_drain_mul();
 }
 
 static bool empty() { return s_exhausted; }
@@ -309,6 +315,65 @@ static void deny() {
         s_denyCooldown = kDenyCooldownFrames;
         Z2GetAudioMgr()->seStart(Z2SE_SYS_ERROR, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
     }
+}
+
+static constexpr f32 kBlockCost = 8.0f;
+static constexpr f32 kBlockLargeMul = 1.5f;
+static constexpr f32 kBlockHugeMul = 2.0f;
+static constexpr int kBlockCooldownFrames = 8;
+static constexpr u32 kSmallGuardNoBreakModes = 0x70C52;
+
+static bool s_guardBreakPending = false;
+static int  s_blockCd = 0;
+
+static bool is_huge_attack(int spl) { return spl == 2 || spl == 7 || spl == 11 || spl == 14; }
+static bool is_large_attack(int spl) { return spl == 1 || spl == 6 || spl == 10 || spl == 13; }
+
+static void spend(f32 cost);
+
+static HookAction guard_hit_pre(ModContext*, void* args, void*, void*) {
+    if (!g_configStaminaEnabled || !g_configStaminaSrcBlock || !args) return HOOK_CONTINUE;
+    if (!in_gameplay()) return HOOK_CONTINUE;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    dCcD_GObjInf* obj = mods::arg<dCcD_GObjInf*>(args, 1);
+    if (!link || !obj || link->checkWolf() || !obj->ChkTgShieldHit()) return HOOK_CONTINUE;
+    if (link->mProcID == daAlink_c::PROC_GUARD_ATTACK || link->checkHorseRide()) return HOOK_CONTINUE;
+    if (s_blockCd > 0) return HOOK_CONTINUE;
+    s_blockCd = kBlockCooldownFrames;
+    if (!empty()) {
+        dCcD_GObjInf* hit = obj->GetTgHitGObj();
+        const int spl = hit != nullptr ? hit->GetAtSpl() : 0;
+        f32 cost = kBlockCost;
+        if (is_huge_attack(spl)) cost *= kBlockHugeMul;
+        else if (is_large_attack(spl)) cost *= kBlockLargeMul;
+        spend(stamina_impl::cost_scaled(cost, g_configStaminaCostBlock));
+    }
+    if (empty()) {
+        s_guardBreakPending = true;
+        deny();
+    }
+    return HOOK_CONTINUE;
+}
+
+static HookAction guard_slip_pre(ModContext*, void* args, void* retval, void*) {
+    if (!s_guardBreakPending || !args) return HOOK_CONTINUE;
+    s_guardBreakPending = false;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || link->mProcID == daAlink_c::PROC_GUARD_SLIP) return HOOK_CONTINUE;
+    const int result = link->procGuardBreakInit();
+    if (retval) *static_cast<int*>(retval) = result;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+static HookAction small_guard_pre(ModContext*, void* args, void*, void*) {
+    if (!s_guardBreakPending || !args) return HOOK_CONTINUE;
+    s_guardBreakPending = false;
+    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    if (!link || !link->mLinkAcch.ChkGroundHit() || link->checkModeFlg(kSmallGuardNoBreakModes)) {
+        return HOOK_CONTINUE;
+    }
+    link->procGuardBreakInit();
+    return HOOK_SKIP_ORIGINAL;
 }
 
 static HookAction spin_charge_pre(ModContext*, void* args, void* retval, void*) {
@@ -549,6 +614,8 @@ void update_stamina(const LogService*, ModContext*) {
     if (s_suppressSwingCharge > 0) s_suppressSwingCharge--;
     if (s_jumpChargeCd > 0) s_jumpChargeCd--;
     if (s_denyCooldown > 0) s_denyCooldown--;
+    if (s_blockCd > 0) s_blockCd--;
+    s_guardBreakPending = false;
     if (s_hiddenSkillLock > 0) s_hiddenSkillLock--;
     if (s_otherSpend > 0.0f) {
         s_otherSpend -= kRecentSpendDecay;
@@ -662,6 +729,7 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     init_sprint_wolf(hook_svc);
     init_sprint_swim(hook_svc);
     init_sprint_wind(hook_svc);
+    init_stamina_swordcharge(hook_svc);
 
     init_stamina_hud(hook_svc, s_stamina);
 
@@ -673,6 +741,10 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     mods::hook::add_pre<StamSpinChargeMove>(hook_svc, spin_charge_pre);
 
     mods::hook::add_post<StamSwordSwing>(hook_svc, sword_swing_post);
+
+    mods::hook::add_pre<StamGuardHit>(hook_svc, guard_hit_pre);
+    mods::hook::add_pre<StamGuardSlip>(hook_svc, guard_slip_pre);
+    mods::hook::add_pre<StamSmallGuard>(hook_svc, small_guard_pre);
 
     hook_cost<StamFrontRoll>(hook_svc, STAM_ROLLS, STAMC_ROLL);
     hook_cost<StamSideRoll>(hook_svc, STAM_ROLLS, STAMC_ROLL);
@@ -696,6 +768,7 @@ void shutdown_stamina() {
     shutdown_sprint_wolf();
     shutdown_sprint_swim();
     shutdown_sprint_wind();
+    shutdown_stamina_swordcharge();
     s_stamina = stamina_max();
     shutdown_stamina_hud(s_stamina);
     s_regenDelay = 0;
@@ -703,6 +776,8 @@ void shutdown_stamina() {
     s_suppressSwingCharge = 0;
     s_jumpChargeCd = 0;
     s_denyCooldown = 0;
+    s_blockCd = 0;
+    s_guardBreakPending = false;
     s_extraDrain = 0.0f;
     s_exhausted = false;
     s_regenRamp = 0.0f;

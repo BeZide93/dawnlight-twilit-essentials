@@ -148,17 +148,15 @@ static bool sprint_wanted(const daAlink_c* link) {
     return true;
 }
 
-static void apply_dash_speed(daAlink_c* link) {
+static f32 dash_base_speed(daAlink_c* link) {
     const daAlinkHIO_wlMove_c1& wl = link->mpHIO->mWolf.mWlMove.m;
-    f32 dashMax;
-    if (link->checkWolfSlowDash()) {
-        dashMax = wl.mADashMaxSpeedSlow;
-    } else if (link->field_0x2fc7 == 2) {
-        dashMax = wl.mADashMaxSpeedSlow2;
-    } else {
-        dashMax = wl.mADashMaxSpeed;
-    }
-    link->mMaxSpeed = dashMax * g_configStaminaWolfSprintSpeed;
+    if (link->checkWolfSlowDash()) return wl.mADashMaxSpeedSlow;
+    if (link->field_0x2fc7 == 2) return wl.mADashMaxSpeedSlow2;
+    return wl.mADashMaxSpeed;
+}
+
+static void apply_dash_speed(daAlink_c* link) {
+    link->mMaxSpeed = dash_base_speed(link) * g_configStaminaWolfSprintSpeed;
 }
 
 static void top_up_dash_duration(daAlink_c* link) {
@@ -232,7 +230,8 @@ static HookAction wolf_move_pre(ModContext*, void* args, void* retval, void*) {
         link->mNormalSpeed = link->mMaxSpeed;
     }
     if (g_configStaminaEnabled && g_configStaminaSrcWolfDash) {
-        stamina_impl::report_drain(stamina_impl::cost_scaled(kWolfSprintDrainRate, g_configStaminaCostWolfSprint));
+        const f32 speedMul = stamina_impl::sprint_drain_speed_mul(link->mNormalSpeed, dash_base_speed(link));
+        stamina_impl::report_drain(stamina_impl::cost_scaled(kWolfSprintDrainRate, g_configStaminaCostWolfSprint) * speedMul);
     }
 
     if (++s_burstTimer < kBurstIntervalFrames) return HOOK_CONTINUE;

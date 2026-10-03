@@ -90,7 +90,8 @@ void update_sprint_swim() {
     }
 
     if (g_configStaminaEnabled && g_configStaminaSrcSprint) {
-        stamina_impl::report_drain(stamina_impl::cost_scaled(kSwimSprintDrainRate, g_configStaminaCostSwimSprint));
+        const f32 speedMul = stamina_impl::sprint_drain_speed_mul(link->mNormalSpeed, baseDashSpeed);
+        stamina_impl::report_drain(stamina_impl::cost_scaled(kSwimSprintDrainRate, g_configStaminaCostSwimSprint) * speedMul);
     }
 }
 

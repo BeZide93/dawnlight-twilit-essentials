@@ -7,15 +7,19 @@
 #include "general/horse_cam.hpp"
 #include "general/free_cam_distance.hpp"
 #include "general/no_battle_music.hpp"
+#include "general/zora_swim.hpp"
 
 #include "general/human_warp.hpp"
 #include "general/faster_midna_cancel.hpp"
+#include "general/auto_zora_armor.hpp"
 #include "general/faster_transitions.hpp"
 #include "general/midna_select_freeze_guard.hpp"
 #include "general/shade_shield_fix.hpp"
 #include "hp_bars/hp_bars.hpp"
 #include "boss_bar/boss_bar.hpp"
 #include "boss_rush/boss_rush.hpp"
+#include "boss_rush/boss_rush_hardmode.hpp"
+#include "actor_attribute.hpp"
 #include "boss_rush/boss_rush_darklink.hpp"
 #include "boss_rush/boss_rush_models.hpp"
 #include "boss_rush/boss_rush_equipment.hpp"
@@ -35,6 +39,7 @@
 #include "flurry_rush/flurry_rush.hpp"
 #include "flurry_rush/flurry_vignette.hpp"
 #include "bullet_time/bullet_time.hpp"
+#include "bullet_time/bullet_time_vignette.hpp"
 #include "puppet_zelda_pattern/puppet_zelda_pattern.hpp"
 #include "stamina/stamina.hpp"
 #include "stamina/sprint_human.hpp"
@@ -241,6 +246,7 @@ IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 IMPORT_OPTIONAL_SERVICE(HttpService, svc_http);
 IMPORT_OPTIONAL_SERVICE(GameModeService, svc_game_mode);
 IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+IMPORT_OPTIONAL_SERVICE_VERSION(ActorAttributeService, svc_actor_attribute, 0);
 IMPORT_OPTIONAL_SERVICE(FileService, svc_file);
 
 extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
@@ -262,6 +268,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_http,
     &mod_meta_import_svc_game_mode,
     &mod_meta_import_svc_interp,
+    &mod_meta_import_svc_actor_attribute,
     &mod_meta_import_svc_file,
 };
 
@@ -459,10 +466,12 @@ static ConfigVarHandle s_varFreeCamDistance = 0;
 static ConfigVarHandle s_varFreeCamDistanceZTarget = 0;
 static ConfigVarHandle s_varGeneralHumanWarp = 0;
 static ConfigVarHandle s_varGeneralFasterMidnaCancel = 0;
+static ConfigVarHandle s_varGeneralAutoZoraArmor = 0;
 static ConfigVarHandle s_varGeneralSceneTransitions = 0;
 static ConfigVarHandle s_varGeneralFastDoorAnimations = 0;
 static ConfigVarHandle s_varHudAutoFade = 0;
 static ConfigVarHandle s_varGeneralNoBattleMusic = 0;
+static ConfigVarHandle s_varGeneralModernZoraSwim = 0;
 static ConfigVarHandle s_varGeneralDrowningVignette = 0;
 static ConfigVarHandle s_varDamageVignette = 0;
 static ConfigVarHandle s_varSprintFovKick = 0;
@@ -498,6 +507,7 @@ static ConfigVarHandle s_varStaminaSlowHangRegen = 0;
 static ConfigVarHandle s_varStaminaRefillOnStageChange = 0;
 static ConfigVarHandle s_varStaminaSwimRestRegen = 0;
 static ConfigVarHandle s_varStaminaSwimDrown = 0;
+static ConfigVarHandle s_varStaminaSpinChargeLevels = 0;
 static ConfigVarHandle s_varStaminaSrcAttacks = 0;
 static ConfigVarHandle s_varStaminaSrcJumpSpin = 0;
 static ConfigVarHandle s_varStaminaSrcRolls = 0;
@@ -508,8 +518,10 @@ static ConfigVarHandle s_varStaminaSrcPushPull = 0;
 static ConfigVarHandle s_varStaminaSrcWolfDash = 0;
 static ConfigVarHandle s_varStaminaSrcHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaSrcBulletTime = 0;
+static ConfigVarHandle s_varStaminaSrcBlock = 0;
 static ConfigVarHandle s_varStaminaSprint = 0;
 static ConfigVarHandle s_varStaminaSprintStartRoll = 0;
+static ConfigVarHandle s_varStaminaSprintDrainBySpeed = 0;
 static ConfigVarHandle s_varStaminaSrcSprint = 0;
 static ConfigVarHandle s_varStaminaSprintSpeed = 0;
 static ConfigVarHandle s_varStaminaWolfSprint = 0;
@@ -533,6 +545,7 @@ static ConfigVarHandle s_varStaminaCostSwimSprint = 0;
 static ConfigVarHandle s_varStaminaCostHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaCostSpinCharge = 0;
 static ConfigVarHandle s_varStaminaCostBulletTime = 0;
+static ConfigVarHandle s_varStaminaCostBlock = 0;
 static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
@@ -554,11 +567,13 @@ static ConfigVarHandle s_varBossRushChainBest = 0;
 static ConfigVarHandle s_varBossRushAllPhasesBest = 0;
 static ConfigVarHandle s_varMasterRushRetryMode = 0;
 static ConfigVarHandle s_varMasterRushDifficulty = 0;
+static ConfigVarHandle s_varBossRushHardMode = 0;
 
 static bool s_generalInitialized = false;
 static bool s_damageVignetteInitialized = false;
 static bool s_oxygenVignetteInitialized = false;
 static bool s_flurryVignetteInitialized = false;
+static bool s_bulletTimeVignetteInitialized = false;
 static bool s_hpBarsInitialized = false;
 static bool s_bossBarInitialized = false;
 static bool s_bossRushInitialized = false;
@@ -633,6 +648,12 @@ static void on_master_rush_retry_mode_changed(ModContext*, ConfigVarHandle, cons
 static void on_master_rush_difficulty_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configMasterRushDifficulty = static_cast<int>(value->int_value);
+    }
+}
+
+static void on_boss_rush_hard_mode_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        boss_rush_hardmode_set_enabled(value->bool_value);
     }
 }
 
@@ -869,6 +890,10 @@ static void on_stamina_swim_drown_changed(ModContext*, ConfigVarHandle, const Co
     if (value) g_configStaminaSwimDrown = value->bool_value;
 }
 
+static void on_stamina_spin_charge_levels_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSpinChargeLevels = value->bool_value;
+}
+
 static void on_stamina_src_attacks_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSrcAttacks = value->bool_value;
 }
@@ -902,12 +927,20 @@ static void on_stamina_src_bullet_time_changed(ModContext*, ConfigVarHandle, con
     if (value) g_configStaminaSrcBulletTime = value->bool_value;
 }
 
+static void on_stamina_src_block_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcBlock = value->bool_value;
+}
+
 static void on_stamina_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSprint = value->bool_value;
 }
 
 static void on_stamina_sprint_start_roll_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSprintStartRoll = value->bool_value;
+}
+
+static void on_stamina_sprint_drain_by_speed_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSprintDrainBySpeed = value->bool_value;
 }
 
 static void on_stamina_src_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1013,10 +1046,20 @@ static void on_general_faster_midna_cancel_changed(ModContext*, ConfigVarHandle,
     }
 }
 
+static void on_general_auto_zora_armor_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) {
+        g_configAutoZoraArmor = value->bool_value;
+    }
+}
+
 static void on_general_no_battle_music_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) {
         g_configNoBattleMusic = value->bool_value;
     }
+}
+
+static void on_general_modern_zora_swim_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configModernZoraSwim = value->bool_value;
 }
 
 static void on_hud_auto_fade_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
@@ -1162,6 +1205,11 @@ static bool is_swim_sprint_speed_disabled(ModContext*, void*) {
     return !g_configStaminaSwimSprint;
 }
 
+static bool is_sprint_drain_by_speed_disabled(ModContext*, void*) {
+    return !g_configStaminaEnabled ||
+           (!g_configStaminaSprint && !g_configStaminaWolfSprint && !g_configStaminaSwimSprint);
+}
+
 static bool is_fast_forward_speed_disabled(ModContext*, void*) {
     return g_configGeneralFastForwardCutscenesMode == FF_CUTSCENES_OFF &&
            !g_configGeneralFastDoorAnimations;
@@ -1264,6 +1312,7 @@ static ModResult build_stamina_dialog(ModContext* ctx, UiElementHandle pane, voi
     stamina_dialog_toggle(ctx, pane, "Bullet Time", s_varStaminaSrcBulletTime);
     stamina_dialog_toggle(ctx, pane, "Jump & spin attacks", s_varStaminaSrcJumpSpin);
     stamina_dialog_toggle(ctx, pane, "Rolls, side hops & backflips", s_varStaminaSrcRolls);
+    stamina_dialog_toggle(ctx, pane, "Blocking with the shield", s_varStaminaSrcBlock);
     stamina_dialog_toggle(ctx, pane, "Sprint", s_varStaminaSrcSprint);
     stamina_dialog_toggle(ctx, pane, "Climbing walls", s_varStaminaSrcClimb);
     stamina_dialog_toggle(ctx, pane, "Hanging on ledges", s_varStaminaSrcHang);
@@ -1337,6 +1386,11 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
     stamina_dialog_number(ctx, pane, "Side hop",
         "<p>Stamina cost per side hop while locked on (default: 12).</p>",
         s_varStaminaCostSidestep);
+    stamina_dialog_number(ctx, pane, "Blocked hit",
+        "<p>Stamina cost per hit blocked with the shield (default: 8, strong attacks cost 1.5x, "
+        "very strong attacks 2x). Blocking with an empty meter breaks Link's guard and staggers "
+        "him.</p>",
+        s_varStaminaCostBlock);
 
     svc_ui->pane_add_section(mod_ctx, pane, "Continuous (drain per frame while doing)");
     stamina_dialog_number(ctx, pane, "Bullet Time",
@@ -1515,6 +1569,24 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     ui_add_toggle(left, "Faster call cancel", s_varGeneralFasterMidnaCancel,
         "<p>Lets you cancel Midna's call faster.</p>");
 
+    ui_add_toggle(left, "Auto Zora Armor", s_varGeneralAutoZoraArmor,
+        "<p>Automatically puts on the " RML_HL("Zora Armor") " when you enter the water and "
+        "switches back to your previous tunic once you are back on land.</p>");
+    ui_add_toggle(left, "Improved Zora Swimming", s_varGeneralModernZoraSwim,
+        "<p>Makes underwater swimming with the " RML_HL("Zora Armor") " feel smoother. Tilt the "
+        "stick and Link swims, no need to hold or tap " RML_HL("A") ". He swims faster, turns and "
+        "tilts up or down more quickly, and keeps gliding for a moment after you let go. Tap "
+        RML_HL("A") " for a short speed burst, or hold " RML_HL("A") " to keep swimming as fast as "
+        "if you were tapping it. He also swims a bit faster on the surface. Link leans into turns, "
+        "does a barrel roll when you tap " RML_HL("A") " (and now and then while holding it), and "
+        "leaves a trail of bubbles while he "
+        "speeds up, with a short rumble and a slight camera zoom.</p>");
+    ui_add_toggle(left, "Spin attack charge levels", s_varStaminaSpinChargeLevels,
+        "<p>Keep holding the spin attack charge to power it up in three levels (about 4 seconds "
+        "for all three). Level 1 is the normal spin attack, level 2 flashes stars on the sword "
+        "and gives the spin a bigger reach, level 3 flashes golden stars and reaches even "
+        "further. With " RML_HL("Stamina") " enabled, charging also drains stamina.</p>");
+
     svc_ui->pane_add_section(mod_ctx, left, "Epona");
     ui_add_toggle(left, "Enabled", g_varEponaEnabled,
         "<p>Enables the Epona tweaks below.</p>");
@@ -1655,7 +1727,7 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         UiControlDesc c = UI_CONTROL_DESC_INIT;
         c.kind = UI_CONTROL_NUMBER;
         c.label = "Sprint speed";
-        c.help_rml = "<p>Human sprint speed percentage (default: 110%).</p>";
+        c.help_rml = "<p>Human sprint speed percentage (default: 155%).</p>";
         c.binding = UI_BINDING_CONFIG_VAR;
         c.config_var = s_varStaminaSprintSpeed;
         c.is_disabled = is_sprint_speed_disabled;
@@ -1700,6 +1772,12 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_toggle(left, "Drain more based on sprint speed", s_varStaminaSprintDrainBySpeed,
+        "<p>Sprinting faster uses up stamina faster. Applies to human, wolf and swim sprint. "
+        "At the default sprint speed (155%) the drain stays the same, a higher "
+        RML_HL("Sprint speed") " drains more, a lower one less. Speeding up from a standstill "
+        "also costs less than full speed.</p>",
+        is_sprint_drain_by_speed_disabled);
     return MOD_OK;
 }
 
@@ -2014,6 +2092,12 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
         svc_ui->pane_add_control(mod_ctx, left, &ctrl, nullptr);
     }
 
+    ui_add_toggle(left, "Hard mode", s_varBossRushHardMode,
+        "<p>Bosses get more health, hit harder, move faster and recover quicker, and the "
+        "whole Boss Rush is bathed in red light. Can also be switched in the chamber via "
+        "Midna's menu. Needs a Dusklight version with the Actor Attribute service, "
+        "otherwise only the lighting changes.</p>");
+
     ui_add_toggle(left, "Separate Ganon fights", s_varBossRushSeparateGanon,
         "<p>Fights all 4 Ganon phases in sequence instead of separate statues.</p>");
 
@@ -2024,7 +2108,7 @@ static ModResult tab_boss_rush(ModContext*, UiWindowHandle, UiElementHandle left
     ui_add_toggle(left, "Show boss rush portal", s_varBossRushPortal,
         "<p>Shows the warp portal on the map while a Boss Rush is active.</p>");
 
-#if 0
+#if 1
     {
         UiControlDesc ctrl = UI_CONTROL_DESC_INIT;
         ctrl.kind = UI_CONTROL_BUTTON;
@@ -2740,6 +2824,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varGeneralFasterMidnaCancel, on_general_faster_midna_cancel_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descGeneralAutoZoraArmor = CONFIG_VAR_DESC_INIT;
+        descGeneralAutoZoraArmor.name = "generalAutoZoraArmor";
+        descGeneralAutoZoraArmor.type = CONFIG_VAR_BOOL;
+        descGeneralAutoZoraArmor.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descGeneralAutoZoraArmor, &s_varGeneralAutoZoraArmor) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralAutoZoraArmor, &g_configAutoZoraArmor);
+            svc_config->subscribe(mod_ctx, s_varGeneralAutoZoraArmor, on_general_auto_zora_armor_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descGeneralNoBattleMusic = CONFIG_VAR_DESC_INIT;
         descGeneralNoBattleMusic.name = "generalNoBattleMusic";
         descGeneralNoBattleMusic.type = CONFIG_VAR_BOOL;
@@ -2747,6 +2840,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descGeneralNoBattleMusic, &s_varGeneralNoBattleMusic) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varGeneralNoBattleMusic, &g_configNoBattleMusic);
             svc_config->subscribe(mod_ctx, s_varGeneralNoBattleMusic, on_general_no_battle_music_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descGeneralModernZoraSwim = CONFIG_VAR_DESC_INIT;
+        descGeneralModernZoraSwim.name = "generalModernZoraSwim";
+        descGeneralModernZoraSwim.type = CONFIG_VAR_BOOL;
+        descGeneralModernZoraSwim.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descGeneralModernZoraSwim, &s_varGeneralModernZoraSwim) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varGeneralModernZoraSwim, &g_configModernZoraSwim);
+            svc_config->subscribe(mod_ctx, s_varGeneralModernZoraSwim, on_general_modern_zora_swim_changed, nullptr, nullptr);
         }
 
         g_configHudAutoFadeIdleSeconds = kHudAutoFadeIdleSeconds;
@@ -3115,6 +3217,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->subscribe(mod_ctx, s_varStaminaSwimDrown, on_stamina_swim_drown_changed, nullptr, nullptr);
         }
 
+        ConfigVarDesc descStaminaSpinChargeLevels = CONFIG_VAR_DESC_INIT;
+        descStaminaSpinChargeLevels.name = "staminaSpinChargeLevels";
+        descStaminaSpinChargeLevels.type = CONFIG_VAR_BOOL;
+        descStaminaSpinChargeLevels.default_bool = true;
+        if (svc_config->register_var(mod_ctx, &descStaminaSpinChargeLevels, &s_varStaminaSpinChargeLevels) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSpinChargeLevels, &g_configStaminaSpinChargeLevels);
+            svc_config->subscribe(mod_ctx, s_varStaminaSpinChargeLevels, on_stamina_spin_charge_levels_changed, nullptr, nullptr);
+        }
+
         ConfigVarDesc descStaminaSprint = CONFIG_VAR_DESC_INIT;
         descStaminaSprint.name = "staminaSprint";
         descStaminaSprint.type = CONFIG_VAR_BOOL;
@@ -3131,6 +3242,15 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         if (svc_config->register_var(mod_ctx, &descStaminaSprintStartRoll, &s_varStaminaSprintStartRoll) == MOD_OK) {
             svc_config->get_bool(mod_ctx, s_varStaminaSprintStartRoll, &g_configStaminaSprintStartRoll);
             svc_config->subscribe(mod_ctx, s_varStaminaSprintStartRoll, on_stamina_sprint_start_roll_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descStaminaSprintDrainBySpeed = CONFIG_VAR_DESC_INIT;
+        descStaminaSprintDrainBySpeed.name = "staminaSprintDrainBySpeed";
+        descStaminaSprintDrainBySpeed.type = CONFIG_VAR_BOOL;
+        descStaminaSprintDrainBySpeed.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descStaminaSprintDrainBySpeed, &s_varStaminaSprintDrainBySpeed) == MOD_OK) {
+            svc_config->get_bool(mod_ctx, s_varStaminaSprintDrainBySpeed, &g_configStaminaSprintDrainBySpeed);
+            svc_config->subscribe(mod_ctx, s_varStaminaSprintDrainBySpeed, on_stamina_sprint_drain_by_speed_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descStaminaWolfSprint = CONFIG_VAR_DESC_INIT;
@@ -3202,6 +3322,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaSrcWolfDash", &s_varStaminaSrcWolfDash, &g_configStaminaSrcWolfDash, on_stamina_src_wolf_dash_changed },
             { "staminaSrcHiddenSkills", &s_varStaminaSrcHiddenSkills, &g_configStaminaSrcHiddenSkills, on_stamina_src_hidden_skills_changed },
             { "staminaSrcBulletTime", &s_varStaminaSrcBulletTime, &g_configStaminaSrcBulletTime, on_stamina_src_bullet_time_changed },
+            { "staminaSrcBlock", &s_varStaminaSrcBlock, &g_configStaminaSrcBlock, on_stamina_src_block_changed },
         };
         for (auto& sv : staminaSrcVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -3233,6 +3354,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostHiddenSkills", &s_varStaminaCostHiddenSkills, &g_configStaminaCostHiddenSkills, 100 },
             { "staminaCostSpinCharge", &s_varStaminaCostSpinCharge, &g_configStaminaCostSpinCharge, 10 },
             { "staminaCostBulletTime", &s_varStaminaCostBulletTime, &g_configStaminaCostBulletTime, 100 },
+            { "staminaCostBlock", &s_varStaminaCostBlock, &g_configStaminaCostBlock, 100 },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -3341,6 +3463,18 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             svc_config->get_int(mod_ctx, s_varMasterRushDifficulty, &difficulty);
             g_configMasterRushDifficulty = static_cast<int>(difficulty);
             svc_config->subscribe(mod_ctx, s_varMasterRushDifficulty, on_master_rush_difficulty_changed, nullptr, nullptr);
+        }
+
+        ConfigVarDesc descBossRushHardMode = CONFIG_VAR_DESC_INIT;
+        descBossRushHardMode.name = "bossRushHardMode";
+        descBossRushHardMode.type = CONFIG_VAR_BOOL;
+        descBossRushHardMode.default_bool = false;
+        if (svc_config->register_var(mod_ctx, &descBossRushHardMode, &s_varBossRushHardMode) == MOD_OK) {
+            bool hardMode = false;
+            svc_config->get_bool(mod_ctx, s_varBossRushHardMode, &hardMode);
+            boss_rush_hardmode_set_enabled(hardMode);
+            boss_rush_hardmode_bind_config(svc_config, mod_ctx, s_varBossRushHardMode);
+            svc_config->subscribe(mod_ctx, s_varBossRushHardMode, on_boss_rush_hard_mode_changed, nullptr, nullptr);
         }
 
         ConfigVarDesc descBossRushSeparateGanon = CONFIG_VAR_DESC_INIT;
@@ -3458,6 +3592,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     s_flurryVignetteInitialized =
         init_flurry_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
     log_init_result("flurry_vignette", s_flurryVignetteInitialized);
+    s_bulletTimeVignetteInitialized =
+        init_bullet_time_vignette(svc_gfx, svc_resource, svc_log, mod_ctx, error) == MOD_OK;
+    log_init_result("bullet_time_vignette", s_bulletTimeVignetteInitialized);
     init_midna_select_freeze_guard(svc_hook, error);
     init_shade_shield_fix(svc_hook, error);
     log_init_result("twilight_hd_compat", init_twilight_hd_compat(svc_hook) == MOD_OK);
@@ -3565,6 +3702,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     run_shutdown_step("damage_vignette", shutdown_damage_vignette);
     run_shutdown_step("oxygen_vignette", shutdown_oxygen_vignette);
     run_shutdown_step("flurry_vignette", shutdown_flurry_vignette);
+    run_shutdown_step("bullet_time_vignette", shutdown_bullet_time_vignette);
     run_shutdown_step("midna_select_freeze_guard", shutdown_midna_select_freeze_guard);
     run_shutdown_step("shade_shield_fix", shutdown_shade_shield_fix);
     run_shutdown_step("twilight_hd_compat", shutdown_twilight_hd_compat);

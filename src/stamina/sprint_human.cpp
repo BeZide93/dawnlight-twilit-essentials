@@ -27,6 +27,7 @@ float g_configStaminaSprintSpeed = 1.1f;
 bool g_configStaminaSprintStartRoll = false;
 
 float g_configStaminaSprintJumpDistance = 1.0f;
+bool g_configStaminaSprintDrainBySpeed = false;
 
 static bool s_sprintLatched = false;
 static bool s_sprintBoost   = false;
@@ -111,7 +112,12 @@ static HookAction sprint_run_pre(ModContext*, void* args, void*, void*) {
         anmB = daAlink_c::ANM_RUN_B;
         speedB *= animSpeedMul;
     }
-    if (drains) stamina_impl::report_drain(stamina_impl::cost_scaled(kSprintDrainRate, g_configStaminaCostSprint));
+    if (drains) {
+        const f32 speedMul = link->mpHIO
+            ? stamina_impl::sprint_drain_speed_mul(link->mNormalSpeed, link->mpHIO->mMove.m.mMaxSpeed)
+            : 1.0f;
+        stamina_impl::report_drain(stamina_impl::cost_scaled(kSprintDrainRate, g_configStaminaCostSprint) * speedMul);
+    }
     s_sprintBoost = true;
     if (!wasLatched) {
         s_sprintEngage = true;

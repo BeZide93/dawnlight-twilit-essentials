@@ -1,4 +1,5 @@
 #include "sprint_fov_kick.hpp"
+#include "zora_swim.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_camera.h"
@@ -51,15 +52,15 @@ static void on_camera_run_post(ModContext*, void*, void*, void*) {
 }
 
 void update_sprint_fov_kick() {
-    if (!g_configSprintFovKickEnabled || !in_gameplay()) {
+    if (!in_gameplay()) {
         s_kick = 0.0f;
         return;
     }
 
     daAlink_c* link = static_cast<daAlink_c*>(daPy_getLinkPlayerActorClass());
     bool sprinting = false;
-    if (link != nullptr && link->mpHIO != nullptr && !link->checkHorseRide() &&
-        !link->checkWolf()) {
+    if (g_configSprintFovKickEnabled && link != nullptr && link->mpHIO != nullptr &&
+        !link->checkHorseRide() && !link->checkWolf()) {
         if (link->mProcID == daAlink_c::PROC_MOVE) {
             const f32 hspeed =
                 std::sqrt(link->speed.x * link->speed.x + link->speed.z * link->speed.z);
@@ -68,7 +69,10 @@ void update_sprint_fov_kick() {
         }
     }
 
-    s_kick += ((sprinting ? 1.0f : 0.0f) - s_kick) * (sprinting ? 0.10f : 0.13f);
+    f32 target = sprinting ? 1.0f : 0.0f;
+    const f32 zoraKick = zora_swim_fov_kick();
+    if (zoraKick > target) target = zoraKick;
+    s_kick += (target - s_kick) * (target > s_kick ? 0.10f : 0.13f);
     if (s_kick < 0.001f) s_kick = 0.0f;
     if (s_kick > 1.0f) s_kick = 1.0f;
 }
