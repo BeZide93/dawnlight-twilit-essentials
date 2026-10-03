@@ -5,9 +5,14 @@
 
 #include <collection_lib/collection_lib.hpp>
 #include "d/actor/d_a_alink.h"
+#include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
+#include "f_op/f_op_actor_mng.h"
+#include "JSystem/JKernel/JKRExpHeap.h"
+#include "m_Do/m_Do_mtx.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 
+#include <algorithm>
 #include <cstring>
 
 bool g_configCollectionStarterEquip = false;
@@ -134,8 +139,11 @@ void register_custom_shields() {
 
 }
 
+static int s_unequippedTunicId = -1;
+
 void register_custom_tunics() {
-    collectionlib_set_unequipped_tunic("/res/Object/alSumou.arc", 0xFFFF, dItemNo_WEAR_KOKIRI_e, 0xF0A878u);
+    s_unequippedTunicId =
+        collectionlib_set_unequipped_tunic("/res/Object/alSumou.arc", 0xFFFF, dItemNo_WEAR_KOKIRI_e, 0xF0A878u);
 
     if (!collection_ordon_hero_enabled()) {
         return;
@@ -165,10 +173,68 @@ DEFINE_HOOK(&daAlink_c::execute, CollectionTunicChangeExecuteHook);
 
 static bool s_safeClothesChange = false;
 
+static constexpr int kPoseParts = 4;
+static constexpr u16 kPoseMaxJoints = 48;
+
+struct LinkPoseCache {
+    bool valid = false;
+    fpc_ProcID linkId = fpcM_ERROR_PROCESS_ID_e;
+    Mtx base[kPoseParts];
+    Mtx joints[kPoseParts][kPoseMaxJoints];
+    u16 num[kPoseParts] = {};
+};
+
+static LinkPoseCache s_poseCache;
+
+static J3DModel* link_pose_part(daAlink_c* link, int part) {
+    switch (part) {
+    case 0: return link->mpLinkModel;
+    case 1: return link->mpLinkHatModel;
+    case 2: return link->mpLinkFaceModel;
+    default: return link->mpLinkHandModel;
+    }
+}
+
+static void cache_link_pose(daAlink_c* link) {
+    s_poseCache.valid = false;
+    if (link->checkWolf()) return;
+    for (int part = 0; part < kPoseParts; part++) {
+        J3DModel* model = link_pose_part(link, part);
+        if (model == nullptr || model->getModelData() == nullptr) return;
+        const u16 num = std::min<u16>(model->getModelData()->getJointNum(), kPoseMaxJoints);
+        mDoMtx_copy(model->getBaseTRMtx(), s_poseCache.base[part]);
+        for (u16 j = 0; j < num; j++) {
+            mDoMtx_copy(model->getAnmMtx(j), s_poseCache.joints[part][j]);
+        }
+        s_poseCache.num[part] = num;
+    }
+    s_poseCache.linkId = fopAcM_GetID(link);
+    s_poseCache.valid = true;
+}
+
+static void restore_link_pose(daAlink_c* link) {
+    if (!s_poseCache.valid || s_poseCache.linkId != fopAcM_GetID(link) || link->checkWolf()) return;
+    for (int part = 0; part < kPoseParts; part++) {
+        J3DModel* model = link_pose_part(link, part);
+        if (model == nullptr || model->getModelData() == nullptr) continue;
+        const u16 num = std::min<u16>(model->getModelData()->getJointNum(), s_poseCache.num[part]);
+        model->setBaseTRMtx(s_poseCache.base[part]);
+        for (u16 j = 0; j < num; j++) {
+            mDoMtx_copy(s_poseCache.joints[part][j], model->getAnmMtx(j));
+        }
+    }
+}
+
+static void step_seamless_clothes_change(daAlink_c* link);
+
 static HookAction on_tunic_change_execute_pre(ModContext*, void* args, void*, void*) {
-    if (!s_safeClothesChange) return HOOK_CONTINUE;
-    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
+    daAlink_c* link = args != nullptr ? mods::arg<daAlink_c*>(args, 0) : nullptr;
     if (link == nullptr) return HOOK_CONTINUE;
+    if (link == daAlink_getAlinkActorClass()) {
+        if (!s_safeClothesChange && link->getClothesChangeWaitTimer() == 0) cache_link_pose(link);
+        step_seamless_clothes_change(link);
+    }
+    if (!s_safeClothesChange) return HOOK_CONTINUE;
     if (link->getClothesChangeWaitTimer() == 0) {
         s_safeClothesChange = false;
         return HOOK_CONTINUE;
@@ -176,6 +242,7 @@ static HookAction on_tunic_change_execute_pre(ModContext*, void* args, void*, vo
     link->loadModelDVD();
     if (link->getClothesChangeWaitTimer() == 0) {
         s_safeClothesChange = false;
+        restore_link_pose(link);
         return HOOK_CONTINUE;
     }
     return HOOK_SKIP_ORIGINAL;
@@ -206,17 +273,150 @@ static void start_safe_clothes_change(daAlink_c* link) {
     link->setClothesChange(0);
 }
 
+static constexpr u32 kSeamlessHeapSize = 0x600000;
+static constexpr u32 kSeamlessRootReserve = 0x800000;
+static constexpr int kSeamlessMaxTicks = 300;
+
+struct SeamlessClothesChange {
+    bool pending = false;
+    bool draining = false;
+    bool registered = false;
+    u8 item = 0;
+    int customId = -1;
+    const char* arc = nullptr;
+    fpc_ProcID linkId = fpcM_ERROR_PROCESS_ID_e;
+    int ticks = 0;
+    request_of_phase_process_class phase = {};
+};
+
+static SeamlessClothesChange s_seamless;
+static JKRExpHeap* s_seamlessHeap = nullptr;
+
+static const char* clothes_arc_name(u8 item) {
+    switch (item) {
+    case dItemNo_WEAR_CASUAL_e: return "Bmdl";
+    case dItemNo_WEAR_KOKIRI_e: return "Kmdl";
+    case dItemNo_WEAR_ZORA_e: return "Zmdl";
+    case dItemNo_ARMOR_e: return "Mmdl";
+    default: return nullptr;
+    }
+}
+
+static JKRExpHeap* seamless_heap() {
+    if (s_seamlessHeap != nullptr) return s_seamlessHeap;
+    JKRHeap* root = JKRHeap::getRootHeap();
+    if (root == nullptr || static_cast<u32>(root->getFreeSize()) < kSeamlessHeapSize + kSeamlessRootReserve) {
+        return nullptr;
+    }
+    s_seamlessHeap = JKRExpHeap::create(kSeamlessHeapSize, root, false);
+    return s_seamlessHeap;
+}
+
+static int seamless_poll() {
+    const int state = dComIfG_resLoad(&s_seamless.phase, s_seamless.arc, s_seamlessHeap);
+    if (state == cPhs_ERROR_e) {
+        if (s_seamless.registered) dComIfG_deleteObjectResMain(s_seamless.arc);
+        s_seamless.registered = false;
+    } else {
+        s_seamless.registered = true;
+    }
+    return state;
+}
+
+static void seamless_begin_drain() {
+    s_seamless.pending = false;
+    s_seamless.draining = s_seamless.registered;
+    if (!s_seamless.draining) s_seamless = SeamlessClothesChange{};
+}
+
+static void seamless_drain() {
+    if (!s_seamless.draining) return;
+    const int state = seamless_poll();
+    if (state == cPhs_COMPLEATE_e) {
+        dComIfG_resDelete(&s_seamless.phase, s_seamless.arc);
+        s_seamless = SeamlessClothesChange{};
+    } else if (state == cPhs_ERROR_e) {
+        s_seamless = SeamlessClothesChange{};
+    }
+}
+
+static bool start_seamless_clothes_change(daAlink_c* link, u8 item, int customId = -1) {
+    if (s_seamless.pending || s_seamless.draining) return false;
+    if (item == dComIfGs_getSelectEquipClothes()) return false;
+    const char* arc = clothes_arc_name(item);
+    if (arc == nullptr || seamless_heap() == nullptr) return false;
+    s_seamless = SeamlessClothesChange{};
+    s_seamless.pending = true;
+    s_seamless.item = item;
+    s_seamless.customId = customId;
+    s_seamless.arc = arc;
+    s_seamless.linkId = fopAcM_GetID(link);
+    if (seamless_poll() == cPhs_ERROR_e) {
+        s_seamless = SeamlessClothesChange{};
+        return false;
+    }
+    return true;
+}
+
+static void finish_seamless_clothes_change(daAlink_c* link) {
+    link->mEyeHL1.remove();
+    link->mEyeHL2.remove();
+    link->mpWlMidnaModel = nullptr;
+    link->mpWlMidnaMaskModel = nullptr;
+    link->mpWlMidnaHandModel = nullptr;
+    link->mpWlMidnaHairModel = nullptr;
+    if (!dComIfG_resDelete(&link->mPhaseReq, link->mArcName)) {
+        dComIfG_deleteObjectResMain(link->mArcName);
+    }
+    link->mPhaseReq = s_seamless.phase;
+    dMeter2Info_setCloth(s_seamless.item, false);
+    if (s_seamless.customId >= 0) {
+        custom_equip_activate(s_seamless.customId);
+    } else if (custom_equip_active(CE_TUNIC)) {
+        collectionlib_clear(CE_TUNIC);
+    }
+    link->setArcName(link->checkWolf());
+    const bool keepBlend = link->field_0x2060 != nullptr && link->field_0x2060->getOldFrameFlg();
+    link->changeLink(1);
+    if (keepBlend) link->field_0x2060->onOldFrameFlg();
+    restore_link_pose(link);
+    s_seamless = SeamlessClothesChange{};
+}
+
+static void step_seamless_clothes_change(daAlink_c* link) {
+    if (!s_seamless.pending) return;
+    if (fopAcM_GetID(link) != s_seamless.linkId || link->checkWolf() ||
+        link->getClothesChangeWaitTimer() != 0 || link->mProcID == daAlink_c::PROC_METAMORPHOSE ||
+        link->mProcID == daAlink_c::PROC_METAMORPHOSE_ONLY || ++s_seamless.ticks > kSeamlessMaxTicks) {
+        seamless_begin_drain();
+        return;
+    }
+    const int state = seamless_poll();
+    if (state == cPhs_COMPLEATE_e) {
+        finish_seamless_clothes_change(link);
+    } else if (state == cPhs_ERROR_e) {
+        const u8 item = s_seamless.item;
+        s_seamless = SeamlessClothesChange{};
+        dMeter2Info_setCloth(item, false);
+        start_safe_clothes_change(link);
+    }
+}
+
+bool collection_tunic_change_pending() {
+    return s_seamless.pending;
+}
+
 static bool link_floating_still(daAlink_c* link) {
     return link->mProcID == daAlink_c::PROC_SWIM_WAIT &&
            link->checkNoResetFlg0(daPy_py_c::FLG0_SWIM_UP);
 }
 
-static bool link_can_change_clothes(daAlink_c* link, bool allowSwimming = false) {
+static bool link_can_change_clothes(daAlink_c* link, bool allowSwimming = false, bool anyPose = false) {
     if (link == nullptr || link->checkWolf() || link->getClothesChangeWaitTimer() != 0 ||
-        link->checkEventRun() || link->checkRide()) {
+        link->checkEventRun() || link->checkRide() || s_seamless.pending) {
         return false;
     }
-    if (link_floating_still(link)) return true;
+    if (anyPose || link_floating_still(link)) return true;
     if (allowSwimming && link->checkModeFlg(daAlink_c::MODE_SWIMMING)) return true;
     return !link->checkPlayerFly() && link->mLinkAcch.ChkGroundHit();
 }
@@ -278,20 +478,44 @@ bool collection_tunic_equipped(int tunic) {
     return item != dItemNo_NONE_e && dComIfGs_getSelectEquipClothes() == item;
 }
 
-bool collection_tunic_equip(int tunic, bool allowSwimming) {
+static void tunic_equip_feedback(bool silent) {
+    if (silent) return;
+    Z2GetAudioMgr()->seStart(Z2SE_SY_ITEM_SET_X, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    dMeter2Info_set2DVibration();
+}
+
+static bool start_seamless_custom_tunic(daAlink_c* link, int id) {
+    const CustomEquipDef* def = id >= 0 ? custom_equip_get(id) : nullptr;
+    if (def == nullptr || def->kind != CE_TUNIC || custom_equip_active_id(CE_TUNIC) == id) return false;
+    const u8 base = def->baseItem != dItemNo_NONE_e ? def->baseItem : static_cast<u8>(dItemNo_WEAR_KOKIRI_e);
+    return start_seamless_clothes_change(link, base, id);
+}
+
+bool collection_tunic_equip(int tunic, unsigned flags) {
     if (!collection_tunic_unlocked(tunic)) return false;
+    const bool allowSwimming = (flags & TUNIC_EQUIP_SWIMMING) != 0;
+    const bool seamless = (flags & TUNIC_EQUIP_SEAMLESS) != 0;
+    const bool silent = (flags & TUNIC_EQUIP_SILENT) != 0;
+    const bool anyPose = seamless && (flags & TUNIC_EQUIP_ANY_POSE) != 0;
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (collection_tunic_equipped(tunic)) {
-        if (!link_can_change_clothes(link, allowSwimming)) return false;
+        if (!link_can_change_clothes(link, allowSwimming, anyPose)) return false;
+        if (seamless && start_seamless_custom_tunic(link, s_unequippedTunicId)) return true;
+        if (anyPose) return false;
         const u8 before = dComIfGs_getSelectEquipClothes();
         if (!collectionlib_unequip_tunic()) return true;
         if (dComIfGs_getSelectEquipClothes() != before) start_safe_clothes_change(link);
         return true;
     }
-    if (!link_can_change_clothes(link, allowSwimming)) return false;
+    if (!link_can_change_clothes(link, allowSwimming, anyPose)) return false;
 
     if (tunic == COLLECTION_TUNIC_ORDON_HERO) {
         const int id = find_ordon_hero_tunic_id();
+        if (seamless && start_seamless_custom_tunic(link, id)) {
+            tunic_equip_feedback(silent);
+            return true;
+        }
+        if (anyPose) return false;
         const u8 before = dComIfGs_getSelectEquipClothes();
         if (id < 0 || !custom_equip_toggle(id)) return false;
         if (dComIfGs_getSelectEquipClothes() != before) start_safe_clothes_change(link);
@@ -300,11 +524,15 @@ bool collection_tunic_equip(int tunic, bool allowSwimming) {
 
     const u8 item = native_tunic_item(tunic);
     if (item == dItemNo_NONE_e) return false;
+    if (seamless && start_seamless_clothes_change(link, item)) {
+        tunic_equip_feedback(silent);
+        return true;
+    }
+    if (anyPose) return false;
     if (custom_equip_active(CE_TUNIC)) collectionlib_clear(CE_TUNIC);
     dMeter2Info_setCloth(item, false);
     start_safe_clothes_change(link);
-    Z2GetAudioMgr()->seStart(Z2SE_SY_ITEM_SET_X, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
-    dMeter2Info_set2DVibration();
+    tunic_equip_feedback(silent);
     return true;
 }
 
@@ -363,6 +591,11 @@ ModResult init_collection_menu(const HookService* hook_svc, const LogService* lo
 }
 
 void update_collection_menu(const LogService*, ModContext*) {
+    if (s_seamless.pending) {
+        daAlink_c* link = daAlink_getAlinkActorClass();
+        if (link == nullptr || fopAcM_GetID(link) != s_seamless.linkId) seamless_begin_drain();
+    }
+    seamless_drain();
     // Linkle can be switched on or off while the game runs.
     const bool linkle = collection_linkle_active();
     if (linkle != s_linkleActive) {

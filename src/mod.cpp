@@ -1478,16 +1478,16 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
     svc_ui->pane_add_section(mod_ctx, pane, "Items (drain per frame while aiming)");
     stamina_dialog_number(ctx, pane, "Slingshot aiming",
         "<p>Drain per frame while Link pulls back the slingshot and holds it drawn. Just "
-        "holding the slingshot up or shooting is free (default: 0.40).</p>",
+        "holding the slingshot up or shooting is free (default: 50%).</p>",
         s_varStaminaCostSlingshot);
     stamina_dialog_number(ctx, pane, "Bow aiming",
         "<p>Drain per frame while Link pulls back the bowstring and holds the arrow drawn. "
         "Just holding the bow up or shooting is free. Doesn't stack with Bullet Time "
-        "(default: 0.40).</p>",
+        "(default: 75%).</p>",
         s_varStaminaCostBow);
     stamina_dialog_number(ctx, pane, "Ball and Chain aiming",
         "<p>Drain per frame while Link swings the Ball and Chain over his head before "
-        "throwing it (default: 0.50).</p>",
+        "throwing it (default: 100%).</p>",
         s_varStaminaCostIronBall);
     return MOD_OK;
 }
@@ -3490,8 +3490,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostSpinCharge", &s_varStaminaCostSpinCharge, &g_configStaminaCostSpinCharge, 10 },
             { "staminaCostBulletTime", &s_varStaminaCostBulletTime, &g_configStaminaCostBulletTime, 100 },
             { "staminaCostBlock", &s_varStaminaCostBlock, &g_configStaminaCostBlock, 100 },
-            { "staminaCostBow", &s_varStaminaCostBow, &g_configStaminaCostBow, 100 },
-            { "staminaCostSlingshot", &s_varStaminaCostSlingshot, &g_configStaminaCostSlingshot, 100 },
+            { "staminaCostBow", &s_varStaminaCostBow, &g_configStaminaCostBow, 75 },
+            { "staminaCostSlingshot", &s_varStaminaCostSlingshot, &g_configStaminaCostSlingshot, 50 },
             { "staminaCostIronBall", &s_varStaminaCostIronBall, &g_configStaminaCostIronBall, 100 },
         };
         for (auto& cv : staminaCostVars) {

@@ -4,6 +4,7 @@
 #include "human_warp.hpp"
 #include "faster_midna_cancel.hpp"
 #include "auto_zora_armor.hpp"
+#include "zora_armor_fx.hpp"
 #include "hud_auto_fade.hpp"
 #include "sprint_fov_kick.hpp"
 #include "free_cam_distance.hpp"
@@ -32,6 +33,7 @@ ModResult init_general(const HookService* hook_svc, ModError* error) {
     init_no_battle_music(hook_svc, error);
     init_zora_swim(hook_svc, error);
     init_auto_zora_armor(hook_svc, error);
+    init_zora_armor_fx(hook_svc, error);
     init_shield_surf(hook_svc, error);
     return MOD_OK;
 }
@@ -68,6 +70,7 @@ void update_general(const LogService* log_svc, ModContext* mod_ctx) {
     update_hud_auto_fade();
     update_sprint_fov_kick();
     update_auto_zora_armor();
+    update_zora_armor_fx();
 }
 
 void shutdown_general() {
@@ -77,6 +80,7 @@ void shutdown_general() {
     shutdown_human_warp();
     shutdown_faster_midna_cancel();
     shutdown_auto_zora_armor();
+    shutdown_zora_armor_fx();
     shutdown_faster_transitions();
     shutdown_hud_auto_fade();
     shutdown_sprint_fov_kick();

@@ -50,6 +50,7 @@ add_mod(twilit_essentials
             src/general/human_warp.cpp
             src/general/faster_midna_cancel.cpp
             src/general/auto_zora_armor.cpp
+            src/general/zora_armor_fx.cpp
             src/general/faster_transitions.cpp
             src/general/midna_select_freeze_guard.cpp
             src/general/shade_shield_fix.cpp
