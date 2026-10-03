@@ -265,6 +265,7 @@ extern "C" MOD_EXPORT const void* const g_keep_mod_records[] = {
     &mod_meta_import_svc_interp,
     &mod_meta_import_svc_actor_attribute,
     &mod_meta_import_svc_file,
+    &g_staminaServiceRecord,
 };
 
 static constexpr const char* kTitleLogoLinklePath = "res/title_logo/linkle/tex1_608x100_0c1c70378fb8cb46_6.png";
@@ -518,6 +519,9 @@ static ConfigVarHandle s_varStaminaSrcWolfDash = 0;
 static ConfigVarHandle s_varStaminaSrcHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaSrcBulletTime = 0;
 static ConfigVarHandle s_varStaminaSrcBlock = 0;
+static ConfigVarHandle s_varStaminaSrcBow = 0;
+static ConfigVarHandle s_varStaminaSrcSlingshot = 0;
+static ConfigVarHandle s_varStaminaSrcIronBall = 0;
 static ConfigVarHandle s_varStaminaSprint = 0;
 static ConfigVarHandle s_varStaminaSprintStartRoll = 0;
 static ConfigVarHandle s_varStaminaSprintDrainBySpeed = 0;
@@ -545,6 +549,9 @@ static ConfigVarHandle s_varStaminaCostHiddenSkills = 0;
 static ConfigVarHandle s_varStaminaCostSpinCharge = 0;
 static ConfigVarHandle s_varStaminaCostBulletTime = 0;
 static ConfigVarHandle s_varStaminaCostBlock = 0;
+static ConfigVarHandle s_varStaminaCostBow = 0;
+static ConfigVarHandle s_varStaminaCostSlingshot = 0;
+static ConfigVarHandle s_varStaminaCostIronBall = 0;
 static ConfigVarHandle s_varPuppetZeldaPattern = 0;
 static ConfigVarHandle s_varPuppetZeldaAlwaysShortest = 0;
 static ConfigVarHandle s_varCollectionStarterEquip = 0;
@@ -946,6 +953,18 @@ static void on_stamina_src_block_changed(ModContext*, ConfigVarHandle, const Con
     if (value) g_configStaminaSrcBlock = value->bool_value;
 }
 
+static void on_stamina_src_bow_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcBow = value->bool_value;
+}
+
+static void on_stamina_src_slingshot_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcSlingshot = value->bool_value;
+}
+
+static void on_stamina_src_iron_ball_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
+    if (value) g_configStaminaSrcIronBall = value->bool_value;
+}
+
 static void on_stamina_sprint_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* value, const ConfigVarValue*, void*) {
     if (value) g_configStaminaSprint = value->bool_value;
 }
@@ -1340,6 +1359,10 @@ static ModResult build_stamina_dialog(ModContext* ctx, UiElementHandle pane, voi
     stamina_dialog_toggle(ctx, pane, "Swimming", s_varStaminaSrcSwim);
     stamina_dialog_toggle(ctx, pane, "Pushing & pulling", s_varStaminaSrcPushPull);
     stamina_dialog_toggle(ctx, pane, "Wolf sprint", s_varStaminaSrcWolfDash);
+    svc_ui->pane_add_section(ctx, pane, "Items");
+    stamina_dialog_toggle(ctx, pane, "Slingshot aiming", s_varStaminaSrcSlingshot);
+    stamina_dialog_toggle(ctx, pane, "Bow aiming", s_varStaminaSrcBow);
+    stamina_dialog_toggle(ctx, pane, "Ball and Chain aiming", s_varStaminaSrcIronBall);
     return MOD_OK;
 }
 
@@ -1451,6 +1474,21 @@ static ModResult build_stamina_costs_dialog(ModContext* ctx, UiElementHandle pan
         "<p>Drain per frame while holding a spin attack charge. Running out while charging "
         "drops the charge (default: 10%).</p>",
         s_varStaminaCostSpinCharge);
+
+    svc_ui->pane_add_section(mod_ctx, pane, "Items (drain per frame while aiming)");
+    stamina_dialog_number(ctx, pane, "Slingshot aiming",
+        "<p>Drain per frame while Link pulls back the slingshot and holds it drawn. Just "
+        "holding the slingshot up or shooting is free (default: 0.40).</p>",
+        s_varStaminaCostSlingshot);
+    stamina_dialog_number(ctx, pane, "Bow aiming",
+        "<p>Drain per frame while Link pulls back the bowstring and holds the arrow drawn. "
+        "Just holding the bow up or shooting is free. Doesn't stack with Bullet Time "
+        "(default: 0.40).</p>",
+        s_varStaminaCostBow);
+    stamina_dialog_number(ctx, pane, "Ball and Chain aiming",
+        "<p>Drain per frame while Link swings the Ball and Chain over his head before "
+        "throwing it (default: 0.50).</p>",
+        s_varStaminaCostIronBall);
     return MOD_OK;
 }
 
@@ -1631,8 +1669,14 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
     ui_add_toggle(left, "Auto-gallop", g_varEponaAutoGallop,
         "<p>Hold the stick nearly fully forward to gallop without whipping.</p>",
         is_epona_sub_disabled);
+    return MOD_OK;
+}
 
-    svc_ui->pane_add_section(mod_ctx, left, "Stamina");
+static ModResult tab_stamina(ModContext*, UiWindowHandle, UiElementHandle left,
+                             UiElementHandle right, void*, ModError*) {
+    svc_ui->pane_add_rml(mod_ctx, right,
+        "<p>Stamina meter, activities, costs and sprinting.</p>", nullptr);
+
     ui_add_toggle(left, "Enabled", s_varStamina,
         "<p>Adds a stamina meter for attacks, sprint, climbing, and swimming.</p>");
 
@@ -1654,6 +1698,7 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.is_disabled = is_stamina_sub_disabled;
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    svc_ui->pane_add_section(mod_ctx, left, "Meter & Refill");
     ui_add_toggle(left, "Scale max stamina with max hearts", s_varStaminaScaleWithHearts,
         "<p>Automatically sets max stamina based on your max hearts: 100 at 3 hearts, plus "
         "the amount below for every heart past that. Overrides Max Stamina below.</p>",
@@ -1733,6 +1778,12 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         c.suffix = "%";
         svc_ui->pane_add_control(mod_ctx, left, &c, nullptr);
     }
+    ui_add_toggle(left, "Restore stamina on stage change", s_varStaminaRefillOnStageChange,
+        "<p>Refills stamina whenever you go through a loading zone, door to another area or "
+        "warp. When off, stamina carries over to the next area as it is.</p>",
+        is_stamina_sub_disabled);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Climbing & Swimming");
     ui_add_toggle(left, "Slow regen while hanging", s_varStaminaSlowHangRegen,
         "<p>While hanging still on ivy or on a ledge, stamina recovers very slowly "
         "(about a seventh of the normal rate) instead of staying frozen. Moving or "
@@ -1748,11 +1799,8 @@ static ModResult tab_quality_of_life(ModContext*, UiWindowHandle, UiElementHandl
         RML_HL("Swimming") " is enabled under " RML_HL("Choose Stamina Activities")
         ". Never happens with the Zora Armor.</p>",
         is_stamina_swim_sub_disabled);
-    ui_add_toggle(left, "Restore stamina on stage change", s_varStaminaRefillOnStageChange,
-        "<p>Refills stamina whenever you go through a loading zone, door to another area or "
-        "warp. When off, stamina carries over to the next area as it is.</p>",
-        is_stamina_sub_disabled);
-    svc_ui->pane_add_rml(mod_ctx, left, "<hr/>", nullptr);
+
+    svc_ui->pane_add_section(mod_ctx, left, "Sprint");
     ui_add_toggle(left, "Sprint (hold roll button)", s_varStaminaSprint,
         "<p>Hold the roll button while running to sprint.</p>");
     if (s_varStaminaSprintSpeed != 0) {
@@ -2338,6 +2386,7 @@ static const UiTabDesc s_modSettingsTabs[] = {
     { sizeof(UiTabDesc), "General",   tab_general,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quality of Life", tab_quality_of_life, nullptr, nullptr },
     { sizeof(UiTabDesc), "Combat",    tab_combat,    nullptr, nullptr },
+    { sizeof(UiTabDesc), "Stamina",   tab_stamina,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Visuals",   tab_visuals,   nullptr, nullptr },
     { sizeof(UiTabDesc), "Quick Access", tab_quick_access, nullptr, nullptr },
     { sizeof(UiTabDesc), "Menus",     tab_menus,     nullptr, nullptr },
@@ -3406,6 +3455,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaSrcHiddenSkills", &s_varStaminaSrcHiddenSkills, &g_configStaminaSrcHiddenSkills, on_stamina_src_hidden_skills_changed },
             { "staminaSrcBulletTime", &s_varStaminaSrcBulletTime, &g_configStaminaSrcBulletTime, on_stamina_src_bullet_time_changed },
             { "staminaSrcBlock", &s_varStaminaSrcBlock, &g_configStaminaSrcBlock, on_stamina_src_block_changed },
+            { "staminaSrcBow", &s_varStaminaSrcBow, &g_configStaminaSrcBow, on_stamina_src_bow_changed },
+            { "staminaSrcSlingshot", &s_varStaminaSrcSlingshot, &g_configStaminaSrcSlingshot, on_stamina_src_slingshot_changed },
+            { "staminaSrcIronBall", &s_varStaminaSrcIronBall, &g_configStaminaSrcIronBall, on_stamina_src_iron_ball_changed },
         };
         for (auto& sv : staminaSrcVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;
@@ -3438,6 +3490,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
             { "staminaCostSpinCharge", &s_varStaminaCostSpinCharge, &g_configStaminaCostSpinCharge, 10 },
             { "staminaCostBulletTime", &s_varStaminaCostBulletTime, &g_configStaminaCostBulletTime, 100 },
             { "staminaCostBlock", &s_varStaminaCostBlock, &g_configStaminaCostBlock, 100 },
+            { "staminaCostBow", &s_varStaminaCostBow, &g_configStaminaCostBow, 100 },
+            { "staminaCostSlingshot", &s_varStaminaCostSlingshot, &g_configStaminaCostSlingshot, 100 },
+            { "staminaCostIronBall", &s_varStaminaCostIronBall, &g_configStaminaCostIronBall, 100 },
         };
         for (auto& cv : staminaCostVars) {
             ConfigVarDesc d = CONFIG_VAR_DESC_INIT;

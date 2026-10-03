@@ -1,0 +1,7 @@
+{
+  "id": "dev.fimmel.staminaserviceexample",
+  "name": "Stamina Service Example",
+  "version": "1.0",
+  "author": "Fimmel",
+  "description": "Example consumer of the Twilit Essentials stamina service: drawing the bow drains stamina."
+}

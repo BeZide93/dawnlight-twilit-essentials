@@ -1,4 +1,5 @@
 #include "stamina.hpp"
+#include "../../include/twilit_essentials/stamina.h"
 #include "stamina_internal.hpp"
 #include "stamina_hud.hpp"
 #include "sprint_human.hpp"
@@ -6,6 +7,7 @@
 #include "sprint_swim.hpp"
 #include "sprint_wind.hpp"
 #include "stamina_swordcharge.hpp"
+#include "../bullet_time/bullet_time.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -19,7 +21,10 @@
 #include "mods/svc/save.h"
 #include "mods/svc/config.h"
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 extern const SaveService* svc_save;
 extern ModContext* mod_ctx;
@@ -47,6 +52,9 @@ bool g_configStaminaSrcWolfDash  = true;
 bool g_configStaminaSrcHiddenSkills = true;
 bool g_configStaminaSrcBulletTime = true;
 bool g_configStaminaSrcBlock = true;
+bool g_configStaminaSrcBow = true;
+bool g_configStaminaSrcSlingshot = true;
+bool g_configStaminaSrcIronBall = true;
 
 int g_configStaminaCostAttack     = 100;
 int g_configStaminaCostJumpAttack = 100;
@@ -66,6 +74,9 @@ int g_configStaminaCostHiddenSkills = 100;
 int g_configStaminaCostSpinCharge = 10;
 int g_configStaminaCostBulletTime = 100;
 int g_configStaminaCostBlock = 100;
+int g_configStaminaCostBow = 100;
+int g_configStaminaCostSlingshot = 100;
+int g_configStaminaCostIronBall = 100;
 
 enum StamCat {
     STAM_ATTACKS = 1,
@@ -116,6 +127,8 @@ static int  s_jumpChargeCd = 0;
 static f32  s_extraDrain  = 0.0f;
 static bool s_exhausted   = false;
 static f32  s_regenRamp   = 0.0f;
+static bool s_serviceReady = false;
+static bool s_externalSpent = false;
 
 static constexpr int kExhaustMinDelayFrames = 30;
 static constexpr f32 kRegenRampStep = 1.0f / 20.0f;
@@ -219,6 +232,38 @@ static f32 drain_rate(const daAlink_c* link) {
 }
 
 static constexpr f32 kSpinChargeDrain = 0.5f;
+static constexpr f32 kBowDrawDrain = 0.4f;
+static constexpr f32 kSlingshotDrawDrain = 0.4f;
+static constexpr f32 kIronBallSwingDrain = 0.5f;
+
+static bool s_itemDrainDenied = false;
+
+static bool is_bow_item(u16 item) {
+    return item == dItemNo_BOW_e || item == dItemNo_BOMB_ARROW_e || item == dItemNo_HAWK_ARROW_e;
+}
+
+static bool is_drawing_string(const daAlink_c* link) {
+    return link->checkBowReloadAnime() || link->checkBowChargeWaitAnime();
+}
+
+static f32 item_drain(const daAlink_c* link) {
+    if (link == nullptr || link->checkWolf()) return 0.0f;
+    const u16 item = link->mEquipItem;
+    if (is_bow_item(item)) {
+        if (!g_configStaminaSrcBow || bullet_time_is_active() || !is_drawing_string(link)) return 0.0f;
+        return stamina_impl::cost_scaled(kBowDrawDrain, g_configStaminaCostBow);
+    }
+    if (item == dItemNo_PACHINKO_e) {
+        if (!g_configStaminaSrcSlingshot || !is_drawing_string(link)) return 0.0f;
+        return stamina_impl::cost_scaled(kSlingshotDrawDrain, g_configStaminaCostSlingshot);
+    }
+    if (item == dItemNo_IRONBALL_e) {
+        if (!g_configStaminaSrcIronBall) return 0.0f;
+        if (!link->checkIronBallPreSwingAnime() && !link->checkIronBallSwingAnime()) return 0.0f;
+        return stamina_impl::cost_scaled(kIronBallSwingDrain, g_configStaminaCostIronBall);
+    }
+    return 0.0f;
+}
 
 static bool is_spin_charge(const daAlink_c* link) {
     if (link->mProcID != daAlink_c::PROC_CUT_TURN_CHARGE && link->mProcID != daAlink_c::PROC_CUT_TURN_MOVE) return false;
@@ -412,6 +457,154 @@ static void spend_raw(f32 cost) {
     check_exhaust();
 }
 
+static f32 exhaust_recover_at(f32 maxValue) {
+    f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
+    if (recoverFrac < 0.05f) recoverFrac = 0.05f;
+    if (recoverFrac > 1.0f) recoverFrac = 1.0f;
+    const f32 recoverBase = stamina_hud_radial_style() ? stamina_impl::main_ring_capacity(maxValue) : maxValue;
+    f32 recoverAt = recoverBase * recoverFrac;
+    if (recoverAt > maxValue) recoverAt = maxValue;
+    return recoverAt;
+}
+
+static bool stamina_service_gameplay() {
+    auto* link = daAlink_getAlinkActorClass();
+    return link && !link->checkDeadHP() && !link->checkSceneChangeAreaStart() &&
+           !dComIfGp_isEnableNextStage() && in_gameplay();
+}
+
+static bool stamina_service_can_mutate() {
+    return s_serviceReady && g_configStaminaEnabled && stamina_service_gameplay();
+}
+
+static bool stamina_service_valid_amount(float amount) {
+    return std::isfinite(amount) && amount >= 0.0f;
+}
+
+static constexpr uint32_t kStaminaStateV1Size = offsetof(TwilitEssentialsStaminaState, recover_at);
+static_assert(kStaminaStateV1Size == TWILIT_ESSENTIALS_STAMINA_STATE_V1_0_SIZE);
+
+static ModResult stamina_service_get_state(ModContext* caller, TwilitEssentialsStaminaState* out) {
+    if (!caller || !out || out->struct_size < kStaminaStateV1Size) return MOD_INVALID_ARGUMENT;
+    TwilitEssentialsStaminaState state = TWILIT_ESSENTIALS_STAMINA_STATE_INIT;
+    if (s_serviceReady) {
+        const f32 maximum = stamina_max();
+        state.enabled = g_configStaminaEnabled;
+        state.gameplay = stamina_service_gameplay();
+        state.exhausted = g_configStaminaEnabled && s_exhausted;
+        state.maximum = maximum;
+        state.current = g_configStaminaEnabled ? s_stamina : maximum;
+        if (state.current > maximum) state.current = maximum;
+        if (g_configStaminaEnabled) {
+            state.recover_at = exhaust_recover_at(maximum);
+            state.regen_delay = static_cast<f32>(s_regenDelay) / 30.0f;
+        }
+    }
+    const uint32_t size = out->struct_size < sizeof(state) ? out->struct_size : static_cast<uint32_t>(sizeof(state));
+    state.struct_size = out->struct_size;
+    std::memcpy(out, &state, size);
+    return s_serviceReady ? MOD_OK : MOD_UNAVAILABLE;
+}
+
+static ModResult stamina_service_spend(ModContext* caller, float amount, bool requireFull) {
+    if (!caller || !stamina_service_valid_amount(amount)) return MOD_INVALID_ARGUMENT;
+    if (!stamina_service_can_mutate()) return MOD_UNAVAILABLE;
+    if (amount == 0.0f) return MOD_OK;
+    if (s_exhausted) return MOD_CONFLICT;
+    const f32 maximum = stamina_max();
+    const f32 available = s_stamina < maximum ? s_stamina : maximum;
+    if (requireFull && amount > available) return MOD_CONFLICT;
+    s_stamina = available;
+    spend_raw(amount);
+    s_externalSpent = true;
+    return MOD_OK;
+}
+
+static ModResult stamina_service_try_consume(ModContext* caller, float amount) {
+    return stamina_service_spend(caller, amount, true);
+}
+
+static ModResult stamina_service_drain(ModContext* caller, float amount) {
+    return stamina_service_spend(caller, amount, false);
+}
+
+static ModResult stamina_service_restore(ModContext* caller, float amount) {
+    if (!caller || !stamina_service_valid_amount(amount)) return MOD_INVALID_ARGUMENT;
+    if (!stamina_service_can_mutate()) return MOD_UNAVAILABLE;
+    if (amount == 0.0f) return MOD_OK;
+    const f32 maximum = stamina_max();
+    s_stamina += amount;
+    if (s_stamina > maximum) s_stamina = maximum;
+    stamina_hud_notify_recover();
+    return MOD_OK;
+}
+
+static ModResult stamina_service_deny(ModContext* caller) {
+    if (!caller) return MOD_INVALID_ARGUMENT;
+    if (!stamina_service_can_mutate()) return MOD_UNAVAILABLE;
+    deny();
+    return MOD_OK;
+}
+
+struct StaminaSourceSetting {
+    const bool* enabled;
+    const int* cost;
+};
+
+static bool stamina_source_setting(uint32_t source, StaminaSourceSetting& out) {
+    switch (source) {
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_ATTACK:       out = {&g_configStaminaSrcAttacks, &g_configStaminaCostAttack}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_JUMP_ATTACK:  out = {&g_configStaminaSrcJumpSpin, &g_configStaminaCostJumpAttack}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SPIN_ATTACK:  out = {&g_configStaminaSrcJumpSpin, &g_configStaminaCostSpin}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SPIN_CHARGE:  out = {&g_configStaminaSrcJumpSpin, &g_configStaminaCostSpinCharge}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_HIDDEN_SKILL: out = {&g_configStaminaSrcHiddenSkills, &g_configStaminaCostHiddenSkills}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_ROLL:         out = {&g_configStaminaSrcRolls, &g_configStaminaCostRoll}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SIDESTEP:     out = {&g_configStaminaSrcRolls, &g_configStaminaCostSidestep}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_BLOCK:        out = {&g_configStaminaSrcBlock, &g_configStaminaCostBlock}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_CLIMB:        out = {&g_configStaminaSrcClimb, &g_configStaminaCostClimb}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_CRAWL:        out = {&g_configStaminaSrcClimb, &g_configStaminaCostCrawl}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_HANG:         out = {&g_configStaminaSrcHang, &g_configStaminaCostHang}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SWIM:         out = {&g_configStaminaSrcSwim, &g_configStaminaCostSwim}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_PUSH_PULL:    out = {&g_configStaminaSrcPushPull, &g_configStaminaCostPushPull}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SPRINT:       out = {&g_configStaminaSrcSprint, &g_configStaminaCostSprint}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SWIM_SPRINT:  out = {&g_configStaminaSrcSprint, &g_configStaminaCostSwimSprint}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_WOLF_DASH:    out = {&g_configStaminaSrcWolfDash, &g_configStaminaCostWolfDash}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_WOLF_SPRINT:  out = {&g_configStaminaSrcWolfDash, &g_configStaminaCostWolfSprint}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_BULLET_TIME:  out = {&g_configStaminaSrcBulletTime, &g_configStaminaCostBulletTime}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_BOW_DRAW:     out = {&g_configStaminaSrcBow, &g_configStaminaCostBow}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_SLINGSHOT:    out = {&g_configStaminaSrcSlingshot, &g_configStaminaCostSlingshot}; return true;
+    case TWILIT_ESSENTIALS_STAMINA_SOURCE_BALL_AND_CHAIN: out = {&g_configStaminaSrcIronBall, &g_configStaminaCostIronBall}; return true;
+    default: return false;
+    }
+}
+
+static ModResult stamina_service_get_source(ModContext* caller, uint32_t source,
+                                            TwilitEssentialsStaminaSourceInfo* out) {
+    if (!caller || !out || out->struct_size < sizeof(*out)) return MOD_INVALID_ARGUMENT;
+    StaminaSourceSetting setting{};
+    if (!stamina_source_setting(source, setting)) return MOD_INVALID_ARGUMENT;
+    const uint32_t size = out->struct_size;
+    *out = TWILIT_ESSENTIALS_STAMINA_SOURCE_INFO_INIT;
+    out->struct_size = size;
+    if (!s_serviceReady) return MOD_UNAVAILABLE;
+    out->enabled = g_configStaminaEnabled && *setting.enabled;
+    out->cost_multiplier = stamina_impl::cost_scaled(1.0f, *setting.cost);
+    return MOD_OK;
+}
+
+static constexpr TwilitEssentialsStaminaService g_staminaService{
+    SERVICE_HEADER(TwilitEssentialsStaminaService, TWILIT_ESSENTIALS_STAMINA_SERVICE_MAJOR,
+                   TWILIT_ESSENTIALS_STAMINA_SERVICE_MINOR),
+    stamina_service_get_state,
+    stamina_service_try_consume,
+    stamina_service_drain,
+    stamina_service_restore,
+    stamina_service_deny,
+    stamina_service_get_source,
+};
+EXPORT_SERVICE(g_staminaService);
+extern const void* const g_staminaServiceRecord = &mod_meta_export_g_staminaService;
+
 static void spend(f32 cost) {
     spend_raw(cost);
     s_otherSpend += cost;
@@ -565,6 +758,17 @@ static bool is_swim_rest_proc(const daAlink_c* link) {
     return link != nullptr && link->mProcID == daAlink_c::PROC_SWIM_WAIT && swim_costs_stamina(link);
 }
 
+static void update_item_drain_deny(f32 itemDrain) {
+    if (itemDrain <= 0.0f) {
+        s_itemDrainDenied = false;
+        return;
+    }
+    if (empty() && !s_itemDrainDenied) {
+        deny();
+        s_itemDrainDenied = true;
+    }
+}
+
 static void reset_drown() {
     s_drownTimer = 0;
     s_drowning = false;
@@ -606,6 +810,8 @@ static void update_drown(daAlink_c* link) {
 }
 
 void update_stamina(const LogService*, ModContext*) {
+    const bool externalSpent = s_externalSpent;
+    s_externalSpent = false;
     stamina_hud_begin_tick();
     s_blockedThisFrame = false;
     s_swungThisFrame = false;
@@ -631,6 +837,7 @@ void update_stamina(const LogService*, ModContext*) {
         s_hiddenSkillLock = 0;
         s_otherSpend = 0.0f;
         s_extraDrain = 0.0f;
+        s_itemDrainDenied = false;
         reset_drown();
         return;
     }
@@ -657,7 +864,8 @@ void update_stamina(const LogService*, ModContext*) {
 
     const f32 extra = s_extraDrain;
     s_extraDrain = 0.0f;
-    f32 rate = (link ? drain_rate(link) + spin_charge_drain(link) : 0.0f) + extra;
+    const f32 itemDrain = item_drain(link);
+    f32 rate = (link ? drain_rate(link) + spin_charge_drain(link) + itemDrain : 0.0f) + extra;
 
     if (rate > 0.0f) {
         s_stamina -= rate;
@@ -665,7 +873,7 @@ void update_stamina(const LogService*, ModContext*) {
         s_regenRamp = 0.0f;
         stamina_hud_notify_drain();
         check_exhaust();
-    } else {
+    } else if (!externalSpent) {
         if (s_regenDelay > 0) {
             s_regenDelay--;
             s_regenRamp = 0.0f;
@@ -689,12 +897,8 @@ void update_stamina(const LogService*, ModContext*) {
     if (s_stamina < 0.0f) s_stamina = 0.0f;
     if (s_stamina > kMax) s_stamina = kMax;
     update_drown(link);
-    f32 recoverFrac = static_cast<f32>(g_configStaminaExhaustRecover) / 100.0f;
-    if (recoverFrac < 0.05f) recoverFrac = 0.05f;
-    if (recoverFrac > 1.0f) recoverFrac = 1.0f;
-    const f32 recoverBase = stamina_hud_radial_style() ? stamina_impl::main_ring_capacity(kMax) : kMax;
-    f32 recoverAt = recoverBase * recoverFrac;
-    if (recoverAt > kMax) recoverAt = kMax;
+    update_item_drain_deny(itemDrain);
+    const f32 recoverAt = exhaust_recover_at(kMax);
     if (s_exhausted && s_stamina >= recoverAt - 0.01f) {
         s_exhausted = false;
         stamina_hud_notify_recover();
@@ -715,6 +919,8 @@ static void on_stamina_save_activated(ModContext*, uint32_t, void*) {
 }
 
 ModResult init_stamina(const HookService* hook_svc, ModError*) {
+    s_serviceReady = false;
+    s_externalSpent = false;
     if (!hook_svc) return MOD_OK;
 
     s_stamina = stamina_max();
@@ -760,10 +966,13 @@ ModResult init_stamina(const HookService* hook_svc, ModError*) {
     hook_cost<StamCutDown>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
     hook_cost<StamCutHead>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
     hook_cost<StamGuardAttack>(hook_svc, STAM_HIDDENSKILLS, STAMC_HIDDENSKILL);
+    s_serviceReady = true;
     return MOD_OK;
 }
 
 void shutdown_stamina() {
+    s_serviceReady = false;
+    s_externalSpent = false;
     shutdown_sprint_human();
     shutdown_sprint_wolf();
     shutdown_sprint_swim();
@@ -783,5 +992,6 @@ void shutdown_stamina() {
     s_regenRamp = 0.0f;
     s_hiddenSkillLock = 0;
     s_otherSpend = 0.0f;
+    s_itemDrainDenied = false;
     reset_drown();
 }

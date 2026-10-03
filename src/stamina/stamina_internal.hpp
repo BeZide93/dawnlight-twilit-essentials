@@ -44,5 +44,7 @@ float cost_scaled(float base_cost, int pct);
 
 bool sprint_wind_allowed();
 void sprint_wind_report(unsigned int emitterId);
+short sprint_wind_pitch(float x, float y, float z);
+void sprint_wind_pitch_reset();
 
 }
